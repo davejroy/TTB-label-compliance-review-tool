@@ -33,13 +33,36 @@ CANONICAL_WARNING_BODY = (
     "car or operate machinery, and may cause health problems."
 )
 
-# Approximate ABV tolerances allowed by TTB regulations (simplified for this
-# prototype - real rules vary further by class/type, e.g. 27 CFR 4.36, 5.37, 7.71).
+# ABV tolerances allowed by TTB regulations:
+# - Distilled spirits: +/-0.3 percentage points (27 CFR 5.65(c)).
+# - Wine: +/-1.0 percentage point if the labeled ABV is over 14%, or +/-1.5
+#   percentage points if 14% or below (27 CFR 4.36(b)(1)). See
+#   ``WINE_ABV_TOLERANCE_THRESHOLD`` and ``_wine_abv_tolerance``.
+# - Malt beverages (beer): +/-0.3 percentage points for products at or above
+#   0.5% ABV (27 CFR 7.65(c)).
 ABV_TOLERANCE = {
-    "distilled_spirits": 0.15,
-    "wine": 1.0,
+    "distilled_spirits": 0.3,
     "beer": 0.3,
 }
+
+# Wine ABV percentage at/below which the wider +/-1.5 point tolerance applies
+# (27 CFR 4.36(b)(1)).
+WINE_ABV_TOLERANCE_THRESHOLD = 14.0
+WINE_ABV_TOLERANCE_LOW = 1.5
+WINE_ABV_TOLERANCE_HIGH = 1.0
+
+
+def _wine_abv_tolerance(app_pct: float, label_pct: float) -> float:
+    """Return the wine ABV tolerance per 27 CFR 4.36(b)(1).
+
+    Wines containing more than 14% ABV get a +/-1.0 point tolerance; wines at
+    or below 14% get the wider +/-1.5 point tolerance. Since either value
+    could be the "true" ABV, the higher of the two is used to decide which
+    tolerance band applies.
+    """
+    if max(app_pct, label_pct) > WINE_ABV_TOLERANCE_THRESHOLD:
+        return WINE_ABV_TOLERANCE_HIGH
+    return WINE_ABV_TOLERANCE_LOW
 
 
 def _normalize(text: str | None) -> str:
@@ -168,11 +191,13 @@ def _check_alcohol_content(
     """Compare the application's stated ABV to the label's ABV.
 
     Percentages are parsed out of both values and compared numerically
-    against ``ABV_TOLERANCE`` for the application's beverage type (falling
-    back to text comparison if either value has no parseable percentage).
-    A missing ABV on a wine/beer label is a ``warning`` rather than a
-    ``fail``, since some wine/beer labels are legally exempt from stating
-    ABV (27 CFR 4.36 / 7.71).
+    against the applicable TTB tolerance for the application's beverage type
+    (wine uses the ABV-dependent tolerance from ``_wine_abv_tolerance`` per
+    27 CFR 4.36(b)(1); distilled spirits and beer use ``ABV_TOLERANCE``,
+    falling back to text comparison if either value has no parseable
+    percentage). A missing ABV on a wine/beer label is a ``warning`` rather
+    than a ``fail``, since some wine/beer labels are legally exempt from
+    stating ABV (27 CFR 4.36 / 7.65).
     """
     label_value = extracted.alcohol_content
     field, label_name = "alcohol_content", "Alcohol Content"
@@ -207,7 +232,10 @@ def _check_alcohol_content(
     if app_pct is None or label_pct is None:
         return _check_text_field(field, label_name, application.alcohol_content, label_value)
 
-    tolerance = ABV_TOLERANCE.get(application.beverage_type, 0.3)
+    if application.beverage_type == "wine":
+        tolerance = _wine_abv_tolerance(app_pct, label_pct)
+    else:
+        tolerance = ABV_TOLERANCE.get(application.beverage_type, 0.3)
     diff = abs(app_pct - label_pct)
 
     if diff == 0:
@@ -392,19 +420,21 @@ def _check_label_alcohol_content(
     value), this only checks whether *some* ABV statement is present and
     whether one is required at all for ``beverage_type``:
 
-    - Distilled spirits: required (27 CFR 5.37) -> ``fail`` if missing.
+    - Distilled spirits: required (27 CFR 5.63(a)(3) / 5.65) -> ``fail`` if missing.
     - Wine: required over 14% ABV (27 CFR 4.36); below that it may be
       omitted -> ``warning`` if missing (can't tell ABV without the value).
-    - Beer: not federally required (27 CFR 7.71) -> ``pass`` if missing.
+    - Beer: not federally required unless alcohol is derived from added
+      flavors/ingredients (27 CFR 7.63(a)(3) / 7.65) -> ``pass`` if missing.
     - Unknown beverage type: ``warning`` if missing, since we can't
       determine the requirement.
     """
     field, label_name = "alcohol_content", "Alcohol Content"
     requirement = (
         "Alcohol content (ABV) statement is required on distilled spirits labels "
-        "(27 CFR 5.37) and on wine labels over 14% ABV (27 CFR 4.36). It is not "
-        "federally required on malt beverage labels (27 CFR 7.71), though some "
-        "states require it."
+        "(27 CFR 5.63(a)(3) / 5.65) and on wine labels over 14% ABV (27 CFR 4.36). "
+        "It is not federally required on malt beverage labels unless alcohol is "
+        "derived from added flavors or other nonbeverage ingredients (27 CFR "
+        "7.63(a)(3) / 7.65), though some states require it."
     )
     label_value = extracted.alcohol_content
 
@@ -437,7 +467,7 @@ def _check_label_alcohol_content(
             status="fail",
             application_value=requirement,
             label_value=label_value,
-            message="Alcohol content statement is required on distilled spirits labels (27 CFR 5.37) and was not found.",
+            message="Alcohol content statement is required on distilled spirits labels (27 CFR 5.63(a)(3) / 5.65) and was not found.",
         )
 
     if beverage_type == "wine":
@@ -463,8 +493,10 @@ def _check_label_alcohol_content(
             label_value=label_value,
             message=(
                 "Alcohol content not stated. Federal law does not require an ABV "
-                "statement on malt beverage labels (27 CFR 7.71), though some "
-                "state laws do - verify state requirements."
+                "statement on malt beverage labels unless alcohol is derived from "
+                "added flavors or other nonbeverage ingredients (27 CFR "
+                "7.63(a)(3) / 7.65), though some state laws require it - verify "
+                "state requirements."
             ),
         )
 
@@ -483,16 +515,16 @@ def _check_label_alcohol_content(
 
 
 def _check_label_net_contents(extracted: ExtractedLabelData) -> FieldResult:
-    """Check that the label states a net contents quantity (27 CFR 4.37/5.38/7.25).
+    """Check that the label states a net contents quantity (27 CFR 4.37 / 5.70 / 7.70).
 
     Only confirms a quantity-looking value is present; does not validate it
-    against the authorized standards-of-fill sizes (see "Possible next
-    steps" in docs/PDR.md).
+    against the authorized standards-of-fill sizes (27 CFR 4.72 / 5.203 /
+    7.70) (see "Possible next steps" in docs/PDR.md).
     """
     field, label_name = "net_contents", "Net Contents"
     requirement = (
         "Net contents must be stated in conformance with standards of fill "
-        "(27 CFR 4.37 / 5.38 / 7.25)."
+        "(27 CFR 4.37 / 5.70 / 7.70)."
     )
     label_value = extracted.net_contents
 
@@ -536,7 +568,7 @@ def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult
     field, label_name = "country_of_origin", "Country of Origin"
     requirement = (
         "A country-of-origin statement (e.g. 'Product of Scotland') is required "
-        "for imported products (27 CFR 27.59, 4.35(b), 5.36(d), 7.23(c))."
+        "for imported products (27 CFR 27.59, 4.35(b), 5.69, 7.69)."
     )
     label_value = extracted.country_of_origin
 
@@ -573,13 +605,13 @@ def check_label_requirements(
             "brand_name",
             "Brand Name",
             extracted.brand_name,
-            "A brand name is required on every label (27 CFR 4.32 / 5.32 / 7.22).",
+            "A brand name is required on every label (27 CFR 4.32 / 5.63(a)(1), 5.64 / 7.63(a)(1), 7.64).",
         ),
         _presence_check(
             "class_type",
             "Class/Type Designation",
             extracted.class_type,
-            "A class, type, or other required designation must be stated on the label (27 CFR 4.34 / 5.35 / 7.24).",
+            "A class, type, or other required designation must be stated on the label (27 CFR 4.34 / 5.63(a)(2), 5.141 / 7.63(a)(2), 7.141).",
         ),
         _check_label_alcohol_content(extracted, beverage_type),
         _check_label_net_contents(extracted),
@@ -587,7 +619,7 @@ def check_label_requirements(
             "name_and_address",
             "Name and Address",
             extracted.name_and_address,
-            "The name and address of the bottler, producer, packer, or importer is required (27 CFR 4.35 / 5.36 / 7.23).",
+            "The name and address of the bottler, producer, packer, or importer is required (27 CFR 4.35 / 5.66-5.68 / 7.66-7.68).",
         ),
         _check_government_warning(extracted),
         _check_label_country_of_origin(extracted),
