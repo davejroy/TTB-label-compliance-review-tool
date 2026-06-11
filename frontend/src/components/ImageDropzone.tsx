@@ -9,6 +9,7 @@ interface Props {
 
 export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
 
   function addFiles(newFiles: FileList | null) {
@@ -79,13 +80,22 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
                 : `Add another image (${files.length}/${MAX_IMAGES_PER_LABEL})`}
             </p>
             <p className="text-sm text-slate-500">or</p>
-            <button
-              type="button"
-              className="rounded-lg bg-[#15396a] px-5 py-2.5 text-base font-semibold text-white hover:bg-[#0b1f3a]"
-              onClick={() => inputRef.current?.click()}
-            >
-              Choose File
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                className="rounded-lg bg-[#15396a] px-5 py-2.5 text-base font-semibold text-white hover:bg-[#0b1f3a]"
+                onClick={() => inputRef.current?.click()}
+              >
+                Choose File
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border-2 border-[#15396a] px-5 py-2.5 text-base font-semibold text-[#15396a] hover:bg-blue-50"
+                onClick={() => cameraInputRef.current?.click()}
+              >
+                Take Photo
+              </button>
+            </div>
           </div>
         )}
 
@@ -95,6 +105,18 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
           type="file"
           accept="image/png,image/jpeg,image/webp"
           multiple
+          className="hidden"
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={cameraInputRef}
+          id={`${idPrefix}-camera`}
+          type="file"
+          accept="image/*"
+          capture="environment"
           className="hidden"
           onChange={(e) => {
             addFiles(e.target.files);
