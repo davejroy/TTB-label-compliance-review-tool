@@ -1,7 +1,12 @@
+import { useState } from "react";
 import type { ReviewResult } from "../types";
+import ConfidenceBadge from "./ConfidenceBadge";
+import LabelImageViewer from "./LabelImageViewer";
 import StatusBadge from "./StatusBadge";
 
-export default function ResultsPanel({ result }: { result: ReviewResult }) {
+export default function ResultsPanel({ result, files }: { result: ReviewResult; files: File[] }) {
+  const [highlightedField, setHighlightedField] = useState<string | null>(null);
+
   if (result.error) {
     return (
       <div className="rounded-xl border border-red-300 bg-red-50 p-6">
@@ -12,55 +17,84 @@ export default function ResultsPanel({ result }: { result: ReviewResult }) {
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
-        <div>
-          <h3 className="text-xl font-bold text-slate-900">{result.filenames.join(", ")}</h3>
-          <p className="text-sm text-slate-500">
-            Processed in {(result.processing_time_ms / 1000).toFixed(1)}s
-          </p>
-        </div>
-        <StatusBadge status={result.overall_status} size="lg" />
-      </div>
-
-      <div className="divide-y divide-slate-100">
-        {result.fields.map((field) => (
-          <div key={field.field} className="p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <h4 className="text-lg font-semibold text-slate-800">{field.label_name}</h4>
-              <StatusBadge status={field.status} size="sm" />
-            </div>
-            <p className="text-base text-slate-600 mb-3">{field.message}</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="rounded-lg bg-slate-50 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
-                  Application
-                </p>
-                <p className="text-sm font-mono text-slate-800 whitespace-pre-wrap break-words">
-                  {field.application_value || <span className="text-slate-400">(none)</span>}
-                </p>
-              </div>
-              <div className="rounded-lg bg-slate-50 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
-                  Label
-                </p>
-                <p className="text-sm font-mono text-slate-800 whitespace-pre-wrap break-words">
-                  {field.label_value || <span className="text-slate-400">(not found)</span>}
-                </p>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {result.extracted.notes && (
-        <div className="border-t border-slate-200 bg-amber-50 p-4">
-          <p className="text-sm text-amber-800">
-            <span className="font-semibold">Image notes: </span>
-            {result.extracted.notes}
-          </p>
-        </div>
+    <div className="space-y-6">
+      {files.length > 0 && (
+        <LabelImageViewer
+          files={files}
+          fieldLocations={result.extracted.field_locations}
+          highlightedField={highlightedField}
+        />
       )}
+
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
+          <div>
+            <h3 className="text-xl font-bold text-slate-900">{result.filenames.join(", ")}</h3>
+            <p className="text-sm text-slate-500">
+              Processed in {(result.processing_time_ms / 1000).toFixed(1)}s
+            </p>
+          </div>
+          <StatusBadge status={result.overall_status} size="lg" />
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {result.fields.map((field) => {
+            const location = result.extracted.field_locations.find(
+              (loc) => loc.field === field.field
+            );
+            return (
+              <div
+                key={field.field}
+                className={`p-5 transition-colors ${
+                  highlightedField === field.field ? "bg-blue-50" : ""
+                } ${files.length > 0 ? "cursor-pointer" : ""}`}
+                onMouseEnter={() => files.length > 0 && setHighlightedField(field.field)}
+                onMouseLeave={() => setHighlightedField(null)}
+                onClick={() =>
+                  files.length > 0 &&
+                  setHighlightedField((current) => (current === field.field ? null : field.field))
+                }
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <h4 className="text-lg font-semibold text-slate-800">{field.label_name}</h4>
+                  <div className="flex items-center gap-2">
+                    {location && <ConfidenceBadge confidence={location.confidence} />}
+                    <StatusBadge status={field.status} size="sm" />
+                  </div>
+                </div>
+                <p className="text-base text-slate-600 mb-3">{field.message}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
+                      Application
+                    </p>
+                    <p className="text-sm font-mono text-slate-800 whitespace-pre-wrap break-words">
+                      {field.application_value || <span className="text-slate-400">(none)</span>}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
+                      Label
+                    </p>
+                    <p className="text-sm font-mono text-slate-800 whitespace-pre-wrap break-words">
+                      {field.label_value || <span className="text-slate-400">(not found)</span>}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {result.extracted.notes && (
+          <div className="border-t border-slate-200 bg-amber-50 p-4">
+            <p className="text-sm text-amber-800">
+              <span className="font-semibold">Image notes: </span>
+              {result.extracted.notes}
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

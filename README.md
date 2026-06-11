@@ -144,10 +144,18 @@ notes - large text, big buttons, drag-and-drop image upload, color-coded
 Pass/Needs Review/Fail badges, and side-by-side "Application vs. Label"
 values for every field so an agent can see exactly what triggered a flag.
 
+**Visual verification:** Each result panel includes a zoomable view of the
+uploaded label image(s). Hovering or clicking a field highlights an
+approximate bounding box on the image showing where Claude read that field
+from, alongside a confidence badge (High/Medium/Low) for the transcription.
+These regions/confidence levels are AI-generated approximations meant as a
+starting point for the agent's own visual check, not a guarantee.
+
 **Batch review:** Agents can add multiple label/application pairs and submit
 them together, returning a summary table with per-label status and
-expandable details - addressing the "200-300 applications at once" pain
-point from peak season.
+expandable details, plus an **Export CSV** button that downloads a
+per-field breakdown of every label in the batch - addressing the "200-300
+applications at once" pain point from peak season.
 
 **Speed:** A single label review is one Claude API call (no multi-step
 chains), targeting the "under 5 seconds" requirement from the failed
@@ -185,11 +193,6 @@ size.
 
 ## Possible next steps
 
-- Confidence scores / highlighted regions on the label image showing where
-  each field was read from.
-- Side-by-side image viewer with zoom for agents to manually verify flagged
-  fields.
-- CSV export of batch results.
 - Configurable tolerance rules per beverage class.
 - **Label-Only Check enhancements:** the beverage type used for the ABV
   requirement check is currently Claude's best guess from the label text

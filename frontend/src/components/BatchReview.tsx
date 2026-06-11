@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { reviewLabelsBatch } from "../api";
+import { downloadCsv } from "../csv";
 import { EMPTY_APPLICATION, type ApplicationData, type ReviewResult } from "../types";
 import ApplicationForm from "./ApplicationForm";
 import ImageDropzone from "./ImageDropzone";
@@ -46,6 +47,40 @@ export default function BatchReview() {
         item.application.net_contents.trim() !== ""
     ) &&
     !loading;
+
+  function exportCsv() {
+    if (!results) return;
+    const rows: string[][] = [
+      [
+        "Files",
+        "Overall Status",
+        "Field",
+        "Field Status",
+        "Application Value",
+        "Label Value",
+        "Message",
+      ],
+    ];
+    results.forEach((result) => {
+      const files = result.filenames.join(", ");
+      if (result.error) {
+        rows.push([files, "fail", "", "", "", "", result.error]);
+        return;
+      }
+      result.fields.forEach((field) => {
+        rows.push([
+          files,
+          result.overall_status,
+          field.label_name,
+          field.status,
+          field.application_value ?? "",
+          field.label_value ?? "",
+          field.message,
+        ]);
+      });
+    });
+    downloadCsv("batch-review-results.csv", rows);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -119,7 +154,16 @@ export default function BatchReview() {
 
       {results && (
         <div className="mt-10">
-          <h2 className="text-2xl font-bold text-slate-900 mb-4">Batch Results</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 className="text-2xl font-bold text-slate-900">Batch Results</h2>
+            <button
+              type="button"
+              className="rounded-lg border-2 border-blue-600 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50"
+              onClick={exportCsv}
+            >
+              Export CSV
+            </button>
+          </div>
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <table className="w-full text-left">
               <thead className="bg-slate-50 text-sm uppercase tracking-wide text-slate-500">
@@ -164,7 +208,7 @@ export default function BatchReview() {
 
           {expanded !== null && (
             <div className="mt-6">
-              <ResultsPanel result={results[expanded]} />
+              <ResultsPanel result={results[expanded]} files={items[expanded]?.files ?? []} />
             </div>
           )}
         </div>
