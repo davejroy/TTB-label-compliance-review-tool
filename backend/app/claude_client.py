@@ -72,6 +72,17 @@ EXTRACTION_TOOL = {
                     "beverage), or 'unknown' if it cannot be determined."
                 ),
             },
+            "origin_guess": {
+                "type": "string",
+                "enum": ["domestic", "imported", "unknown"],
+                "description": (
+                    "Best guess at whether this product is domestic (produced in "
+                    "the US) or imported, based on cues such as a 'Product of "
+                    "<country>' or 'Imported by/from' statement, the country in "
+                    "the name_and_address block, or other label text. Use "
+                    "'unknown' only if there is genuinely no indication either way."
+                ),
+            },
             "field_locations": {
                 "type": "array",
                 "description": (
@@ -142,6 +153,7 @@ EXTRACTION_TOOL = {
             "government_warning_body",
             "government_warning_present",
             "beverage_type_guess",
+            "origin_guess",
             "field_locations",
             "notes",
         ],

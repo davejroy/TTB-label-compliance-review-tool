@@ -158,6 +158,12 @@ single pass, keeping the architecture simple for a prototype.
   deviation (reworded text, missing statement) is a Fail - this is the one
   check that is intentionally strict, since agents reject labels for things
   like "Government Warning" in title case.
+- **Country of origin (Label-Only Check):** only required for imported
+  products. A missing statement is judged against `origin_guess` (Claude's
+  domestic/imported/unknown call based on cues like "Imported by" or
+  "Product of <country>"): domestic -> Pass, imported -> Fail, unknown ->
+  Needs Review. This avoids flagging every domestic label as "Needs Review"
+  for a statement it isn't required to have.
 - **Net contents:** normalized so equivalent unit notations (e.g. `12 oz`
   vs `12 FL. OZ.`) match; does not convert between unit systems (mL vs fl
   oz).

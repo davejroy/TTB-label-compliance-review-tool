@@ -25,7 +25,12 @@ worded correctly.
    imports), and the Government Warning statement. Each requirement gets a
    Pass / Needs Review / Fail with the specific CFR citation and an
    explanation. Useful for spot-checking a label's basic compliance
-   independent of any specific COLA application.
+   independent of any specific COLA application. A missing
+   country-of-origin statement is only flagged if the label appears to be
+   an imported product (Claude's `origin_guess`, based on cues like
+   "Imported by" or "Product of <country>") - a domestic label without one
+   is a Pass, not a Needs Review, since the statement isn't required for
+   domestic products.
 6. Every result includes a **zoomable label image viewer**. Hovering or
    clicking a field highlights the approximate region on the label where
    Claude read that value from, along with a High/Medium/Low confidence
