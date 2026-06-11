@@ -33,8 +33,10 @@ export interface FieldResult {
   message: string;
 }
 
+export const MAX_IMAGES_PER_LABEL = 4;
+
 export interface ReviewResult {
-  filename: string;
+  filenames: string[];
   overall_status: Status;
   fields: FieldResult[];
   extracted: ExtractedLabelData;

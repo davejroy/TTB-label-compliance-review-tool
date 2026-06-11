@@ -1,26 +1,35 @@
 import { useRef, useState } from "react";
+import { MAX_IMAGES_PER_LABEL } from "../types";
 
 interface Props {
-  file: File | null;
-  onChange: (file: File | null) => void;
+  files: File[];
+  onChange: (files: File[]) => void;
   idPrefix: string;
 }
 
-export default function ImageDropzone({ file, onChange, idPrefix }: Props) {
+export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
-  const previewUrl = file ? URL.createObjectURL(file) : null;
 
-  function handleFiles(files: FileList | null) {
-    if (files && files.length > 0) {
-      onChange(files[0]);
-    }
+  function addFiles(newFiles: FileList | null) {
+    if (!newFiles || newFiles.length === 0) return;
+    const combined = [...files, ...Array.from(newFiles)].slice(0, MAX_IMAGES_PER_LABEL);
+    onChange(combined);
   }
+
+  function removeFile(index: number) {
+    onChange(files.filter((_, i) => i !== index));
+  }
+
+  const atLimit = files.length >= MAX_IMAGES_PER_LABEL;
 
   return (
     <div>
       <label className="block text-base font-semibold text-slate-700 mb-1" htmlFor={`${idPrefix}-file`}>
-        Label Image
+        Label Images{" "}
+        <span className="font-normal text-slate-500">
+          (1-{MAX_IMAGES_PER_LABEL}, e.g. front &amp; back)
+        </span>
       </label>
       <div
         className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
@@ -28,34 +37,46 @@ export default function ImageDropzone({ file, onChange, idPrefix }: Props) {
         }`}
         onDragOver={(e) => {
           e.preventDefault();
-          setDragActive(true);
+          if (!atLimit) setDragActive(true);
         }}
         onDragLeave={() => setDragActive(false)}
         onDrop={(e) => {
           e.preventDefault();
           setDragActive(false);
-          handleFiles(e.dataTransfer.files);
+          addFiles(e.dataTransfer.files);
         }}
       >
-        {previewUrl ? (
-          <div className="flex flex-col items-center gap-3">
-            <img src={previewUrl} alt="Label preview" className="max-h-48 rounded-md shadow" />
-            <p className="text-sm text-slate-600">{file?.name}</p>
-            <button
-              type="button"
-              className="text-sm font-semibold text-blue-700 underline"
-              onClick={() => onChange(null)}
-            >
-              Remove image
-            </button>
+        {files.length > 0 && (
+          <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3 w-full">
+            {files.map((file, index) => (
+              <div key={index} className="relative">
+                <img
+                  src={URL.createObjectURL(file)}
+                  alt={`Label image ${index + 1}`}
+                  className="h-24 w-full rounded-md object-cover shadow"
+                />
+                <button
+                  type="button"
+                  aria-label="Remove image"
+                  className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-sm font-bold text-white shadow hover:bg-red-700"
+                  onClick={() => removeFile(index)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
           </div>
-        ) : (
-          <div className="flex flex-col items-center gap-2 py-6">
+        )}
+
+        {!atLimit && (
+          <div className="flex flex-col items-center gap-2 py-4">
             <span className="text-4xl" aria-hidden="true">
               📷
             </span>
             <p className="text-lg font-medium text-slate-700">
-              Drag &amp; drop a label photo here
+              {files.length === 0
+                ? "Drag & drop label photos here"
+                : `Add another image (${files.length}/${MAX_IMAGES_PER_LABEL})`}
             </p>
             <p className="text-sm text-slate-500">or</p>
             <button
@@ -67,13 +88,18 @@ export default function ImageDropzone({ file, onChange, idPrefix }: Props) {
             </button>
           </div>
         )}
+
         <input
           ref={inputRef}
           id={`${idPrefix}-file`}
           type="file"
           accept="image/png,image/jpeg,image/webp"
+          multiple
           className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
         />
       </div>
     </div>
