@@ -36,11 +36,9 @@ function setPreview(item, file) {
     return;
   }
 
-  const imageUrl = URL.createObjectURL(file);
-  const image = document.createElement('img');
-  image.src = imageUrl;
-  image.alt = 'Uploaded label preview';
-  preview.replaceChildren(image);
+  const details = document.createElement('p');
+  details.textContent = `Selected image: ${file.name}`;
+  preview.replaceChildren(details);
 }
 
 function createStatusBadge(status) {
