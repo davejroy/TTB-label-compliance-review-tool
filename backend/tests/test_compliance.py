@@ -116,3 +116,21 @@ def test_net_contents_mismatch_fails():
     )
     nc_result = next(r for r in results if r.field == "net_contents")
     assert nc_result.status == "fail"
+
+
+def test_net_contents_oz_vs_fl_oz_passes():
+    results = run_compliance_checks(
+        make_application(net_contents="12 oz"),
+        make_extracted(net_contents="12 FL. OZ."),
+    )
+    nc_result = next(r for r in results if r.field == "net_contents")
+    assert nc_result.status == "pass"
+
+
+def test_government_warning_all_caps_body_passes():
+    results = run_compliance_checks(
+        make_application(),
+        make_extracted(government_warning_body=CANONICAL_WARNING_BODY.upper()),
+    )
+    warning_result = next(r for r in results if r.field == "government_warning")
+    assert warning_result.status == "pass"
