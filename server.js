@@ -85,8 +85,8 @@ let server;
 async function terminateWorker() {
   if (workerPromise) {
     const worker = await workerPromise;
-    workerPromise = null;
     await worker.terminate();
+    workerPromise = null;
   }
 }
 
