@@ -4,6 +4,7 @@ const batchUpload = document.querySelector('#batch-upload');
 const addItemButton = document.querySelector('#add-item');
 const analyzeAllButton = document.querySelector('#analyze-all');
 const liveRegion = document.querySelector('#queue-live-region');
+const CONTROL_CHARACTERS_PATTERN = /[\u0000-\u001f\u007f-\u009f]/g;
 
 let itemSequence = 0;
 
@@ -43,7 +44,7 @@ function setPreview(item, file) {
 }
 
 function sanitizeDisplayText(value) {
-  return value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim() || 'Unnamed file';
+  return value.replace(CONTROL_CHARACTERS_PATTERN, '').trim() || 'Unnamed file';
 }
 
 function announce(message) {
