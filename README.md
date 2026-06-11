@@ -125,6 +125,30 @@ behind a process manager (e.g. `uvicorn app.main:app` with a reverse proxy).
 Set `ANTHROPIC_API_KEY` (and optionally `CLAUDE_MODEL`) as environment
 variables for the backend process.
 
+## Deploying to Render
+
+This repo includes a `render.yaml` "Blueprint" that defines two services:
+
+- `ttb-label-backend` - a Python web service running the FastAPI app
+- `ttb-label-frontend` - a static site serving the built React app, wired to
+  call the backend automatically via the `VITE_API_HOST` build variable
+
+To deploy:
+
+1. In the Render dashboard, click **New > Blueprint** and select this repo.
+2. Render will detect `render.yaml` and show both services. Click **Apply**.
+3. Once `ttb-label-backend` is created, open it, go to **Environment**, and
+   add `ANTHROPIC_API_KEY` with your Anthropic API key (this is marked
+   `sync: false` in the blueprint so it isn't stored in the repo - you must
+   set it manually).
+4. Trigger a deploy of `ttb-label-frontend` (it needs `VITE_API_HOST` to be
+   resolved from the backend service, which happens automatically once the
+   backend exists).
+5. Once both are live, open the frontend's `.onrender.com` URL.
+
+Note: on Render's free tier, services "spin down" after inactivity and the
+first request after idling can take 30-60 seconds while it wakes up.
+
 ## Approach & design decisions
 
 **Why an LLM for extraction instead of traditional OCR?** Plain OCR returns
