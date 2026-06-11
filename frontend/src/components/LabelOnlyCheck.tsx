@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { checkLabelsBatch } from "../api";
+import { downloadCsv } from "../csv";
 import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
 import ImageDropzone from "./ImageDropzone";
 import LabelCheckResultsPanel from "./LabelCheckResultsPanel";
@@ -30,6 +31,45 @@ export default function LabelOnlyCheck() {
   }
 
   const canSubmit = items.length > 0 && items.every((item) => item.files.length > 0) && !loading;
+
+  function exportCsv() {
+    if (!results) return;
+    const rows: string[][] = [
+      [
+        "Files",
+        "Beverage Type",
+        "Overall Status",
+        "Check",
+        "Check Status",
+        "TTB Requirement",
+        "Found on Label",
+        "Message",
+      ],
+    ];
+    results.forEach((result) => {
+      const files = result.filenames.join(", ");
+      const beverageType = result.beverage_type
+        ? BEVERAGE_TYPE_LABELS[result.beverage_type] ?? result.beverage_type
+        : "";
+      if (result.error) {
+        rows.push([files, beverageType, "fail", "", "", "", "", result.error]);
+        return;
+      }
+      result.checks.forEach((check) => {
+        rows.push([
+          files,
+          beverageType,
+          result.overall_status,
+          check.label_name,
+          check.status,
+          check.application_value ?? "",
+          check.label_value ?? "",
+          check.message,
+        ]);
+      });
+    });
+    downloadCsv("label-check-results.csv", rows);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -107,7 +147,16 @@ export default function LabelOnlyCheck() {
 
       {results && (
         <div className="mt-10">
-          <h2 className="text-2xl font-bold text-slate-900 mb-4">Results</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h2 className="text-2xl font-bold text-slate-900">Results</h2>
+            <button
+              type="button"
+              className="rounded-lg border-2 border-blue-600 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50"
+              onClick={exportCsv}
+            >
+              Export CSV
+            </button>
+          </div>
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <table className="w-full text-left">
               <thead className="bg-slate-50 text-sm uppercase tracking-wide text-slate-500">
@@ -158,7 +207,10 @@ export default function LabelOnlyCheck() {
 
           {expanded !== null && (
             <div className="mt-6">
-              <LabelCheckResultsPanel result={results[expanded]} />
+              <LabelCheckResultsPanel
+                result={results[expanded]}
+                files={items[expanded]?.files ?? []}
+              />
             </div>
           )}
         </div>

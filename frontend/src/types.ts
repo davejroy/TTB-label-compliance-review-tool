@@ -11,6 +11,18 @@ export interface ApplicationData {
   country_of_origin?: string;
 }
 
+export type Confidence = "high" | "medium" | "low";
+
+export interface FieldLocation {
+  field: string;
+  image_index: number;
+  confidence: Confidence;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface ExtractedLabelData {
   brand_name?: string;
   class_type?: string;
@@ -22,6 +34,7 @@ export interface ExtractedLabelData {
   government_warning_body?: string;
   government_warning_present: boolean;
   beverage_type_guess?: string;
+  field_locations: FieldLocation[];
   notes?: string;
 }
 

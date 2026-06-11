@@ -70,7 +70,7 @@ export default function SingleReview() {
             "Review Label" to see results here.
           </div>
         )}
-        {result && <ResultsPanel result={result} />}
+        {result && <ResultsPanel result={result} files={files} />}
       </div>
     </div>
   );

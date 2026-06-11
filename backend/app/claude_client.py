@@ -61,6 +61,60 @@ EXTRACTION_TOOL = {
                     "beverage), or 'unknown' if it cannot be determined."
                 ),
             },
+            "field_locations": {
+                "type": "array",
+                "description": (
+                    "For each of brand_name, class_type, alcohol_content, "
+                    "net_contents, name_and_address, country_of_origin, and "
+                    "government_warning that was found on the label, an entry "
+                    "describing roughly where it appears and how confident you "
+                    "are in the reading. Omit entries for fields that were not "
+                    "found."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "field": {
+                            "type": "string",
+                            "enum": [
+                                "brand_name",
+                                "class_type",
+                                "alcohol_content",
+                                "net_contents",
+                                "name_and_address",
+                                "country_of_origin",
+                                "government_warning",
+                            ],
+                        },
+                        "image_index": {
+                            "type": "integer",
+                            "description": "0-based index into the provided images where this field appears.",
+                        },
+                        "confidence": {
+                            "type": "string",
+                            "enum": ["high", "medium", "low"],
+                            "description": "How confident you are in this field's transcription, e.g. lower for blurry, angled, or glare-obscured text.",
+                        },
+                        "x": {
+                            "type": "number",
+                            "description": "Left edge of the bounding box, as a fraction (0-1) of the image width.",
+                        },
+                        "y": {
+                            "type": "number",
+                            "description": "Top edge of the bounding box, as a fraction (0-1) of the image height.",
+                        },
+                        "width": {
+                            "type": "number",
+                            "description": "Width of the bounding box, as a fraction (0-1) of the image width.",
+                        },
+                        "height": {
+                            "type": "number",
+                            "description": "Height of the bounding box, as a fraction (0-1) of the image height.",
+                        },
+                    },
+                    "required": ["field", "image_index", "confidence", "x", "y", "width", "height"],
+                },
+            },
             "notes": {
                 "type": "string",
                 "description": "Any other observations relevant to compliance review (e.g. image is blurry/cut off, text partially obscured by glare, multiple labels visible).",
@@ -77,6 +131,7 @@ EXTRACTION_TOOL = {
             "government_warning_body",
             "government_warning_present",
             "beverage_type_guess",
+            "field_locations",
             "notes",
         ],
     },
@@ -94,7 +149,12 @@ SYSTEM_PROMPT = (
     "statement). Do not correct, paraphrase, or 'clean up' the text. If a field is "
     "not visible in any of the images, return an empty string for it. If an image is "
     "low quality, at an angle, or partially obscured, do your best and note the "
-    "issue in the 'notes' field. Always respond by calling the record_label_fields tool."
+    "issue in the 'notes' field. For each field you do find, also record an entry "
+    "in 'field_locations' with an approximate bounding box (as fractions of that "
+    "image's width/height, with (0,0) at the top-left corner) showing where on the "
+    "image the text appears, the index of the image it appears in, and a confidence "
+    "level reflecting how certain you are in the transcription. Always respond by "
+    "calling the record_label_fields tool."
 )
 
 
