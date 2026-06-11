@@ -16,6 +16,11 @@ function isTouchDevice(): boolean {
   return window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
 }
 
+/**
+ * Upload control for a label's image(s). Supports three input methods:
+ * drag-and-drop, a "Choose File" picker (always shown), and - on touch
+ * devices only - a "Take Photo" button that opens the camera.
+ */
 export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);

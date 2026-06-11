@@ -10,6 +10,10 @@ type Tab = "single" | "batch" | "label-check";
  * Batch Review, Label-Only Check), and a footer disclaimer. Each tab
  * renders an independent, self-contained component that manages its own
  * upload/results state.
+ *
+ * The header reuses TTB's official logo (`public/ttb-logo.png`) and
+ * ttb.gov's navy/gold color scheme (`#083c6f` background, `#ffbe2e`
+ * accent border) so the tool reads as part of the TTB site family.
  */
 export default function App() {
   const [tab, setTab] = useState<Tab>("single");

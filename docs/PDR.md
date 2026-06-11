@@ -109,10 +109,13 @@ commit history (Dave, Jenny, Sarah, Marcus).
 ### Frontend (`frontend/src/`)
 
 - **`App.tsx`** - top-level layout/routing between Single, Batch, and
-  Label-Only modes.
+  Label-Only modes. Renders the TTB-branded header (official TTB seal/
+  wordmark logo, navy/gold color scheme matching ttb.gov).
 - **`components/SingleReview.tsx` / `BatchReview.tsx`** - application-data
   + label review flows.
 - **`components/LabelOnlyCheck.tsx`** - label-only requirements flow.
+- **`components/ImageDropzone.tsx`** - drag-and-drop / file-picker / camera
+  capture for label images (see 7.7).
 - **`components/ResultsPanel.tsx` / `LabelCheckResultsPanel.tsx`** -
   per-label result display (status badges, application-vs-label values).
 - **`components/LabelImageViewer.tsx`** - zoomable image viewer with
@@ -189,6 +192,23 @@ A single label review is one Claude API call (no multi-step chains),
 targeting the "under 5 seconds" requirement from the failed
 scanning-vendor pilot. Actual latency depends on the Anthropic API and
 image size.
+
+### 7.7 Branding & camera capture
+
+The UI uses TTB's official logo (`frontend/public/ttb-logo.png`, also
+cropped to `favicon.png`) and matches ttb.gov's navy/gold color scheme
+(`#083c6f` header background, `#15396a` primary actions, `#ffbe2e` accent
+border) so the tool feels like part of the TTB site family.
+
+`ImageDropzone` offers drag-and-drop, a "Choose File" picker (always
+available), and - on touch-primary devices only - a "Take Photo" button.
+"Take Photo" uses a hidden `<input type="file" accept="image/*"
+capture="environment">`, which opens the device's rear camera directly on
+mobile browsers; the browser handles the camera permission prompt, so no
+app-level permission code is needed. Device type is detected via the
+`(pointer: coarse)` media query and `navigator.maxTouchPoints`, since
+desktop browsers don't support camera capture through this API and would
+otherwise just open a redundant file picker.
 
 ## 8. Assumptions & trade-offs
 
