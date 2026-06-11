@@ -16,12 +16,16 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <header className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-4 py-6">
-          <h1 className="text-3xl font-bold text-slate-900">TTB Label Compliance Review Tool</h1>
-          <p className="text-lg text-slate-600 mt-1">
-            Upload a label image and compare it against the application details.
-          </p>
+      <div className="bg-[#15396a] h-1.5" />
+      <header className="bg-[#083c6f] border-b-4 border-[#ffbe2e]">
+        <div className="max-w-6xl mx-auto px-4 py-6 flex flex-wrap items-center gap-4">
+          <img src="/ttb-logo.png" alt="TTB - Alcohol and Tobacco Tax and Trade Bureau, U.S. Department of the Treasury" className="h-16 w-auto flex-shrink-0" />
+          <div>
+            <h1 className="text-3xl font-bold text-white">Label Compliance Review Tool</h1>
+            <p className="text-lg text-slate-200 mt-1">
+              Upload a label image and compare it against the application details.
+            </p>
+          </div>
         </div>
       </header>
 
@@ -29,7 +33,7 @@ export default function App() {
         <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1 shadow-sm">
           <button
             className={`rounded-md px-5 py-2.5 text-base font-semibold transition-colors ${
-              tab === "single" ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-100"
+              tab === "single" ? "bg-[#15396a] text-white" : "text-slate-700 hover:bg-slate-100"
             }`}
             onClick={() => setTab("single")}
           >
@@ -37,7 +41,7 @@ export default function App() {
           </button>
           <button
             className={`rounded-md px-5 py-2.5 text-base font-semibold transition-colors ${
-              tab === "batch" ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-100"
+              tab === "batch" ? "bg-[#15396a] text-white" : "text-slate-700 hover:bg-slate-100"
             }`}
             onClick={() => setTab("batch")}
           >
@@ -45,7 +49,7 @@ export default function App() {
           </button>
           <button
             className={`rounded-md px-5 py-2.5 text-base font-semibold transition-colors ${
-              tab === "label-check" ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-100"
+              tab === "label-check" ? "bg-[#15396a] text-white" : "text-slate-700 hover:bg-slate-100"
             }`}
             onClick={() => setTab("label-check")}
           >

@@ -135,7 +135,7 @@ export default function BatchReview() {
         <div className="flex flex-wrap items-center gap-4">
           <button
             type="button"
-            className="rounded-lg border-2 border-blue-600 px-5 py-3 text-base font-bold text-blue-700 hover:bg-blue-50"
+            className="rounded-lg border-2 border-[#15396a] px-5 py-3 text-base font-bold text-[#15396a] hover:bg-blue-50"
             onClick={() => setItems((prev) => [...prev, newItem()])}
           >
             + Add Another Label
@@ -143,7 +143,7 @@ export default function BatchReview() {
           <button
             type="submit"
             disabled={!canSubmit}
-            className="rounded-lg bg-blue-600 px-6 py-3 text-lg font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="rounded-lg bg-[#15396a] px-6 py-3 text-lg font-bold text-white hover:bg-[#0b1f3a] disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             {loading ? `Reviewing ${items.length} labels...` : `Review ${items.length} Labels`}
           </button>
@@ -158,7 +158,7 @@ export default function BatchReview() {
             <h2 className="text-2xl font-bold text-slate-900">Batch Results</h2>
             <button
               type="button"
-              className="rounded-lg border-2 border-blue-600 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50"
+              className="rounded-lg border-2 border-[#15396a] px-4 py-2 text-sm font-bold text-[#15396a] hover:bg-blue-50"
               onClick={exportCsv}
             >
               Export CSV
