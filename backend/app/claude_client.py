@@ -8,13 +8,22 @@ parseable response in one round trip (see NFR-1 in docs/PDR.md).
 """
 
 import base64
+import io
 import os
 
 from anthropic import Anthropic
+from PIL import Image
 
 from .models import ExtractedLabelData
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+
+# Claude resizes images so the long edge is ~1568px before processing them
+# (anything larger is wasted upload bandwidth/latency with no quality
+# benefit). Downscaling phone-camera photos to this size client-side keeps
+# the matching field-location coordinates valid (they're fractions of width/
+# height) while cutting upload size and processing time substantially.
+MAX_IMAGE_DIMENSION = 1568
 
 # JSON-schema tool definition passed to Claude. Keep this in sync with
 # ExtractedLabelData in models.py - the tool's "input" is parsed directly
@@ -197,6 +206,30 @@ def _media_type_for(filename: str) -> str:
     }.get(ext, "image/jpeg")
 
 
+def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
+    """Shrink an image to ``MAX_IMAGE_DIMENSION`` on its long edge if larger.
+
+    Returns the (possibly re-encoded) bytes and media type. Re-encodes as
+    JPEG to additionally cut file size for large PNG photos. Falls back to
+    the original bytes/media type if the image can't be parsed (e.g.
+    unsupported format) so a borderline file doesn't fail the whole upload.
+    """
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            if max(img.size) <= MAX_IMAGE_DIMENSION:
+                return image_bytes, media_type
+
+            ratio = MAX_IMAGE_DIMENSION / max(img.size)
+            new_size = (round(img.width * ratio), round(img.height * ratio))
+            resized = img.convert("RGB").resize(new_size, Image.LANCZOS)
+
+            buf = io.BytesIO()
+            resized.save(buf, format="JPEG", quality=85)
+            return buf.getvalue(), "image/jpeg"
+    except Exception:  # noqa: BLE001
+        return image_bytes, media_type
+
+
 def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
     """Extract structured label fields from one or more images of a label.
 
@@ -221,17 +254,19 @@ def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
     """
     client = Anthropic()
 
-    image_blocks = [
-        {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": _media_type_for(filename),
-                "data": base64.b64encode(image_bytes).decode("utf-8"),
-            },
-        }
-        for image_bytes, filename in images
-    ]
+    image_blocks = []
+    for image_bytes, filename in images:
+        resized_bytes, media_type = _downscale_if_needed(image_bytes, _media_type_for(filename))
+        image_blocks.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": base64.b64encode(resized_bytes).decode("utf-8"),
+                },
+            }
+        )
 
     if len(images) == 1:
         prompt_text = "Read this alcohol beverage label and record its fields."
