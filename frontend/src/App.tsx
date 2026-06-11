@@ -5,6 +5,12 @@ import LabelOnlyCheck from "./components/LabelOnlyCheck";
 
 type Tab = "single" | "batch" | "label-check";
 
+/**
+ * Top-level layout: header, the three review-mode tabs (Single Label,
+ * Batch Review, Label-Only Check), and a footer disclaimer. Each tab
+ * renders an independent, self-contained component that manages its own
+ * upload/results state.
+ */
 export default function App() {
   const [tab, setTab] = useState<Tab>("single");
 

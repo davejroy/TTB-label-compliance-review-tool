@@ -1,3 +1,22 @@
+"""Compliance matching and TTB label requirement checks.
+
+This module is the core "business logic" of the prototype and is kept free
+of any I/O (no network calls, no file access) so it can be unit tested
+without an Anthropic API key.
+
+Two entry points are exported:
+
+- ``run_compliance_checks`` - compares a label's extracted fields against a
+  COLA application's data (Application vs. Label review).
+- ``check_label_requirements`` - validates a label's extracted fields
+  against the baseline TTB mandatory label requirements (27 CFR Parts 4, 5,
+  7, 16), independent of any application data (Label-Only Check).
+
+Every check returns a ``FieldResult`` with a ``status`` of ``"pass"``,
+``"warning"`` (needs human review), or ``"fail"``, plus a plain-language
+``message`` explaining the result.
+"""
+
 import re
 from difflib import SequenceMatcher
 
@@ -24,6 +43,12 @@ ABV_TOLERANCE = {
 
 
 def _normalize(text: str | None) -> str:
+    """Lowercase, strip punctuation, and collapse whitespace.
+
+    Used for case/punctuation-insensitive comparisons (e.g. brand name,
+    class/type) so that "STONE'S THROW" and "Stone's Throw" are treated as
+    the same value.
+    """
     if not text:
         return ""
     text = text.strip().lower()
@@ -45,16 +70,24 @@ def _normalize_net_contents(text: str | None) -> str:
 
 
 def _normalize_whitespace(text: str | None) -> str:
+    """Collapse runs of whitespace to a single space, preserving case.
+
+    Used for the Government Warning text, where casing matters (the header
+    must be all-caps) but incidental line-wrapping/spacing differences from
+    OCR/transcription should not cause a mismatch.
+    """
     if not text:
         return ""
     return re.sub(r"\s+", " ", text.strip())
 
 
 def _similarity(a: str, b: str) -> float:
+    """Return a 0-1 similarity ratio between two strings (via difflib)."""
     return SequenceMatcher(None, a, b).ratio()
 
 
 def _extract_percent(text: str | None) -> float | None:
+    """Pull the first ``NN.N%`` style percentage out of free text, if any."""
     if not text:
         return None
     match = re.search(r"(\d+(?:\.\d+)?)\s*%", text)
@@ -70,6 +103,18 @@ def _check_text_field(
     label_value: str | None,
     normalizer=_normalize,
 ) -> FieldResult:
+    """Compare an application value to the corresponding label value.
+
+    - Missing on the label -> ``fail``.
+    - Equal after normalization -> ``pass``.
+    - Not equal but >=85% similar after normalization -> ``warning`` (likely
+      a cosmetic difference; flagged for a human to confirm).
+    - Otherwise -> ``fail``.
+
+    ``normalizer`` controls how values are normalized before comparison
+    (e.g. ``_normalize`` for case/punctuation-insensitive text,
+    ``_normalize_net_contents`` for unit-aware net-contents comparison).
+    """
     norm_app = normalizer(application_value)
     norm_label = normalizer(label_value)
 
@@ -120,6 +165,15 @@ def _check_text_field(
 def _check_alcohol_content(
     application: ApplicationData, extracted: ExtractedLabelData
 ) -> FieldResult:
+    """Compare the application's stated ABV to the label's ABV.
+
+    Percentages are parsed out of both values and compared numerically
+    against ``ABV_TOLERANCE`` for the application's beverage type (falling
+    back to text comparison if either value has no parseable percentage).
+    A missing ABV on a wine/beer label is a ``warning`` rather than a
+    ``fail``, since some wine/beer labels are legally exempt from stating
+    ABV (27 CFR 4.36 / 7.71).
+    """
     label_value = extracted.alcohol_content
     field, label_name = "alcohol_content", "Alcohol Content"
 
@@ -182,6 +236,19 @@ def _check_alcohol_content(
 
 
 def _check_government_warning(extracted: ExtractedLabelData) -> FieldResult:
+    """Validate the Government Warning statement (27 CFR 16.21).
+
+    This check is intentionally strict and shared by both
+    ``run_compliance_checks`` and ``check_label_requirements``:
+
+    - The statement must be present at all -> otherwise ``fail``.
+    - The header must read exactly ``GOVERNMENT WARNING:`` in capital
+      letters (title case is a ``fail``, not a warning).
+    - The body text must match the canonical statutory wording
+      case-insensitively. A near match (>=95% similarity) is reported as a
+      "minor wording differences" issue but is still an overall ``fail``,
+      since any deviation from the required text is non-compliant.
+    """
     field, label_name = "government_warning", "Government Warning"
 
     if not extracted.government_warning_present:
@@ -235,6 +302,13 @@ def _check_government_warning(extracted: ExtractedLabelData) -> FieldResult:
 def run_compliance_checks(
     application: ApplicationData, extracted: ExtractedLabelData
 ) -> list[FieldResult]:
+    """Compare a label's extracted fields against the COLA application data.
+
+    Always checks brand name, class/type, alcohol content, net contents,
+    and the Government Warning. Name/address and country of origin are only
+    checked if the application provided values for them (they are optional
+    on ``ApplicationData``).
+    """
     results = [
         _check_text_field(
             "brand_name", "Brand Name", application.brand_name, extracted.brand_name
@@ -283,6 +357,12 @@ def _presence_check(
     requirement: str,
     found_message: str | None = None,
 ) -> FieldResult:
+    """Generic "is this required field present on the label?" check.
+
+    Used by ``check_label_requirements`` for fields that the TTB regulations
+    require to simply be present (brand name, class/type, name & address),
+    as opposed to fields that need value-level validation.
+    """
     if label_value and label_value.strip():
         return FieldResult(
             field=field,
@@ -306,6 +386,19 @@ def _presence_check(
 def _check_label_alcohol_content(
     extracted: ExtractedLabelData, beverage_type: str | None
 ) -> FieldResult:
+    """Check the ABV statement against the per-beverage-type requirement.
+
+    Unlike ``_check_alcohol_content`` (which compares to an application
+    value), this only checks whether *some* ABV statement is present and
+    whether one is required at all for ``beverage_type``:
+
+    - Distilled spirits: required (27 CFR 5.37) -> ``fail`` if missing.
+    - Wine: required over 14% ABV (27 CFR 4.36); below that it may be
+      omitted -> ``warning`` if missing (can't tell ABV without the value).
+    - Beer: not federally required (27 CFR 7.71) -> ``pass`` if missing.
+    - Unknown beverage type: ``warning`` if missing, since we can't
+      determine the requirement.
+    """
     field, label_name = "alcohol_content", "Alcohol Content"
     requirement = (
         "Alcohol content (ABV) statement is required on distilled spirits labels "
@@ -390,6 +483,12 @@ def _check_label_alcohol_content(
 
 
 def _check_label_net_contents(extracted: ExtractedLabelData) -> FieldResult:
+    """Check that the label states a net contents quantity (27 CFR 4.37/5.38/7.25).
+
+    Only confirms a quantity-looking value is present; does not validate it
+    against the authorized standards-of-fill sizes (see "Possible next
+    steps" in docs/PDR.md).
+    """
     field, label_name = "net_contents", "Net Contents"
     requirement = (
         "Net contents must be stated in conformance with standards of fill "
@@ -428,6 +527,12 @@ def _check_label_net_contents(extracted: ExtractedLabelData) -> FieldResult:
 
 
 def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult:
+    """Check for a country-of-origin statement, required only for imports.
+
+    Since the label-only check has no application data to confirm whether
+    the product is imported, a missing statement is reported as a
+    ``warning`` (not a ``fail``) so the agent can verify whether it applies.
+    """
     field, label_name = "country_of_origin", "Country of Origin"
     requirement = (
         "A country-of-origin statement (e.g. 'Product of Scotland') is required "
@@ -490,6 +595,11 @@ def check_label_requirements(
 
 
 def overall_status(results: list[FieldResult]) -> str:
+    """Roll up a list of FieldResults into a single overall status.
+
+    ``fail`` if any field failed, else ``warning`` if any field needs
+    review, else ``pass``.
+    """
     if any(r.status == "fail" for r in results):
         return "fail"
     if any(r.status == "warning" for r in results):

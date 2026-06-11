@@ -8,11 +8,23 @@ const CONFIDENCE_COLORS: Record<Confidence, string> = {
 };
 
 interface Props {
+  /** Uploaded label image files, rendered via object URLs. */
   files: File[];
+  /** All field locations reported by Claude for this label (across all images). */
   fieldLocations: FieldLocation[];
+  /**
+   * The `field` name currently hovered/selected in the results list, or
+   * `null` if none. Only locations matching this field are outlined.
+   */
   highlightedField: string | null;
 }
 
+/**
+ * Zoomable viewer for a label's uploaded image(s) with bounding-box
+ * overlays for the field currently highlighted in the results panel.
+ *
+ * Renders nothing if no images were uploaded (e.g. a CSV-only batch entry).
+ */
 export default function LabelImageViewer({ files, fieldLocations, highlightedField }: Props) {
   const [zoom, setZoom] = useState(1);
 

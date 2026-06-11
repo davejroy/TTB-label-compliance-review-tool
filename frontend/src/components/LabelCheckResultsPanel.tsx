@@ -4,6 +4,11 @@ import ConfidenceBadge from "./ConfidenceBadge";
 import LabelImageViewer from "./LabelImageViewer";
 import StatusBadge from "./StatusBadge";
 
+/**
+ * Renders one Label-Only Check result: the label image viewer (with
+ * field-location highlighting), the detected beverage type, and the
+ * Pass/Needs Review/Fail breakdown for each TTB requirement.
+ */
 export default function LabelCheckResultsPanel({
   result,
   files,
