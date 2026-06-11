@@ -10,6 +10,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
 });
+const SHUTDOWN_TIMEOUT_MS = 5000;
 
 let workerPromise;
 
@@ -96,7 +97,7 @@ async function shutdown(exitCode = 0) {
   if (server) {
     const forceExitTimer = setTimeout(() => {
       process.exit(exitCode);
-    }, 5000);
+    }, SHUTDOWN_TIMEOUT_MS);
 
     server.close(() => process.exit(exitCode));
     server.on('close', () => clearTimeout(forceExitTimer));
