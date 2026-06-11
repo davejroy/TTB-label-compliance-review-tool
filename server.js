@@ -80,18 +80,39 @@ app.use((error, _req, res, _next) => {
 });
 
 const port = process.env.PORT || 3000;
+let server;
+
+async function terminateWorker() {
+  if (workerPromise) {
+    const worker = await workerPromise;
+    workerPromise = null;
+    await worker.terminate();
+  }
+}
+
+async function shutdown(exitCode = 0) {
+  await terminateWorker();
+
+  if (server) {
+    server.close(() => process.exit(exitCode));
+    return;
+  }
+
+  process.exit(exitCode);
+}
 
 if (require.main === module) {
-  app.listen(port, () => {
+  server = app.listen(port, () => {
     console.log(`TTB label compliance review tool running at http://localhost:${port}`);
   });
 }
 
-process.on('exit', async () => {
-  if (workerPromise) {
-    const worker = await workerPromise;
-    await worker.terminate();
-  }
+process.once('SIGINT', () => {
+  shutdown(0);
+});
+
+process.once('SIGTERM', () => {
+  shutdown(0);
 });
 
 module.exports = app;

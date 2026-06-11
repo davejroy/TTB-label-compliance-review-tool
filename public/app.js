@@ -30,12 +30,43 @@ function setPreview(item, file) {
   const preview = item.querySelector('[data-role="preview"]');
 
   if (!file) {
-    preview.innerHTML = '<p>No image uploaded yet.</p>';
+    const message = document.createElement('p');
+    message.textContent = 'No image uploaded yet.';
+    preview.replaceChildren(message);
     return;
   }
 
   const imageUrl = URL.createObjectURL(file);
-  preview.innerHTML = `<img src="${imageUrl}" alt="Uploaded label preview" />`;
+  const image = document.createElement('img');
+  image.src = imageUrl;
+  image.alt = 'Uploaded label preview';
+  preview.replaceChildren(image);
+}
+
+function createStatusBadge(status) {
+  const badge = document.createElement('span');
+  badge.className = `status-badge ${status}`;
+  badge.textContent = status;
+  return badge;
+}
+
+function createLabeledParagraph(label, value) {
+  const paragraph = document.createElement('p');
+  const strong = document.createElement('strong');
+  strong.textContent = `${label}:`;
+  paragraph.append(strong, ` ${value}`);
+  return paragraph;
+}
+
+function renderMessage(results, message) {
+  const heading = document.createElement('h3');
+  heading.textContent = 'Results';
+
+  const paragraph = document.createElement('p');
+  paragraph.className = 'muted';
+  paragraph.textContent = message;
+
+  results.replaceChildren(heading, paragraph);
 }
 
 function renderResults(item, payload) {
@@ -49,35 +80,61 @@ function renderResults(item, payload) {
     overallStatus === 'match' ? 'Ready to approve' : overallStatus === 'mismatch' ? 'Potential rejection' : 'Manual review needed';
   badge.className = `status-badge ${overallStatus}`;
 
-  const cards = payload.checks
-    .map(
-      (check) => `
-        <article class="result-card">
-          <span class="status-badge ${check.status}">${check.status}</span>
-          <h4>${check.field}</h4>
-          ${check.expected ? `<p><strong>Application:</strong> ${check.expected}</p>` : ''}
-          ${check.found ? `<p><strong>Detected:</strong> ${check.found}</p>` : ''}
-          <p>${check.reason}</p>
-        </article>
-      `
-    )
-    .join('');
+  const heading = document.createElement('h3');
+  heading.textContent = 'Results';
 
-  results.innerHTML = `
-    <h3>Results</h3>
-    <div class="result-grid">
-      <article class="result-summary">
-        <p><strong>${payload.summary.match}</strong> match(es)</p>
-        <p><strong>${payload.summary.mismatch}</strong> mismatch(es)</p>
-        <p><strong>${payload.summary.review}</strong> manual-review item(s)</p>
-      </article>
-      ${cards}
-    </div>
-    <section class="ocr-output">
-      <h4>Extracted label text</h4>
-      <pre>${payload.extractedText}</pre>
-    </section>
-  `;
+  const resultGrid = document.createElement('div');
+  resultGrid.className = 'result-grid';
+
+  const summaryCard = document.createElement('article');
+  summaryCard.className = 'result-summary';
+  [
+    `${payload.summary.match} match(es)`,
+    `${payload.summary.mismatch} mismatch(es)`,
+    `${payload.summary.review} manual-review item(s)`,
+  ].forEach((text) => {
+    const paragraph = document.createElement('p');
+    const strong = document.createElement('strong');
+    const [count, ...rest] = text.split(' ');
+    strong.textContent = count;
+    paragraph.append(strong, ` ${rest.join(' ')}`);
+    summaryCard.append(paragraph);
+  });
+  resultGrid.append(summaryCard);
+
+  payload.checks.forEach((check) => {
+    const card = document.createElement('article');
+    card.className = 'result-card';
+
+    const title = document.createElement('h4');
+    title.textContent = check.field;
+
+    const reason = document.createElement('p');
+    reason.textContent = check.reason;
+
+    card.append(createStatusBadge(check.status), title);
+
+    if (check.expected) {
+      card.append(createLabeledParagraph('Application', check.expected));
+    }
+
+    if (check.found) {
+      card.append(createLabeledParagraph('Detected', check.found));
+    }
+
+    card.append(reason);
+    resultGrid.append(card);
+  });
+
+  const ocrOutput = document.createElement('section');
+  ocrOutput.className = 'ocr-output';
+  const ocrHeading = document.createElement('h4');
+  ocrHeading.textContent = 'Extracted label text';
+  const pre = document.createElement('pre');
+  pre.textContent = payload.extractedText;
+  ocrOutput.append(ocrHeading, pre);
+
+  results.replaceChildren(heading, resultGrid, ocrOutput);
 
   updateSummary();
 }
@@ -99,8 +156,7 @@ async function analyzeItem(item) {
 
   if (!file && !fields.labelTextOverride) {
     setPendingStatus(item, 'Needs image or text');
-    item.querySelector('[data-role="results"]').innerHTML =
-      '<h3>Results</h3><p class="muted">Attach an image or paste label text before running analysis.</p>';
+    renderMessage(item.querySelector('[data-role="results"]'), 'Attach an image or paste label text before running analysis.');
     return;
   }
 
@@ -122,7 +178,7 @@ async function analyzeItem(item) {
 
   if (!response.ok) {
     setPendingStatus(item, 'Needs attention');
-    item.querySelector('[data-role="results"]').innerHTML = `<h3>Results</h3><p class="muted">${payload.error}</p>`;
+    renderMessage(item.querySelector('[data-role="results"]'), payload.error);
     return;
   }
 
