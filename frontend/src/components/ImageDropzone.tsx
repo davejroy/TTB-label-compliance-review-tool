@@ -7,10 +7,20 @@ interface Props {
   idPrefix: string;
 }
 
+/** True on touch-primary devices (phones/tablets), where a "Take Photo"
+ * button can open the camera. Desktop browsers generally lack a
+ * coarse/touch primary pointer and don't support camera capture via
+ * `<input capture>`, so the button is hidden there. */
+function isTouchDevice(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+}
+
 export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [canUseCamera] = useState(isTouchDevice);
 
   function addFiles(newFiles: FileList | null) {
     if (!newFiles || newFiles.length === 0) return;
@@ -88,13 +98,15 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
               >
                 Choose File
               </button>
-              <button
-                type="button"
-                className="rounded-lg border-2 border-[#15396a] px-5 py-2.5 text-base font-semibold text-[#15396a] hover:bg-blue-50"
-                onClick={() => cameraInputRef.current?.click()}
-              >
-                Take Photo
-              </button>
+              {canUseCamera && (
+                <button
+                  type="button"
+                  className="rounded-lg border-2 border-[#15396a] px-5 py-2.5 text-base font-semibold text-[#15396a] hover:bg-blue-50"
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  Take Photo
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -111,18 +123,20 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
             e.target.value = "";
           }}
         />
-        <input
-          ref={cameraInputRef}
-          id={`${idPrefix}-camera`}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="hidden"
-          onChange={(e) => {
-            addFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
+        {canUseCamera && (
+          <input
+            ref={cameraInputRef}
+            id={`${idPrefix}-camera`}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        )}
       </div>
     </div>
   );
