@@ -17,14 +17,11 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="bg-[#15396a] h-1.5" />
-      <header className="bg-[#0b1f3a] border-b-4 border-[#ffbe2e]">
-        <div className="max-w-6xl mx-auto px-4 py-6 flex items-center gap-4">
-          <img src="/ttb-logo.svg" alt="TTB seal" className="h-14 w-14 flex-shrink-0" />
+      <header className="bg-[#083c6f] border-b-4 border-[#ffbe2e]">
+        <div className="max-w-6xl mx-auto px-4 py-6 flex flex-wrap items-center gap-4">
+          <img src="/ttb-logo.png" alt="TTB - Alcohol and Tobacco Tax and Trade Bureau, U.S. Department of the Treasury" className="h-16 w-auto flex-shrink-0" />
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-[#ffbe2e]">
-              Alcohol and Tobacco Tax and Trade Bureau &middot; U.S. Department of the Treasury
-            </p>
-            <h1 className="text-3xl font-bold text-white">TTB Label Compliance Review Tool</h1>
+            <h1 className="text-3xl font-bold text-white">Label Compliance Review Tool</h1>
             <p className="text-lg text-slate-200 mt-1">
               Upload a label image and compare it against the application details.
             </p>
