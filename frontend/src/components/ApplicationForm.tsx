@@ -7,7 +7,7 @@ interface Props {
 }
 
 const FIELD_CLASSES =
-  "w-full rounded-lg border border-slate-300 px-4 py-3 text-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none";
+  "w-full rounded-lg border border-slate-300 px-4 py-3 text-lg focus:border-[#15396a] focus:ring-2 focus:ring-blue-200 focus:outline-none";
 
 const LABEL_CLASSES = "block text-base font-semibold text-slate-700 mb-1";
 
