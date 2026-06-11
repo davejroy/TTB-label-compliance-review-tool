@@ -1,9 +1,20 @@
+"""Pydantic models shared across the API: request/response bodies for
+``main.py``, the data structures produced by ``claude_client.py``, and the
+result types produced by ``compliance.py``.
+
+These models are also the source of truth for the frontend's TypeScript
+types in ``frontend/src/types.ts`` - keep the two in sync when changing
+fields here.
+"""
+
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 BeverageType = Literal["distilled_spirits", "wine", "beer"]
+# "pass" = matches/compliant, "warning" = needs human review, "fail" = non-compliant.
 Status = Literal["pass", "warning", "fail"]
+# Claude's self-reported confidence in a single field's transcription.
 Confidence = Literal["high", "medium", "low"]
 
 
@@ -53,6 +64,13 @@ class ExtractedLabelData(BaseModel):
 
 
 class FieldResult(BaseModel):
+    """Result of a single compliance/requirement check for one field.
+
+    ``application_value`` holds the COLA application's value for
+    ``run_compliance_checks`` results, or the relevant requirement/CFR
+    citation text for ``check_label_requirements`` results.
+    """
+
     field: str
     label_name: str
     status: Status
@@ -62,6 +80,9 @@ class FieldResult(BaseModel):
 
 
 class ReviewResult(BaseModel):
+    """Response body for ``/api/review`` and ``/api/review/batch``: an
+    application-vs-label comparison for one label."""
+
     filenames: list[str]
     overall_status: Status
     fields: list[FieldResult]

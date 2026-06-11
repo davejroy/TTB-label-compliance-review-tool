@@ -1,3 +1,18 @@
+"""FastAPI application: HTTP routes for the TTB Label Compliance Review Tool.
+
+Three endpoint families are exposed under ``/api``:
+
+- ``/api/review`` and ``/api/review/batch`` - compare label image(s) against
+  COLA application data (``run_compliance_checks``).
+- ``/api/label-check/batch`` - validate label image(s) against TTB mandatory
+  label requirements with no application data (``check_label_requirements``).
+- ``/api/health`` - basic liveness check.
+
+Per NFR-2 (docs/PDR.md), nothing is persisted: uploaded images are read into
+memory, sent to Claude for extraction, and discarded once the response is
+returned.
+"""
+
 import json
 import time
 
@@ -27,6 +42,14 @@ def health() -> dict:
 
 
 async def _review_single(files: list[UploadFile], application: ApplicationData) -> ReviewResult:
+    """Run an application-vs-label review for one label's image(s).
+
+    Validates the upload (image count and per-file size limits), extracts
+    fields via Claude, then runs ``run_compliance_checks``. Any failure
+    along the way is returned as a ``ReviewResult`` with ``error`` set
+    rather than raising, so a batch request can report per-item errors
+    without failing the whole batch.
+    """
     start = time.monotonic()
     filenames = [f.filename or "unknown" for f in files]
 
@@ -82,6 +105,8 @@ async def review_label(
     files: list[UploadFile] = File(...),
     application: str = Form(...),
 ) -> ReviewResult:
+    """Single-label review: 1-4 label images plus one JSON-encoded
+    ``ApplicationData`` form field (the "Single Review" mode)."""
     try:
         application_data = ApplicationData(**json.loads(application))
     except (json.JSONDecodeError, ValueError) as exc:
@@ -96,6 +121,11 @@ async def review_labels_batch(
     image_counts: str = Form(...),
     applications: str = Form(...),
 ) -> list[ReviewResult]:
+    """Batch review: all labels' images concatenated into ``files``, with
+    ``image_counts`` (a JSON array of per-label image counts) and
+    ``applications`` (a JSON array of per-label ``ApplicationData``)
+    indicating how to split them back into per-label groups (the "Batch
+    Review" mode)."""
     try:
         raw_applications = json.loads(applications)
         application_list = [ApplicationData(**item) for item in raw_applications]
@@ -126,6 +156,12 @@ async def review_labels_batch(
 
 
 async def _label_check_single(files: list[UploadFile]) -> LabelCheckResult:
+    """Run a label-only requirements check for one label's image(s).
+
+    Same upload validation/extraction flow as ``_review_single``, but runs
+    ``check_label_requirements`` against ``extracted.beverage_type_guess``
+    instead of comparing to application data.
+    """
     start = time.monotonic()
     filenames = [f.filename or "unknown" for f in files]
 
@@ -182,6 +218,9 @@ async def label_check_batch(
     files: list[UploadFile] = File(...),
     image_counts: str = Form(...),
 ) -> list[LabelCheckResult]:
+    """Label-Only Check (batch): all labels' images concatenated into
+    ``files``, with ``image_counts`` (a JSON array of per-label image
+    counts) indicating how to split them. No application data is required."""
     try:
         counts = json.loads(image_counts)
     except (json.JSONDecodeError, ValueError) as exc:

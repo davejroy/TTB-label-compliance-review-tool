@@ -1,5 +1,13 @@
+"""Claude vision integration: turns label image(s) into structured fields.
+
+This is the only module that talks to the Anthropic API. It builds a single
+request containing the uploaded image(s) plus a forced tool call
+(``record_label_fields``) whose JSON-schema (``EXTRACTION_TOOL``) mirrors
+``ExtractedLabelData``. Forcing the tool call guarantees a structured,
+parseable response in one round trip (see NFR-1 in docs/PDR.md).
+"""
+
 import base64
-import json
 import os
 
 from anthropic import Anthropic
@@ -8,6 +16,9 @@ from .models import ExtractedLabelData
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
+# JSON-schema tool definition passed to Claude. Keep this in sync with
+# ExtractedLabelData in models.py - the tool's "input" is parsed directly
+# into that model (see extract_label_fields below).
 EXTRACTION_TOOL = {
     "name": "record_label_fields",
     "description": "Record the fields read from an alcohol beverage label image.",
@@ -159,6 +170,11 @@ SYSTEM_PROMPT = (
 
 
 def _media_type_for(filename: str) -> str:
+    """Guess the image MIME type from a filename's extension.
+
+    Defaults to ``image/jpeg`` for unrecognized/missing extensions, since
+    that is the most common format for phone photos.
+    """
     ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
     return {
         "jpg": "image/jpeg",
@@ -170,7 +186,27 @@ def _media_type_for(filename: str) -> str:
 
 
 def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
-    """Extract label fields from one or more images of the same label."""
+    """Extract structured label fields from one or more images of a label.
+
+    Sends all images in a single message to Claude along with the
+    ``record_label_fields`` tool definition, and forces that tool to be
+    called (``tool_choice``) so the response is always structured. Up to
+    ``MAX_IMAGES_PER_LABEL`` (see main.py) images of the same physical label
+    (e.g. front/back panels) can be passed and are combined into one
+    ``ExtractedLabelData``.
+
+    Args:
+        images: list of ``(image_bytes, filename)`` tuples. The filename is
+            only used to guess the MIME type.
+
+    Returns:
+        The parsed ``ExtractedLabelData`` from the tool call.
+
+    Raises:
+        RuntimeError: if Claude's response does not include the expected
+            tool call (should not happen given ``tool_choice``, but guarded
+            against defensively).
+    """
     client = Anthropic()
 
     image_blocks = [

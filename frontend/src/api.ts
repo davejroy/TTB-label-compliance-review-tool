@@ -8,6 +8,7 @@ const API_BASE = import.meta.env.VITE_API_HOST
   ? `https://${import.meta.env.VITE_API_HOST}`
   : "";
 
+/** POST /api/review - Single Review mode: one label's image(s) + application data. */
 export async function reviewLabel(
   files: File[],
   application: ApplicationData
@@ -29,6 +30,12 @@ export async function reviewLabel(
   return response.json();
 }
 
+/**
+ * POST /api/review/batch - Batch Review mode: each item is one label's
+ * image(s) + application data. Files are flattened into a single form field
+ * with a parallel `image_counts` array so the backend can split them back
+ * into per-label groups.
+ */
 export async function reviewLabelsBatch(
   items: { files: File[]; application: ApplicationData }[]
 ): Promise<ReviewResult[]> {
@@ -53,6 +60,10 @@ export async function reviewLabelsBatch(
   return response.json();
 }
 
+/**
+ * POST /api/label-check/batch - Label-Only Check mode: each item is one
+ * label's image(s), with no application data required.
+ */
 export async function checkLabelsBatch(
   items: { files: File[] }[]
 ): Promise<LabelCheckResult[]> {
