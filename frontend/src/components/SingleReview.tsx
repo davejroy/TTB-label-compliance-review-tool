@@ -39,10 +39,17 @@ export default function SingleReview() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
       <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-        <h2 className="text-2xl font-bold text-slate-900 mb-4">Application Details</h2>
+        <h2 className="text-2xl font-bold text-slate-900">Step 1: Enter COLA Application Details</h2>
+        <p className="text-base text-slate-500 mb-4">
+          Type in the details exactly as they appear on the approved COLA application.
+        </p>
         <ApplicationForm value={application} onChange={setApplication} idPrefix="single" />
 
         <div className="mt-6">
+          <h2 className="text-2xl font-bold text-slate-900">Step 2: Upload Label Photo(s)</h2>
+          <p className="text-base text-slate-500 mb-4">
+            Take a photo or upload an image of the label (front and back, if needed).
+          </p>
           <ImageDropzone files={files} onChange={setFiles} idPrefix="single" />
         </div>
 
@@ -51,7 +58,7 @@ export default function SingleReview() {
           disabled={!canSubmit}
           className="mt-6 w-full rounded-lg bg-[#15396a] px-6 py-4 text-lg font-bold text-white hover:bg-[#0b1f3a] disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          {loading ? "Reviewing label..." : "Review Label"}
+          {loading ? "Reviewing label..." : "Step 3: Review Label"}
         </button>
 
         {error && <p className="mt-3 text-base text-red-700">{error}</p>}
