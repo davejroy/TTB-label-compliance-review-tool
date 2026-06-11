@@ -50,6 +50,8 @@ worded correctly.
   architecture, design decisions, and trade-offs.
 - [`docs/SBOM.md`](docs/SBOM.md) - Software Bill of Materials for the
   backend and frontend dependencies.
+- [`docs/HANDOFF.md`](docs/HANDOFF.md) - Handoff summary of current project
+  status, recent changes, and suggested next steps.
 
 ## Setup & running locally
 
