@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: ttb-label-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CLAUDE_MODEL
+        value: claude-sonnet-4-6
+
+  - type: web
+    name: ttb-label-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_HOST
+        fromService:
+          type: web
+          name: ttb-label-backend
+          property: host
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
