@@ -94,7 +94,12 @@ async function shutdown(exitCode = 0) {
   await terminateWorker();
 
   if (server) {
+    const forceExitTimer = setTimeout(() => {
+      process.exit(exitCode);
+    }, 5000);
+
     server.close(() => process.exit(exitCode));
+    server.on('close', () => clearTimeout(forceExitTimer));
     return;
   }
 
