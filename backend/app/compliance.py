@@ -32,6 +32,18 @@ def _normalize(text: str | None) -> str:
     return text.strip()
 
 
+def _normalize_net_contents(text: str | None) -> str:
+    """Normalize net contents, treating equivalent unit abbreviations the same
+    (e.g. '12 FL. OZ.' and '12 oz' both normalize to '12 oz')."""
+    norm = _normalize(text)
+    norm = re.sub(r"\bfl(uid)?\b", "", norm)
+    norm = re.sub(r"\bounces?\b", "oz", norm)
+    norm = re.sub(r"\bmilliliters?\b", "ml", norm)
+    norm = re.sub(r"\bliters?\b", "l", norm)
+    norm = re.sub(r"\s+", " ", norm)
+    return norm.strip()
+
+
 def _normalize_whitespace(text: str | None) -> str:
     if not text:
         return ""
@@ -56,9 +68,10 @@ def _check_text_field(
     label_name: str,
     application_value: str,
     label_value: str | None,
+    normalizer=_normalize,
 ) -> FieldResult:
-    norm_app = _normalize(application_value)
-    norm_label = _normalize(label_value)
+    norm_app = normalizer(application_value)
+    norm_label = normalizer(label_value)
 
     if not label_value:
         return FieldResult(
@@ -192,7 +205,7 @@ def _check_government_warning(extracted: ExtractedLabelData) -> FieldResult:
             f"(found '{header}')"
         )
 
-    if body != canonical_body:
+    if body.lower() != canonical_body.lower():
         similarity = _similarity(body.lower(), canonical_body.lower())
         if similarity >= 0.95:
             issues.append("warning text has minor wording differences from the required text")
@@ -231,7 +244,11 @@ def run_compliance_checks(
         ),
         _check_alcohol_content(application, extracted),
         _check_text_field(
-            "net_contents", "Net Contents", application.net_contents, extracted.net_contents
+            "net_contents",
+            "Net Contents",
+            application.net_contents,
+            extracted.net_contents,
+            normalizer=_normalize_net_contents,
         ),
         _check_government_warning(extracted),
     ]
