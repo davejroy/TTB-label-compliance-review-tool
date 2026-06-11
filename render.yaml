@@ -22,10 +22,7 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_HOST
-        fromService:
-          type: web
-          name: ttb-label-backend
-          property: host
+        value: ttb-label-backend.onrender.com
     routes:
       - type: rewrite
         source: /*
