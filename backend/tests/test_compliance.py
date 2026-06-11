@@ -1,6 +1,7 @@
 from app.compliance import (
     CANONICAL_WARNING_BODY,
     CANONICAL_WARNING_HEADER,
+    check_label_requirements,
     overall_status,
     run_compliance_checks,
 )
@@ -134,3 +135,70 @@ def test_government_warning_all_caps_body_passes():
     )
     warning_result = next(r for r in results if r.field == "government_warning")
     assert warning_result.status == "pass"
+
+
+def test_label_requirements_all_present_passes():
+    results = check_label_requirements(
+        make_extracted(name_and_address="Old Tom Distillery, Bardstown, KY"),
+        beverage_type="distilled_spirits",
+    )
+    assert all(r.status == "pass" for r in results if r.field != "country_of_origin")
+    # country of origin is conditional - missing is a warning, not a fail, and
+    # is the only thing keeping this from an overall "pass".
+    coo = next(r for r in results if r.field == "country_of_origin")
+    assert coo.status == "warning"
+    assert overall_status(results) == "warning"
+
+
+def test_label_requirements_missing_brand_name_fails():
+    results = check_label_requirements(
+        make_extracted(brand_name=""), beverage_type="distilled_spirits"
+    )
+    brand_result = next(r for r in results if r.field == "brand_name")
+    assert brand_result.status == "fail"
+
+
+def test_label_requirements_missing_abv_on_spirits_fails():
+    results = check_label_requirements(
+        make_extracted(alcohol_content=""), beverage_type="distilled_spirits"
+    )
+    abv_result = next(r for r in results if r.field == "alcohol_content")
+    assert abv_result.status == "fail"
+
+
+def test_label_requirements_missing_abv_on_beer_passes():
+    results = check_label_requirements(
+        make_extracted(alcohol_content=""), beverage_type="beer"
+    )
+    abv_result = next(r for r in results if r.field == "alcohol_content")
+    assert abv_result.status == "pass"
+
+
+def test_label_requirements_missing_abv_on_wine_is_warning():
+    results = check_label_requirements(
+        make_extracted(alcohol_content=""), beverage_type="wine"
+    )
+    abv_result = next(r for r in results if r.field == "alcohol_content")
+    assert abv_result.status == "warning"
+
+
+def test_label_requirements_missing_government_warning_fails():
+    results = check_label_requirements(
+        make_extracted(
+            government_warning_present=False,
+            government_warning_header="",
+            government_warning_body="",
+        ),
+        beverage_type="distilled_spirits",
+    )
+    warning_result = next(r for r in results if r.field == "government_warning")
+    assert warning_result.status == "fail"
+
+
+def test_label_requirements_country_of_origin_present_passes():
+    results = check_label_requirements(
+        make_extracted(country_of_origin="Product of Scotland"),
+        beverage_type="distilled_spirits",
+    )
+    coo = next(r for r in results if r.field == "country_of_origin")
+    assert coo.status == "pass"

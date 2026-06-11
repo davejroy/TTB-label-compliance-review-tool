@@ -16,6 +16,16 @@ worded correctly.
    is returned for each field with a plain-language explanation.
 4. A **Batch Review** mode lets an agent queue up multiple labels +
    application data and review them all in one submission.
+5. A **Label-Only Check** mode lets an agent upload just label image(s) - no
+   application data required - and validates the extracted fields directly
+   against TTB mandatory label requirements (27 CFR Parts 4, 5, 7, and 16):
+   brand name, class/type designation, alcohol content (with the correct
+   requirement/exemption logic per beverage type), net contents, the
+   bottler/producer/importer name and address, country of origin (for
+   imports), and the Government Warning statement. Each requirement gets a
+   Pass / Needs Review / Fail with the specific CFR citation and an
+   explanation. Useful for spot-checking a label's basic compliance
+   independent of any specific COLA application.
 
 ## Tech stack
 
@@ -181,3 +191,18 @@ size.
   fields.
 - CSV export of batch results.
 - Configurable tolerance rules per beverage class.
+- **Label-Only Check enhancements:** the beverage type used for the ABV
+  requirement check is currently Claude's best guess from the label text
+  (`beverage_type_guess`). For higher-stakes use, let the agent confirm/
+  override the detected beverage type before the requirements are evaluated.
+- **Standards of fill:** the Net Contents check currently only confirms a
+  quantity is stated; it does not validate against the actual list of
+  authorized standards of fill sizes per 27 CFR 4.37 / 5.38 / 7.25.
+- **Additional mandatory statements not yet checked:** sulfite declaration
+  ("Contains Sulfites") for wines with >=10ppm sulfur dioxide (27 CFR
+  4.32(e)), aspartame/saccharin declarations, FD&C Yellow No. 5, and allergen
+  labeling - these require ingredient-level information not visible on most
+  labels and would need additional application-level data.
+- **Age statement checks** for straight whiskies aged less than 4 years (27
+  CFR 5.40), and **commodity statement** requirements for certain imported
+  spirits.

@@ -1,8 +1,9 @@
 import { useState } from "react";
 import SingleReview from "./components/SingleReview";
 import BatchReview from "./components/BatchReview";
+import LabelOnlyCheck from "./components/LabelOnlyCheck";
 
-type Tab = "single" | "batch";
+type Tab = "single" | "batch" | "label-check";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("single");
@@ -36,11 +37,21 @@ export default function App() {
           >
             Batch Review
           </button>
+          <button
+            className={`rounded-md px-5 py-2.5 text-base font-semibold transition-colors ${
+              tab === "label-check" ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-100"
+            }`}
+            onClick={() => setTab("label-check")}
+          >
+            Label-Only Check
+          </button>
         </div>
       </nav>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
-        {tab === "single" ? <SingleReview /> : <BatchReview />}
+        {tab === "single" && <SingleReview />}
+        {tab === "batch" && <BatchReview />}
+        {tab === "label-check" && <LabelOnlyCheck />}
       </main>
 
       <footer className="max-w-6xl mx-auto px-4 py-8 text-sm text-slate-400">

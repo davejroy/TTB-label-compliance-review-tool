@@ -276,6 +276,219 @@ def run_compliance_checks(
     return results
 
 
+def _presence_check(
+    field: str,
+    label_name: str,
+    label_value: str | None,
+    requirement: str,
+    found_message: str | None = None,
+) -> FieldResult:
+    if label_value and label_value.strip():
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=requirement,
+            label_value=label_value,
+            message=found_message or f"{label_name} is present on the label.",
+        )
+
+    return FieldResult(
+        field=field,
+        label_name=label_name,
+        status="fail",
+        application_value=requirement,
+        label_value=label_value,
+        message=f"{label_name} was not found on the label. {requirement}",
+    )
+
+
+def _check_label_alcohol_content(
+    extracted: ExtractedLabelData, beverage_type: str | None
+) -> FieldResult:
+    field, label_name = "alcohol_content", "Alcohol Content"
+    requirement = (
+        "Alcohol content (ABV) statement is required on distilled spirits labels "
+        "(27 CFR 5.37) and on wine labels over 14% ABV (27 CFR 4.36). It is not "
+        "federally required on malt beverage labels (27 CFR 7.71), though some "
+        "states require it."
+    )
+    label_value = extracted.alcohol_content
+
+    if label_value:
+        if _extract_percent(label_value) is None:
+            return FieldResult(
+                field=field,
+                label_name=label_name,
+                status="warning",
+                application_value=requirement,
+                label_value=label_value,
+                message=(
+                    "Alcohol content text was found but does not appear to include "
+                    "a percentage. Verify the format (e.g. 'XX% Alc./Vol.')."
+                ),
+            )
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=requirement,
+            label_value=label_value,
+            message=f"Alcohol content ({label_value}) is stated on the label.",
+        )
+
+    if beverage_type == "distilled_spirits":
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="fail",
+            application_value=requirement,
+            label_value=label_value,
+            message="Alcohol content statement is required on distilled spirits labels (27 CFR 5.37) and was not found.",
+        )
+
+    if beverage_type == "wine":
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="warning",
+            application_value=requirement,
+            label_value=label_value,
+            message=(
+                "Alcohol content not found. Required for wines over 14% ABV "
+                "(27 CFR 4.36); wines at or below 14% ABV may omit it if labeled "
+                "'table wine' or 'light wine'. Verify which applies."
+            ),
+        )
+
+    if beverage_type == "beer":
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=requirement,
+            label_value=label_value,
+            message=(
+                "Alcohol content not stated. Federal law does not require an ABV "
+                "statement on malt beverage labels (27 CFR 7.71), though some "
+                "state laws do - verify state requirements."
+            ),
+        )
+
+    return FieldResult(
+        field=field,
+        label_name=label_name,
+        status="warning",
+        application_value=requirement,
+        label_value=label_value,
+        message=(
+            "Alcohol content not found and the beverage type could not be "
+            "determined. Verify whether an ABV statement is required for this "
+            "product."
+        ),
+    )
+
+
+def _check_label_net_contents(extracted: ExtractedLabelData) -> FieldResult:
+    field, label_name = "net_contents", "Net Contents"
+    requirement = (
+        "Net contents must be stated in conformance with standards of fill "
+        "(27 CFR 4.37 / 5.38 / 7.25)."
+    )
+    label_value = extracted.net_contents
+
+    if not label_value or not label_value.strip():
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="fail",
+            application_value=requirement,
+            label_value=label_value,
+            message=f"Net contents not found on label. {requirement}",
+        )
+
+    if not re.search(r"\d", label_value):
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="warning",
+            application_value=requirement,
+            label_value=label_value,
+            message="Net contents text was found but does not appear to include a quantity. Verify the format.",
+        )
+
+    return FieldResult(
+        field=field,
+        label_name=label_name,
+        status="pass",
+        application_value=requirement,
+        label_value=label_value,
+        message=f"Net contents ({label_value}) is stated on the label.",
+    )
+
+
+def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult:
+    field, label_name = "country_of_origin", "Country of Origin"
+    requirement = (
+        "A country-of-origin statement (e.g. 'Product of Scotland') is required "
+        "for imported products (27 CFR 27.59, 4.35(b), 5.36(d), 7.23(c))."
+    )
+    label_value = extracted.country_of_origin
+
+    if label_value and label_value.strip():
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=requirement,
+            label_value=label_value,
+            message=f"Country of origin statement found: '{label_value}'.",
+        )
+
+    return FieldResult(
+        field=field,
+        label_name=label_name,
+        status="warning",
+        application_value=requirement,
+        label_value=label_value,
+        message=(
+            "No country-of-origin statement found. This is only required if the "
+            "product is imported - verify whether this applies to this product."
+        ),
+    )
+
+
+def check_label_requirements(
+    extracted: ExtractedLabelData, beverage_type: str | None = None
+) -> list[FieldResult]:
+    """Validate a label against TTB mandatory label requirements, independent of
+    any COLA application data."""
+    return [
+        _presence_check(
+            "brand_name",
+            "Brand Name",
+            extracted.brand_name,
+            "A brand name is required on every label (27 CFR 4.32 / 5.32 / 7.22).",
+        ),
+        _presence_check(
+            "class_type",
+            "Class/Type Designation",
+            extracted.class_type,
+            "A class, type, or other required designation must be stated on the label (27 CFR 4.34 / 5.35 / 7.24).",
+        ),
+        _check_label_alcohol_content(extracted, beverage_type),
+        _check_label_net_contents(extracted),
+        _presence_check(
+            "name_and_address",
+            "Name and Address",
+            extracted.name_and_address,
+            "The name and address of the bottler, producer, packer, or importer is required (27 CFR 4.35 / 5.36 / 7.23).",
+        ),
+        _check_government_warning(extracted),
+        _check_label_country_of_origin(extracted),
+    ]
+
+
 def overall_status(results: list[FieldResult]) -> str:
     if any(r.status == "fail" for r in results):
         return "fail"

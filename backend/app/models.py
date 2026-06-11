@@ -32,6 +32,7 @@ class ExtractedLabelData(BaseModel):
     government_warning_header: Optional[str] = None
     government_warning_body: Optional[str] = None
     government_warning_present: bool = False
+    beverage_type_guess: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -48,6 +49,19 @@ class ReviewResult(BaseModel):
     filenames: list[str]
     overall_status: Status
     fields: list[FieldResult]
+    extracted: ExtractedLabelData
+    processing_time_ms: int
+    error: Optional[str] = None
+
+
+class LabelCheckResult(BaseModel):
+    """Result of validating a label against TTB mandatory label requirements,
+    independent of any COLA application data."""
+
+    filenames: list[str]
+    overall_status: Status
+    beverage_type: Optional[str] = None
+    checks: list[FieldResult]
     extracted: ExtractedLabelData
     processing_time_ms: int
     error: Optional[str] = None

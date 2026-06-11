@@ -1,4 +1,4 @@
-import type { ApplicationData, ReviewResult } from "./types";
+import type { ApplicationData, LabelCheckResult, ReviewResult } from "./types";
 
 // In production the frontend and backend are deployed as separate Render
 // services, so the backend's hostname is baked in at build time via
@@ -48,6 +48,26 @@ export async function reviewLabelsBatch(
   if (!response.ok) {
     const detail = await response.text();
     throw new Error(`Batch review failed (${response.status}): ${detail}`);
+  }
+
+  return response.json();
+}
+
+export async function checkLabelsBatch(
+  items: { files: File[] }[]
+): Promise<LabelCheckResult[]> {
+  const formData = new FormData();
+  items.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
+  formData.append("image_counts", JSON.stringify(items.map((item) => item.files.length)));
+
+  const response = await fetch(`${API_BASE}/api/label-check/batch`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Label check failed (${response.status}): ${detail}`);
   }
 
   return response.json();
