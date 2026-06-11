@@ -35,13 +35,6 @@ export default function ResultsPanel({ result, files }: { result: ReviewResult; 
             </p>
           </div>
           <StatusBadge status={result.overall_status} size="lg" />
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
-        <div>
-          <h3 className="text-xl font-bold text-slate-900">{result.filenames.join(", ")}</h3>
-          <p className="text-sm text-slate-500">
-            Processed in {(result.processing_time_ms / 1000).toFixed(1)}s
-          </p>
         </div>
 
         <div className="divide-y divide-slate-100">

@@ -199,9 +199,5 @@ async def label_check_batch(
         item_files = files[offset : offset + count]
         offset += count
         results.append(await _label_check_single(item_files))
-    for count, application_data in zip(counts, application_list):
-        item_files = files[offset : offset + count]
-        offset += count
-        results.append(await _review_single(item_files, application_data))
 
     return results
