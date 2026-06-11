@@ -3,6 +3,7 @@ const template = document.querySelector('#queue-item-template');
 const batchUpload = document.querySelector('#batch-upload');
 const addItemButton = document.querySelector('#add-item');
 const analyzeAllButton = document.querySelector('#analyze-all');
+const liveRegion = document.querySelector('#queue-live-region');
 
 let itemSequence = 0;
 
@@ -37,8 +38,19 @@ function setPreview(item, file) {
   }
 
   const details = document.createElement('p');
-  details.textContent = `Selected image: ${file.name}`;
+  details.textContent = `Selected image: ${sanitizeDisplayText(file.name)}`;
   preview.replaceChildren(details);
+}
+
+function sanitizeDisplayText(value) {
+  return value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim() || 'Unnamed file';
+}
+
+function announce(message) {
+  liveRegion.textContent = '';
+  window.setTimeout(() => {
+    liveRegion.textContent = message;
+  }, 0);
 }
 
 function createStatusBadge(status) {
@@ -246,10 +258,14 @@ addItemButton.addEventListener('click', () => createQueueItem());
 
 analyzeAllButton.addEventListener('click', async () => {
   const items = [...queue.querySelectorAll('.queue-item')];
+  const totalItems = items.length;
 
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
+    announce(`Analyzing label ${index + 1} of ${totalItems}.`);
     await analyzeItem(item);
   }
+
+  announce(`Finished analyzing ${totalItems} label${totalItems === 1 ? '' : 's'}.`);
 });
 
 createQueueItem();
