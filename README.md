@@ -158,6 +158,13 @@ the architecture simple for a prototype.
 notes - large text, big buttons, drag-and-drop image upload, color-coded
 Pass/Needs Review/Fail badges, and side-by-side "Application vs. Label"
 values for every field so an agent can see exactly what triggered a flag.
+The header uses TTB's official logo and ttb.gov's navy/gold color scheme.
+
+**Camera capture:** On phones and tablets (detected via the `(pointer:
+coarse)` media query), each image upload area also offers a "Take Photo"
+button that opens the device camera directly, in addition to the regular
+file picker. Desktop browsers show only "Choose File", since they don't
+support camera capture through this API.
 
 **Visual verification:** Each result panel includes a zoomable view of the
 uploaded label image(s). Hovering or clicking a field highlights an
