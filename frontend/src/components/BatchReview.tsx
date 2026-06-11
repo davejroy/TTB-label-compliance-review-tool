@@ -9,14 +9,14 @@ import StatusBadge from "./StatusBadge";
 interface BatchItem {
   id: string;
   application: ApplicationData;
-  file: File | null;
+  files: File[];
 }
 
 function newItem(): BatchItem {
   return {
     id: crypto.randomUUID(),
     application: { ...EMPTY_APPLICATION },
-    file: null,
+    files: [],
   };
 }
 
@@ -39,7 +39,7 @@ export default function BatchReview() {
     items.length > 0 &&
     items.every(
       (item) =>
-        item.file &&
+        item.files.length > 0 &&
         item.application.brand_name.trim() !== "" &&
         item.application.class_type.trim() !== "" &&
         item.application.alcohol_content.trim() !== "" &&
@@ -55,7 +55,7 @@ export default function BatchReview() {
     setExpanded(null);
     try {
       const res = await reviewLabelsBatch(
-        items.map((item) => ({ file: item.file as File, application: item.application }))
+        items.map((item) => ({ files: item.files, application: item.application }))
       );
       setResults(res);
     } catch (err) {
@@ -89,8 +89,8 @@ export default function BatchReview() {
                 idPrefix={`batch-${item.id}`}
               />
               <ImageDropzone
-                file={item.file}
-                onChange={(file) => updateItem(item.id, { file })}
+                files={item.files}
+                onChange={(files) => updateItem(item.id, { files })}
                 idPrefix={`batch-${item.id}`}
               />
             </div>
@@ -124,7 +124,7 @@ export default function BatchReview() {
             <table className="w-full text-left">
               <thead className="bg-slate-50 text-sm uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="p-4">File</th>
+                  <th className="p-4">Files</th>
                   <th className="p-4">Status</th>
                   <th className="p-4">Issues</th>
                   <th className="p-4"></th>
@@ -135,7 +135,9 @@ export default function BatchReview() {
                   const issues = result.fields.filter((f) => f.status !== "pass");
                   return (
                     <tr key={index}>
-                      <td className="p-4 font-medium text-slate-800">{result.filename}</td>
+                      <td className="p-4 font-medium text-slate-800">
+                        {result.filenames.join(", ")}
+                      </td>
                       <td className="p-4">
                         <StatusBadge status={result.overall_status} size="sm" />
                       </td>

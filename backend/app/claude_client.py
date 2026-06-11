@@ -72,12 +72,15 @@ EXTRACTION_TOOL = {
 
 SYSTEM_PROMPT = (
     "You are assisting a TTB (Alcohol and Tobacco Tax and Trade Bureau) compliance "
-    "agent in reading the text printed on an alcohol beverage label image. "
+    "agent in reading the text printed on an alcohol beverage label. You may be "
+    "given multiple images (e.g. front and back panels of the same bottle, or "
+    "multiple photos of the same panel) - treat them as views of a single label "
+    "and combine information from all of them into one set of fields. "
     "Transcribe the text exactly as it appears, including original capitalization, "
     "spacing, and punctuation - this is important because exact wording and "
     "capitalization matter for compliance (especially for the Government Warning "
     "statement). Do not correct, paraphrase, or 'clean up' the text. If a field is "
-    "not visible on the label, return an empty string for it. If the image is "
+    "not visible in any of the images, return an empty string for it. If an image is "
     "low quality, at an angle, or partially obscured, do your best and note the "
     "issue in the 'notes' field. Always respond by calling the record_label_fields tool."
 )
@@ -94,8 +97,30 @@ def _media_type_for(filename: str) -> str:
     }.get(ext, "image/jpeg")
 
 
-def extract_label_fields(image_bytes: bytes, filename: str) -> ExtractedLabelData:
+def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
+    """Extract label fields from one or more images of the same label."""
     client = Anthropic()
+
+    image_blocks = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": _media_type_for(filename),
+                "data": base64.b64encode(image_bytes).decode("utf-8"),
+            },
+        }
+        for image_bytes, filename in images
+    ]
+
+    if len(images) == 1:
+        prompt_text = "Read this alcohol beverage label and record its fields."
+    else:
+        prompt_text = (
+            f"These {len(images)} images show the same alcohol beverage label "
+            "(e.g. front and back panels). Read all of them together and record "
+            "one combined set of fields."
+        )
 
     response = client.messages.create(
         model=MODEL,
@@ -107,17 +132,10 @@ def extract_label_fields(image_bytes: bytes, filename: str) -> ExtractedLabelDat
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": _media_type_for(filename),
-                            "data": base64.b64encode(image_bytes).decode("utf-8"),
-                        },
-                    },
+                    *image_blocks,
                     {
                         "type": "text",
-                        "text": "Read this alcohol beverage label and record its fields.",
+                        "text": prompt_text,
                     },
                 ],
             }
