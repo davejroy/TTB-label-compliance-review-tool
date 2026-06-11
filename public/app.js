@@ -203,7 +203,7 @@ function createQueueItem(file) {
 
   item.dataset.itemId = String(++itemSequence);
   item.dataset.status = 'pending';
-  title.textContent = file ? file.name : `Label review ${itemSequence}`;
+  title.textContent = file ? sanitizeDisplayText(file.name) : `Label review ${itemSequence}`;
 
   if (file) {
     const transfer = new DataTransfer();
@@ -215,7 +215,7 @@ function createQueueItem(file) {
   fileInput.addEventListener('change', () => {
     const [selectedFile] = fileInput.files;
     if (selectedFile) {
-      title.textContent = selectedFile.name;
+      title.textContent = sanitizeDisplayText(selectedFile.name);
     }
 
     setPreview(item, selectedFile);
