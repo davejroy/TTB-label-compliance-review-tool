@@ -45,7 +45,7 @@ class FieldResult(BaseModel):
 
 
 class ReviewResult(BaseModel):
-    filename: str
+    filenames: list[str]
     overall_status: Status
     fields: list[FieldResult]
     extracted: ExtractedLabelData

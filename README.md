@@ -211,8 +211,9 @@ size.
   stored, per the "don't store anything sensitive for this exercise"
   guidance. A production version would need to address PII/document
   retention requirements.
-- **Single image per label.** Multi-page applications or multiple label
-  panels (front/back) aren't supported in this prototype.
+- **Up to 4 images per label** (e.g. front and back panels) can be uploaded
+  together and are sent to Claude in a single request, which combines
+  information across all images into one set of extracted fields.
 - **Network/API access:** this prototype calls the Anthropic API directly.
   Marcus's note about firewall restrictions on outbound ML API calls would
   need to be addressed for a production deployment (e.g. an approved
