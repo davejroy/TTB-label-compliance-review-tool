@@ -50,6 +50,17 @@ EXTRACTION_TOOL = {
                 "type": "boolean",
                 "description": "True if any form of a government health warning statement appears on the label.",
             },
+            "beverage_type_guess": {
+                "type": "string",
+                "enum": ["distilled_spirits", "wine", "beer", "unknown"],
+                "description": (
+                    "Best guess at the beverage category based on the class/type "
+                    "designation and overall label appearance: 'distilled_spirits' "
+                    "(whiskey, vodka, rum, gin, tequila, liqueurs, etc.), 'wine' "
+                    "(wine, cider, mead, etc.), 'beer' (beer, ale, lager, malt "
+                    "beverage), or 'unknown' if it cannot be determined."
+                ),
+            },
             "notes": {
                 "type": "string",
                 "description": "Any other observations relevant to compliance review (e.g. image is blurry/cut off, text partially obscured by glare, multiple labels visible).",
@@ -65,6 +76,7 @@ EXTRACTION_TOOL = {
             "government_warning_header",
             "government_warning_body",
             "government_warning_present",
+            "beverage_type_guess",
             "notes",
         ],
     },
