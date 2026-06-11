@@ -49,7 +49,7 @@ export default function SingleReview() {
         <button
           type="submit"
           disabled={!canSubmit}
-          className="mt-6 w-full rounded-lg bg-blue-600 px-6 py-4 text-lg font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="mt-6 w-full rounded-lg bg-[#15396a] px-6 py-4 text-lg font-bold text-white hover:bg-[#0b1f3a] disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           {loading ? "Reviewing label..." : "Review Label"}
         </button>

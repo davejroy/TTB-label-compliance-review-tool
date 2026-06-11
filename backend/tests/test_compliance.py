@@ -101,6 +101,59 @@ def test_alcohol_content_outside_tolerance_is_fail():
     assert abv_result.status == "fail"
 
 
+def test_distilled_spirits_alcohol_content_at_tolerance_boundary_is_warning():
+    # 27 CFR 5.65(c): +/-0.3 percentage points for distilled spirits.
+    results = run_compliance_checks(
+        make_application(alcohol_content="45% Alc./Vol."),
+        make_extracted(alcohol_content="45.3% Alc./Vol."),
+    )
+    abv_result = next(r for r in results if r.field == "alcohol_content")
+    assert abv_result.status == "warning"
+
+
+def test_distilled_spirits_alcohol_content_just_outside_tolerance_is_fail():
+    results = run_compliance_checks(
+        make_application(alcohol_content="45% Alc./Vol."),
+        make_extracted(alcohol_content="45.4% Alc./Vol."),
+    )
+    abv_result = next(r for r in results if r.field == "alcohol_content")
+    assert abv_result.status == "fail"
+
+
+def test_wine_alcohol_content_above_14pct_uses_1pt_tolerance():
+    # 27 CFR 4.36(b)(1): +/-1.0 percentage point for wines over 14% ABV.
+    results = run_compliance_checks(
+        make_application(beverage_type="wine", alcohol_content="15% Alc./Vol."),
+        make_extracted(alcohol_content="16% Alc./Vol."),
+    )
+    abv_result = next(r for r in results if r.field == "alcohol_content")
+    assert abv_result.status == "warning"
+
+    results = run_compliance_checks(
+        make_application(beverage_type="wine", alcohol_content="15% Alc./Vol."),
+        make_extracted(alcohol_content="16.1% Alc./Vol."),
+    )
+    abv_result = next(r for r in results if r.field == "alcohol_content")
+    assert abv_result.status == "fail"
+
+
+def test_wine_alcohol_content_at_or_below_14pct_uses_1_5pt_tolerance():
+    # 27 CFR 4.36(b)(1): +/-1.5 percentage points for wines at or below 14% ABV.
+    results = run_compliance_checks(
+        make_application(beverage_type="wine", alcohol_content="12.5% Alc./Vol."),
+        make_extracted(alcohol_content="14% Alc./Vol."),
+    )
+    abv_result = next(r for r in results if r.field == "alcohol_content")
+    assert abv_result.status == "warning"
+
+    results = run_compliance_checks(
+        make_application(beverage_type="wine", alcohol_content="12.4% Alc./Vol."),
+        make_extracted(alcohol_content="14% Alc./Vol."),
+    )
+    abv_result = next(r for r in results if r.field == "alcohol_content")
+    assert abv_result.status == "fail"
+
+
 def test_missing_alcohol_content_on_wine_is_warning():
     results = run_compliance_checks(
         make_application(beverage_type="wine", alcohol_content="13% Alc./Vol."),

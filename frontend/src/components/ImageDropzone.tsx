@@ -33,7 +33,7 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
       </label>
       <div
         className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-          dragActive ? "border-blue-500 bg-blue-50" : "border-slate-300 bg-slate-50"
+          dragActive ? "border-[#15396a] bg-blue-50" : "border-slate-300 bg-slate-50"
         }`}
         onDragOver={(e) => {
           e.preventDefault();
@@ -81,7 +81,7 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
             <p className="text-sm text-slate-500">or</p>
             <button
               type="button"
-              className="rounded-lg bg-blue-600 px-5 py-2.5 text-base font-semibold text-white hover:bg-blue-700"
+              className="rounded-lg bg-[#15396a] px-5 py-2.5 text-base font-semibold text-white hover:bg-[#0b1f3a]"
               onClick={() => inputRef.current?.click()}
             >
               Choose File

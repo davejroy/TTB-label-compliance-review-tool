@@ -142,11 +142,13 @@ single pass, keeping the architecture simple for a prototype.
   THROW vs. Stone's Throw" feedback - cosmetic differences shouldn't block
   a label, but anything more substantial gets a human look.
 - **Alcohol content:** the percentage is parsed from both values and
-  compared numerically against an approximate TTB tolerance (0.15% for
-  spirits, 1.0% for wine, 0.3% for beer - simplified from 27 CFR
-  4.36/5.37/7.71). Within tolerance -> Pass/Needs Review, outside -> Fail.
-  Missing ABV on wine/beer labels is "Needs Review" rather than "Fail"
-  since some wine/beer labels are legally exempt from stating ABV.
+  compared numerically against the TTB tolerance for the beverage type:
+  +/-0.3 percentage points for distilled spirits (27 CFR 5.65(c)), +/-0.3
+  points for beer (27 CFR 7.65(c)), and for wine +/-1.0 point if the labeled
+  ABV is over 14% or +/-1.5 points if 14% or below (27 CFR 4.36(b)(1)).
+  Within tolerance -> Pass/Needs Review, outside -> Fail. Missing ABV on
+  wine/beer labels is "Needs Review" rather than "Fail" since some wine/beer
+  labels are legally exempt from stating ABV.
 - **Government Warning:** must be present, the header must read exactly
   `GOVERNMENT WARNING:` (capital letters, per 27 CFR 16.21), and the body
   text must match the statutory wording (case-insensitively). Any other
@@ -196,9 +198,10 @@ image size.
 - **Government Warning text is hardcoded** to the standard statutory
   wording (27 CFR 16.21). Real labels for very small containers have
   alternate wording rules that aren't handled here.
-- **ABV tolerances are simplified** approximations of the real TTB
-  regulations, which vary further by product class and are intended to
-  illustrate the concept rather than be legally authoritative.
+- **ABV tolerances** follow 27 CFR 4.36(b)(1) (wine), 5.65(c) (distilled
+  spirits), and 7.65(c) (malt beverages), but real-world products can have
+  additional class/type-specific rules and are intended to illustrate the
+  concept rather than be a substitute for legal review.
 - **Net contents matching is exact-after-normalization** (e.g. "750mL" ==
   "750 mL"); it does not convert between units (mL vs. fl oz).
 - **No persistence/database.** Each review is stateless and nothing is
@@ -224,11 +227,11 @@ image size.
   detected beverage type (`beverage_type_guess`) before requirements are
   evaluated.
 - **Standards of fill:** validate net contents against the authorized
-  standards-of-fill sizes per 27 CFR 4.37 / 5.38 / 7.25.
+  standards-of-fill sizes per 27 CFR 4.72 / 5.203 / 7.70.
 - **Additional mandatory statements:** sulfite declaration ("Contains
   Sulfites") for wines with >=10ppm sulfur dioxide (27 CFR 4.32(e)),
   aspartame/saccharin declarations, FD&C Yellow No. 5, and allergen
   labeling.
 - **Age statement checks** for straight whiskies aged less than 4 years (27
-  CFR 5.40), and **commodity statement** requirements for certain imported
+  CFR 5.74), and **commodity statement** requirements for certain imported
   spirits.
