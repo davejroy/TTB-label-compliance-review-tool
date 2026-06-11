@@ -255,3 +255,30 @@ def test_label_requirements_country_of_origin_present_passes():
     )
     coo = next(r for r in results if r.field == "country_of_origin")
     assert coo.status == "pass"
+
+
+def test_label_requirements_missing_country_of_origin_on_domestic_label_passes():
+    results = check_label_requirements(
+        make_extracted(country_of_origin="", origin_guess="domestic"),
+        beverage_type="distilled_spirits",
+    )
+    coo = next(r for r in results if r.field == "country_of_origin")
+    assert coo.status == "pass"
+
+
+def test_label_requirements_missing_country_of_origin_on_imported_label_fails():
+    results = check_label_requirements(
+        make_extracted(country_of_origin="", origin_guess="imported"),
+        beverage_type="distilled_spirits",
+    )
+    coo = next(r for r in results if r.field == "country_of_origin")
+    assert coo.status == "fail"
+
+
+def test_label_requirements_missing_country_of_origin_with_unknown_origin_is_warning():
+    results = check_label_requirements(
+        make_extracted(country_of_origin="", origin_guess="unknown"),
+        beverage_type="distilled_spirits",
+    )
+    coo = next(r for r in results if r.field == "country_of_origin")
+    assert coo.status == "warning"

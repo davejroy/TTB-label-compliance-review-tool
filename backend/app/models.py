@@ -59,6 +59,7 @@ class ExtractedLabelData(BaseModel):
     government_warning_body: Optional[str] = None
     government_warning_present: bool = False
     beverage_type_guess: Optional[str] = None
+    origin_guess: Optional[Literal["domestic", "imported", "unknown"]] = None
     field_locations: list[FieldLocation] = Field(default_factory=list)
     notes: Optional[str] = None
 

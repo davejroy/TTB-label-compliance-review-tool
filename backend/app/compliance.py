@@ -561,9 +561,16 @@ def _check_label_net_contents(extracted: ExtractedLabelData) -> FieldResult:
 def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult:
     """Check for a country-of-origin statement, required only for imports.
 
-    Since the label-only check has no application data to confirm whether
-    the product is imported, a missing statement is reported as a
-    ``warning`` (not a ``fail``) so the agent can verify whether it applies.
+    A country-of-origin statement is only mandatory for imported products,
+    so a missing statement is judged using ``extracted.origin_guess``
+    (Claude's best guess, from cues like a "Product of <country>" or
+    "Imported by" statement) rather than always being flagged:
+
+    - Statement present -> ``pass``.
+    - Missing and the label appears domestic -> ``pass`` (not required).
+    - Missing and the label appears imported -> ``fail`` (required, missing).
+    - Missing and origin can't be determined -> ``warning`` so the agent can
+      verify whether the product is imported.
     """
     field, label_name = "country_of_origin", "Country of Origin"
     requirement = (
@@ -582,6 +589,32 @@ def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult
             message=f"Country of origin statement found: '{label_value}'.",
         )
 
+    if extracted.origin_guess == "domestic":
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=requirement,
+            label_value=label_value,
+            message=(
+                "No country-of-origin statement found, but this label appears to "
+                "be a domestic (US) product, for which one is not required."
+            ),
+        )
+
+    if extracted.origin_guess == "imported":
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="fail",
+            application_value=requirement,
+            label_value=label_value,
+            message=(
+                "This label appears to be an imported product, but no "
+                "country-of-origin statement was found. " + requirement
+            ),
+        )
+
     return FieldResult(
         field=field,
         label_name=label_name,
@@ -589,8 +622,10 @@ def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult
         application_value=requirement,
         label_value=label_value,
         message=(
-            "No country-of-origin statement found. This is only required if the "
-            "product is imported - verify whether this applies to this product."
+            "No country-of-origin statement found, and it could not be "
+            "determined whether this product is domestic or imported. This is "
+            "only required if the product is imported - verify whether this "
+            "applies to this product."
         ),
     )
 

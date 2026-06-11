@@ -34,6 +34,7 @@ export interface ExtractedLabelData {
   government_warning_body?: string;
   government_warning_present: boolean;
   beverage_type_guess?: string;
+  origin_guess?: "domestic" | "imported" | "unknown";
   field_locations: FieldLocation[];
   notes?: string;
 }

@@ -31,6 +31,12 @@ export default function LabelCheckResultsPanel({
     ? BEVERAGE_TYPE_LABELS[result.beverage_type] ?? result.beverage_type
     : "Unknown";
 
+  const originLabel = {
+    domestic: "Domestic (US)",
+    imported: "Imported",
+    unknown: "Origin unknown",
+  }[result.extracted.origin_guess ?? "unknown"];
+
   return (
     <div className="space-y-6">
       {files.length > 0 && (
@@ -46,7 +52,7 @@ export default function LabelCheckResultsPanel({
           <div>
             <h3 className="text-xl font-bold text-slate-900">{result.filenames.join(", ")}</h3>
             <p className="text-sm text-slate-500">
-              Detected as {beverageLabel} &middot; Processed in{" "}
+              Detected as {beverageLabel} &middot; {originLabel} &middot; Processed in{" "}
               {(result.processing_time_ms / 1000).toFixed(1)}s
             </p>
           </div>
