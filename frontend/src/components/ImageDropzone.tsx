@@ -7,13 +7,21 @@ interface Props {
   idPrefix: string;
 }
 
-/** True on touch-primary devices (phones/tablets), where a "Take Photo"
- * button can open the camera. Desktop browsers generally lack a
- * coarse/touch primary pointer and don't support camera capture via
- * `<input capture>`, so the button is hidden there. */
-function isTouchDevice(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+/**
+ * True on phones/tablets, where a "Take Photo" button can open the
+ * camera via `<input capture>`. Desktop browsers - including
+ * touchscreen laptops, where `navigator.maxTouchPoints > 0` and
+ * `(pointer: coarse)` can both be true - don't support camera capture
+ * through this API and would just show a redundant file picker, so
+ * detection is based on the user agent's platform identification rather
+ * than touch/pointer capabilities.
+ */
+function isMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const uaData = (navigator as Navigator & { userAgentData?: { mobile?: boolean } })
+    .userAgentData;
+  if (uaData?.mobile !== undefined) return uaData.mobile;
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
 /**
@@ -25,7 +33,7 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [canUseCamera] = useState(isTouchDevice);
+  const [canUseCamera] = useState(isMobileDevice);
 
   function addFiles(newFiles: FileList | null) {
     if (!newFiles || newFiles.length === 0) return;
