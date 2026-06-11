@@ -9,11 +9,11 @@ const API_BASE = import.meta.env.VITE_API_HOST
   : "";
 
 export async function reviewLabel(
-  file: File,
+  files: File[],
   application: ApplicationData
 ): Promise<ReviewResult> {
   const formData = new FormData();
-  formData.append("file", file);
+  files.forEach((file) => formData.append("files", file));
   formData.append("application", JSON.stringify(application));
 
   const response = await fetch(`${API_BASE}/api/review`, {
@@ -30,10 +30,11 @@ export async function reviewLabel(
 }
 
 export async function reviewLabelsBatch(
-  items: { file: File; application: ApplicationData }[]
+  items: { files: File[]; application: ApplicationData }[]
 ): Promise<ReviewResult[]> {
   const formData = new FormData();
-  items.forEach((item) => formData.append("files", item.file));
+  items.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
+  formData.append("image_counts", JSON.stringify(items.map((item) => item.files.length)));
   formData.append(
     "applications",
     JSON.stringify(items.map((item) => item.application))

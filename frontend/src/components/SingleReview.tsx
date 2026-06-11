@@ -7,13 +7,13 @@ import ResultsPanel from "./ResultsPanel";
 
 export default function SingleReview() {
   const [application, setApplication] = useState<ApplicationData>(EMPTY_APPLICATION);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [result, setResult] = useState<ReviewResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const canSubmit =
-    !!file &&
+    files.length > 0 &&
     application.brand_name.trim() !== "" &&
     application.class_type.trim() !== "" &&
     application.alcohol_content.trim() !== "" &&
@@ -22,12 +22,12 @@ export default function SingleReview() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!file) return;
+    if (files.length === 0) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const res = await reviewLabel(file, application);
+      const res = await reviewLabel(files, application);
       setResult(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -43,7 +43,7 @@ export default function SingleReview() {
         <ApplicationForm value={application} onChange={setApplication} idPrefix="single" />
 
         <div className="mt-6">
-          <ImageDropzone file={file} onChange={setFile} idPrefix="single" />
+          <ImageDropzone files={files} onChange={setFiles} idPrefix="single" />
         </div>
 
         <button
