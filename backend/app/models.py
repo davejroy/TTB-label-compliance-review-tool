@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 BeverageType = Literal["distilled_spirits", "wine", "beer"]
 Status = Literal["pass", "warning", "fail"]
+Confidence = Literal["high", "medium", "low"]
 
 
 class ApplicationData(BaseModel):
@@ -20,6 +21,20 @@ class ApplicationData(BaseModel):
     country_of_origin: Optional[str] = None
 
 
+class FieldLocation(BaseModel):
+    """Approximate location of an extracted field within one of the uploaded
+    images, plus Claude's confidence in that reading. Coordinates are
+    fractions (0-1) of the image's width/height, with (0, 0) at the top-left."""
+
+    field: str
+    image_index: int = 0
+    confidence: Confidence = "medium"
+    x: float
+    y: float
+    width: float
+    height: float
+
+
 class ExtractedLabelData(BaseModel):
     """Fields extracted from the label image by Claude's vision model."""
 
@@ -32,6 +47,8 @@ class ExtractedLabelData(BaseModel):
     government_warning_header: Optional[str] = None
     government_warning_body: Optional[str] = None
     government_warning_present: bool = False
+    beverage_type_guess: Optional[str] = None
+    field_locations: list[FieldLocation] = Field(default_factory=list)
     notes: Optional[str] = None
 
 
@@ -48,6 +65,19 @@ class ReviewResult(BaseModel):
     filenames: list[str]
     overall_status: Status
     fields: list[FieldResult]
+    extracted: ExtractedLabelData
+    processing_time_ms: int
+    error: Optional[str] = None
+
+
+class LabelCheckResult(BaseModel):
+    """Result of validating a label against TTB mandatory label requirements,
+    independent of any COLA application data."""
+
+    filenames: list[str]
+    overall_status: Status
+    beverage_type: Optional[str] = None
+    checks: list[FieldResult]
     extracted: ExtractedLabelData
     processing_time_ms: int
     error: Optional[str] = None

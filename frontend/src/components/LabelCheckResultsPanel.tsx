@@ -1,10 +1,16 @@
 import { useState } from "react";
-import type { ReviewResult } from "../types";
+import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
 import ConfidenceBadge from "./ConfidenceBadge";
 import LabelImageViewer from "./LabelImageViewer";
 import StatusBadge from "./StatusBadge";
 
-export default function ResultsPanel({ result, files }: { result: ReviewResult; files: File[] }) {
+export default function LabelCheckResultsPanel({
+  result,
+  files,
+}: {
+  result: LabelCheckResult;
+  files: File[];
+}) {
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
 
   if (result.error) {
@@ -15,6 +21,10 @@ export default function ResultsPanel({ result, files }: { result: ReviewResult; 
       </div>
     );
   }
+
+  const beverageLabel = result.beverage_type
+    ? BEVERAGE_TYPE_LABELS[result.beverage_type] ?? result.beverage_type
+    : "Unknown";
 
   return (
     <div className="space-y-6">
@@ -31,60 +41,54 @@ export default function ResultsPanel({ result, files }: { result: ReviewResult; 
           <div>
             <h3 className="text-xl font-bold text-slate-900">{result.filenames.join(", ")}</h3>
             <p className="text-sm text-slate-500">
-              Processed in {(result.processing_time_ms / 1000).toFixed(1)}s
+              Detected as {beverageLabel} &middot; Processed in{" "}
+              {(result.processing_time_ms / 1000).toFixed(1)}s
             </p>
           </div>
           <StatusBadge status={result.overall_status} size="lg" />
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
-        <div>
-          <h3 className="text-xl font-bold text-slate-900">{result.filenames.join(", ")}</h3>
-          <p className="text-sm text-slate-500">
-            Processed in {(result.processing_time_ms / 1000).toFixed(1)}s
-          </p>
         </div>
 
         <div className="divide-y divide-slate-100">
-          {result.fields.map((field) => {
+          {result.checks.map((check) => {
             const location = result.extracted.field_locations.find(
-              (loc) => loc.field === field.field
+              (loc) => loc.field === check.field
             );
             return (
               <div
-                key={field.field}
+                key={check.field}
                 className={`p-5 transition-colors ${
-                  highlightedField === field.field ? "bg-blue-50" : ""
+                  highlightedField === check.field ? "bg-blue-50" : ""
                 } ${files.length > 0 ? "cursor-pointer" : ""}`}
-                onMouseEnter={() => files.length > 0 && setHighlightedField(field.field)}
+                onMouseEnter={() => files.length > 0 && setHighlightedField(check.field)}
                 onMouseLeave={() => setHighlightedField(null)}
                 onClick={() =>
                   files.length > 0 &&
-                  setHighlightedField((current) => (current === field.field ? null : field.field))
+                  setHighlightedField((current) => (current === check.field ? null : check.field))
                 }
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                  <h4 className="text-lg font-semibold text-slate-800">{field.label_name}</h4>
+                  <h4 className="text-lg font-semibold text-slate-800">{check.label_name}</h4>
                   <div className="flex items-center gap-2">
                     {location && <ConfidenceBadge confidence={location.confidence} />}
-                    <StatusBadge status={field.status} size="sm" />
+                    <StatusBadge status={check.status} size="sm" />
                   </div>
                 </div>
-                <p className="text-base text-slate-600 mb-3">{field.message}</p>
+                <p className="text-base text-slate-600 mb-3">{check.message}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="rounded-lg bg-slate-50 p-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
-                      Application
+                      TTB Requirement
                     </p>
-                    <p className="text-sm font-mono text-slate-800 whitespace-pre-wrap break-words">
-                      {field.application_value || <span className="text-slate-400">(none)</span>}
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap break-words">
+                      {check.application_value}
                     </p>
                   </div>
                   <div className="rounded-lg bg-slate-50 p-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
-                      Label
+                      Found on Label
                     </p>
                     <p className="text-sm font-mono text-slate-800 whitespace-pre-wrap break-words">
-                      {field.label_value || <span className="text-slate-400">(not found)</span>}
+                      {check.label_value || <span className="text-slate-400">(not found)</span>}
                     </p>
                   </div>
                 </div>
