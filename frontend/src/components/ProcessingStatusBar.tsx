@@ -61,8 +61,7 @@ export default function ProcessingStatusBar({ step, done }: Props) {
         {STAGES.map((stage, i) => {
           const isComplete = done ? true : i < step;
           const isActive   = !done && i === step;
-          const isFuture   = !done && i > step;
-
+          
           return (
             <div key={stage.label} className="flex items-center" style={{ flex: i < totalStages - 1 ? "1" : "0" }}>
               {/* Circle + label */}
