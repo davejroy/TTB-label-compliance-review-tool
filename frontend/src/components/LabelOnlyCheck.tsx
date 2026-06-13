@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { checkLabelsBatch } from "../api";
 import { downloadCsv } from "../csv";
 import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
@@ -15,12 +15,28 @@ function newItem(): Item {
   return { id: crypto.randomUUID(), files: [] };
 }
 
+const LOADING_STEPS = [
+  "Uploading images…",
+  "Reading label text…",
+  "Checking compliance…",
+  "Almost done…",
+];
+
 export default function LabelOnlyCheck() {
   const [items, setItems] = useState<Item[]>([newItem()]);
   const [results, setResults] = useState<LabelCheckResult[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [loadingStep, setLoadingStep] = useState(0);
+
+  useEffect(() => {
+    if (!loading) { setLoadingStep(0); return; }
+    const interval = setInterval(() => {
+      setLoadingStep((s) => (s + 1 < LOADING_STEPS.length ? s + 1 : s));
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [loading]);
 
   function updateItem(id: string, files: File[]) {
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, files } : item)));
@@ -137,13 +153,28 @@ export default function LabelOnlyCheck() {
             className="rounded-lg bg-[#15396a] px-6 py-3 text-lg font-bold text-white hover:bg-[#0b1f3a] disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             {loading
-              ? `Checking ${items.length} label${items.length === 1 ? "" : "s"}...`
+              ? LOADING_STEPS[loadingStep]
               : `Check ${items.length} Label${items.length === 1 ? "" : "s"}`}
           </button>
         </div>
 
         {error && <p className="text-base text-red-700">{error}</p>}
       </form>
+
+      {loading && (
+        <div className="mt-8 rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+          <div className="flex flex-col items-center gap-4 text-slate-500">
+            <svg className="animate-spin h-8 w-8 text-[#15396a]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+            </svg>
+            <p className="text-base font-medium">{LOADING_STEPS[loadingStep]}</p>
+            <p className="text-sm text-slate-400">
+              Checking {items.length} label{items.length === 1 ? "" : "s"} — typically completes in 3–7 seconds each
+            </p>
+          </div>
+        </div>
+      )}
 
       {results && (
         <div className="mt-10">
@@ -185,18 +216,22 @@ export default function LabelOnlyCheck() {
                         <StatusBadge status={result.overall_status} size="sm" />
                       </td>
                       <td className="p-4 text-sm text-slate-600">
-                        {issues.length === 0
-                          ? "No issues found"
-                          : issues.map((c) => c.label_name).join(", ")}
+                        {result.error
+                          ? <span className="text-red-600">{result.error}</span>
+                          : issues.length === 0
+                            ? "No issues found"
+                            : issues.map((c) => c.label_name).join(", ")}
                       </td>
                       <td className="p-4">
-                        <button
-                          type="button"
-                          className="text-sm font-semibold text-blue-700 underline"
-                          onClick={() => setExpanded(expanded === index ? null : index)}
-                        >
-                          {expanded === index ? "Hide details" : "View details"}
-                        </button>
+                        {!result.error && (
+                          <button
+                            type="button"
+                            className="text-sm font-semibold text-blue-700 underline"
+                            onClick={() => setExpanded(expanded === index ? null : index)}
+                          >
+                            {expanded === index ? "Hide details" : "View details"}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
