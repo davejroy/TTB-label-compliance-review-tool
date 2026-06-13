@@ -247,9 +247,9 @@ def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, st
         if img.mode not in ("RGB", "L"):
                     img = img.convert("RGB")
 
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90)
-    return buf.getvalue(), "image/jpeg"
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        return buf.getvalue(), "image/jpeg"
 
 
 def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
