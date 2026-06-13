@@ -284,6 +284,7 @@ async def _label_check_single(files: list[UploadFile]) -> LabelCheckResult:
         filenames=filenames,
         overall_status=overall_status(checks),
         beverage_type=extracted.beverage_type_guess,
+        checks=checks,
         extracted=extracted,
         processing_time_ms=int((time.monotonic() - start) * 1000),
     )
