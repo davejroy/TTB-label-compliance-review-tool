@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { reviewLabel } from "../api";
 import { EMPTY_APPLICATION, type ApplicationData, type ReviewResult } from "../types";
 import ApplicationForm from "./ApplicationForm";
