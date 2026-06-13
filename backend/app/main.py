@@ -64,17 +64,85 @@ def health() -> dict:
 async def _read_and_validate_file(
     file: UploadFile,
 ) -> tuple[bytes, str] | str:
-    """Read one uploaded file and return (bytes, filename) or an error string."""
+    """Read one uploaded file and return (bytes, filename) or an error string.
+
+    Validates file size, then offloads CPU-bound downscaling (which also
+    performs Pillow image validation) to a thread pool. Any corrupt or
+    unreadable image will return a descriptive error string rather than
+    raising, so the caller can surface a per-file error message.
+    """
     image_bytes = await file.read()
     if len(image_bytes) > MAX_FILE_SIZE:
         return f"File '{file.filename}' exceeds 10 MB limit."
-    # Offload CPU-bound downscaling to a thread pool so the event loop stays free.
-    resized_bytes, _media_type = await run_in_threadpool(
-        _downscale_if_needed,
-        image_bytes,
-        _media_type_for(file.filename or "label.jpg"),
-    )
+    try:
+        # _downscale_if_needed now validates the image via Pillow before
+        # downscaling, so corrupt or non-image files are caught here.
+        resized_bytes, _media_type = await run_in_threadpool(
+            _downscale_if_needed,
+            image_bytes,
+            _media_type_for(file.filename or "label.jpg"),
+        )
+    except ValueError as exc:
+        return f"File '{file.filename}' could not be read as an image: {exc}"
     return resized_bytes, file.filename or "label.jpg"
+
+
+async def _read_images(
+    files: list[UploadFile],
+    filenames: list[str],
+) -> list[tuple[bytes, str]] | str:
+    """Read and validate all uploaded files concurrently.
+
+    Returns a list of (bytes, filename) tuples on success, or an error
+    string describing the first file that failed validation.
+    """
+    read_results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
+    images: list[tuple[bytes, str]] = []
+    for result in read_results:
+        if isinstance(result, str):
+            return result
+        images.append(result)
+    return images
+
+
+async def _extract_fields(
+    files: list[UploadFile],
+    filenames: list[str],
+) -> tuple[ExtractedLabelData | None, str | None]:
+    """Shared image-read + Claude-extraction pipeline used by both review
+    endpoints and the label-check endpoint.
+
+    Returns ``(extracted, None)`` on success or ``(None, error_msg)`` on
+    any validation or API failure. All errors are caught and returned as
+    descriptive strings rather than raised so that batch callers can report
+    per-item errors without aborting the whole batch.
+    """
+    if not (1 <= len(files) <= MAX_IMAGES_PER_LABEL):
+        return None, f"Upload between 1 and {MAX_IMAGES_PER_LABEL} images per label."
+
+    images_or_error = await _read_images(files, filenames)
+    if isinstance(images_or_error, str):
+        return None, images_or_error
+
+    images: list[tuple[bytes, str]] = images_or_error
+
+    try:
+        extracted = extract_label_fields(images)
+        return extracted, None
+    except AuthenticationError:
+        return None, "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
+    except RateLimitError:
+        return None, "Anthropic rate limit reached. Please try again shortly."
+    except APITimeoutError:
+        return None, "The request to Claude timed out. Please try again."
+    except APIConnectionError as exc:
+        return None, f"Network error contacting Claude API: {exc}"
+    except APIStatusError as exc:
+        return None, f"Claude API error ({exc.status_code}): {exc.message}"
+    except RuntimeError as exc:
+        return None, f"Could not read label image(s): {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return None, f"Unexpected error during label extraction: {exc}"
 
 
 async def _review_single(files: list[UploadFile], application: ApplicationData) -> ReviewResult:
@@ -89,50 +157,7 @@ async def _review_single(files: list[UploadFile], application: ApplicationData) 
     start = time.monotonic()
     filenames = [f.filename or "unknown" for f in files]
 
-    if not (1 <= len(files) <= MAX_IMAGES_PER_LABEL):
-        return ReviewResult(
-            filenames=filenames,
-            overall_status="fail",
-            fields=[],
-            extracted=ExtractedLabelData(),
-            processing_time_ms=0,
-            error=f"Upload between 1 and {MAX_IMAGES_PER_LABEL} images per label.",
-        )
-
-    # Read and validate all files concurrently.
-    read_results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
-
-    images: list[tuple[bytes, str]] = []
-    for result in read_results:
-        if isinstance(result, str):
-            # Error message from _read_and_validate_file
-            return ReviewResult(
-                filenames=filenames,
-                overall_status="fail",
-                fields=[],
-                extracted=ExtractedLabelData(),
-                processing_time_ms=0,
-                error=result,
-            )
-        images.append(result)
-
-    error_msg: str | None = None
-    try:
-        extracted = extract_label_fields(images)
-    except AuthenticationError:
-        error_msg = "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
-    except RateLimitError:
-        error_msg = "Anthropic rate limit reached. Please try again shortly."
-    except APITimeoutError:
-        error_msg = "The request to Claude timed out. Please try again."
-    except APIConnectionError as exc:
-        error_msg = f"Network error contacting Claude API: {exc}"
-    except APIStatusError as exc:
-        error_msg = f"Claude API error ({exc.status_code}): {exc.message}"
-    except RuntimeError as exc:
-        error_msg = f"Could not read label image(s): {exc}"
-    except Exception as exc:  # noqa: BLE001
-        error_msg = f"Unexpected error during label extraction: {exc}"
+    extracted, error_msg = await _extract_fields(files, filenames)
 
     if error_msg:
         return ReviewResult(
@@ -225,48 +250,7 @@ async def _label_check_single(files: list[UploadFile]) -> LabelCheckResult:
     start = time.monotonic()
     filenames = [f.filename or "unknown" for f in files]
 
-    if not (1 <= len(files) <= MAX_IMAGES_PER_LABEL):
-        return LabelCheckResult(
-            filenames=filenames,
-            overall_status="fail",
-            checks=[],
-            extracted=ExtractedLabelData(),
-            processing_time_ms=0,
-            error=f"Upload between 1 and {MAX_IMAGES_PER_LABEL} images per label.",
-        )
-
-    read_results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
-
-    images: list[tuple[bytes, str]] = []
-    for result in read_results:
-        if isinstance(result, str):
-            return LabelCheckResult(
-                filenames=filenames,
-                overall_status="fail",
-                checks=[],
-                extracted=ExtractedLabelData(),
-                processing_time_ms=0,
-                error=result,
-            )
-        images.append(result)
-
-    error_msg: str | None = None
-    try:
-        extracted = extract_label_fields(images)
-    except AuthenticationError:
-        error_msg = "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
-    except RateLimitError:
-        error_msg = "Anthropic rate limit reached. Please try again shortly."
-    except APITimeoutError:
-        error_msg = "The request to Claude timed out. Please try again."
-    except APIConnectionError as exc:
-        error_msg = f"Network error contacting Claude API: {exc}"
-    except APIStatusError as exc:
-        error_msg = f"Claude API error ({exc.status_code}): {exc.message}"
-    except RuntimeError as exc:
-        error_msg = f"Could not read label image(s): {exc}"
-    except Exception as exc:  # noqa: BLE001
-        error_msg = f"Unexpected error during label extraction: {exc}"
+    extracted, error_msg = await _extract_fields(files, filenames)
 
     if error_msg:
         return LabelCheckResult(
