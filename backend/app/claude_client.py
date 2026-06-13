@@ -136,19 +136,21 @@ EXTRACTION_TOOL = {
                             "type": "integer",
                             "description": "0-based index of the image this field was read from.",
                         },
-                        "bounding_box": {
-                            "type": "object",
-                            "description": (
-                                "Approximate location of the field on the image as fractions "
-                                "of the image's width/height (0.0 = top/left, 1.0 = bottom/right)."
-                            ),
-                            "properties": {
-                                "x": {"type": "number"},
-                                "y": {"type": "number"},
-                                "width": {"type": "number"},
-                                "height": {"type": "number"},
-                            },
-                            "required": ["x", "y", "width", "height"],
+                        "x": {
+                            "type": "number",
+                            "description": "Left edge of the field as a fraction of image width (0.0=left, 1.0=right).",
+                        },
+                        "y": {
+                            "type": "number",
+                            "description": "Top edge of the field as a fraction of image height (0.0=top, 1.0=bottom).",
+                        },
+                        "width": {
+                            "type": "number",
+                            "description": "Width of the field as a fraction of image width.",
+                        },
+                        "height": {
+                            "type": "number",
+                            "description": "Height of the field as a fraction of image height.",
                         },
                         "confidence": {
                             "type": "string",
@@ -156,7 +158,7 @@ EXTRACTION_TOOL = {
                             "description": "How confident you are in the transcription of this field.",
                         },
                     },
-                    "required": ["field", "image_index", "bounding_box", "confidence"],
+                    "required": ["field", "image_index", "x", "y", "width", "height", "confidence"],
                 },
             },
             "notes": {
