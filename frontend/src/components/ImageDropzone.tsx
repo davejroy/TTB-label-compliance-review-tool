@@ -8,42 +8,14 @@ interface Props {
 }
 
 /**
- * Detect phones and tablets so we can show a "Take Photo" button that
- * opens the device camera via input capture.
- *
- * Three-stage detection handles the full browser/OS matrix:
- * 1. navigator.userAgentData.mobile  - Chromium-only but most accurate.
- * 2. Classic UA regex                - Android, iPhone, older iPads.
- * 3. Touch + no fine pointer         - Modern iPads (iPadOS 13+) report a
- *    Mac-like UA, but they have touch points AND lack a fine (mouse) pointer.
- *    Touchscreen laptops always expose a fine pointer too, so they are
- *    correctly excluded.
- *
- * We deliberately avoid (pointer: coarse) / maxTouchPoints alone because
- * touchscreen Windows laptops satisfy both and would show the button on desktop.
- */
-function isMobileDevice(): boolean {
-  if (typeof navigator === "undefined" || typeof window === "undefined") return false;
-
-  // Stage 1: Chromium User-Agent Client Hints (most reliable when available)
-  const uaData = (navigator as Navigator & { userAgentData?: { mobile?: boolean } })
-    .userAgentData;
-  if (uaData?.mobile !== undefined) return uaData.mobile;
-
-  // Stage 2: Classic UA string - covers Android, iPhone, and pre-iPadOS-13 iPads
-  if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) return true;
-
-  // Stage 3: Modern iPads (iPadOS 13+) advertise a Mac UA but have no mouse.
-  // A real laptop/desktop always has a fine pointer; an iPad has only coarse.
-  const hasTouch = navigator.maxTouchPoints > 1;
-  const noFinePointer = !window.matchMedia("(pointer: fine)").matches;
-  return hasTouch && noFinePointer;
-}
-
-/**
  * Upload control for a label image(s). Supports three input methods:
- * drag-and-drop, a "Choose File" picker (always shown), and on phones
- * and tablets only a "Take Photo" button that opens the device camera.
+ * drag-and-drop, a "Choose File" picker, and a "Take Photo" button.
+ *
+ * The "Take Photo" button uses <input capture="environment"> which opens
+ * the rear camera on phones/tablets. On desktop browsers the capture
+ * attribute is ignored and it falls back to a normal file picker, so
+ * showing the button unconditionally is safe and avoids unreliable
+ * device-detection heuristics.
  *
  * Object URLs for thumbnails are created via useMemo and explicitly revoked
  * when the file list changes, preventing memory leaks on long review sessions.
@@ -52,8 +24,6 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
-  // Evaluated once at mount - the device type cannot change mid-session.
-  const [canUseCamera] = useState(isMobileDevice);
 
   // Create object URLs once per files array change; revoke old ones to avoid
   // memory leaks from long review sessions with many image swaps.
@@ -143,19 +113,18 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
               >
                 Choose File
               </button>
-              {canUseCamera && (
-                <button
-                  type="button"
-                  className="rounded-lg border-2 border-[#15396a] px-5 py-2.5 text-base font-semibold text-[#15396a] hover:bg-blue-50"
-                  onClick={() => cameraInputRef.current?.click()}
-                >
-                  Take Photo
-                </button>
-              )}
+              <button
+                type="button"
+                className="rounded-lg border-2 border-[#15396a] px-5 py-2.5 text-base font-semibold text-[#15396a] hover:bg-blue-50"
+                onClick={() => cameraInputRef.current?.click()}
+              >
+                Take Photo
+              </button>
             </div>
           </div>
         )}
 
+        {/* Standard multi-file picker — no capture, accepts common image formats */}
         <input
           ref={inputRef}
           id={`${idPrefix}-file`}
@@ -168,20 +137,20 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
             e.target.value = "";
           }}
         />
-        {canUseCamera && (
-          <input
-            ref={cameraInputRef}
-            id={`${idPrefix}-camera`}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => {
-              addFiles(e.target.files);
-              e.target.value = "";
-            }}
-          />
-        )}
+        {/* Camera input — capture="environment" opens rear camera on mobile;
+            desktop browsers ignore the attribute and show a normal file picker */}
+        <input
+          ref={cameraInputRef}
+          id={`${idPrefix}-camera`}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
       </div>
     </div>
   );
