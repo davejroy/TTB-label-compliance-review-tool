@@ -104,7 +104,7 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
       >
         {files.length > 0 && (
           <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3 w-full">
-            {files.map((file, index) => (
+            {files.map((_file, index) => (
               <div key={index} className="relative">
                 <img
                   src={objectUrls[index]}
