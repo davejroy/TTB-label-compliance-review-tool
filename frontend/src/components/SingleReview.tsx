@@ -1,16 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { reviewLabel } from "../api";
 import { EMPTY_APPLICATION, type ApplicationData, type ReviewResult } from "../types";
 import ApplicationForm from "./ApplicationForm";
 import ImageDropzone from "./ImageDropzone";
+import ProcessingStatusBar from "./ProcessingStatusBar";
 import ResultsPanel from "./ResultsPanel";
 
-const LOADING_STEPS = [
-  "Uploading image…",
-  "Reading label text…",
-  "Checking compliance…",
-  "Almost done…",
-];
+// Step indices for ProcessingStatusBar
+// 0 = Uploading  1 = Reading label  2 = Checking  3 = Complete
+const STEP_UPLOAD   = 0;
+const STEP_READING  = 1;
+const STEP_CHECKING = 2;
+const STEP_COMPLETE = 3;
 
 export default function SingleReview() {
   const [application, setApplication] = useState<ApplicationData>(EMPTY_APPLICATION);
@@ -18,15 +19,24 @@ export default function SingleReview() {
   const [result, setResult] = useState<ReviewResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loadingStep, setLoadingStep] = useState(0);
+  const [statusStep, setStatusStep] = useState(-1);
+  const [showBar, setShowBar] = useState(false);
+  const stepTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  useEffect(() => {
-    if (!loading) { setLoadingStep(0); return; }
-    const interval = setInterval(() => {
-      setLoadingStep((s) => (s + 1 < LOADING_STEPS.length ? s + 1 : s));
-    }, 2500);
-    return () => clearInterval(interval);
-  }, [loading]);
+  function clearTimers() {
+    stepTimers.current.forEach(clearTimeout);
+    stepTimers.current = [];
+  }
+
+  function startProgressTimers() {
+    clearTimers();
+    setStatusStep(STEP_UPLOAD);
+    // Advance to "Reading label" after ~1s (upload is fast)
+    stepTimers.current.push(setTimeout(() => setStatusStep(STEP_READING), 1000));
+    // Advance to "Checking" after ~4s (Claude extraction typically 2-5s)
+    stepTimers.current.push(setTimeout(() => setStatusStep(STEP_CHECKING), 4000));
+    // Stay on Checking until the real result arrives
+  }
 
   const canSubmit =
     files.length > 0 &&
@@ -40,17 +50,26 @@ export default function SingleReview() {
     e.preventDefault();
     if (files.length === 0) return;
     setLoading(true);
+    setShowBar(true);
     setError(null);
     setResult(null);
+    startProgressTimers();
     try {
       const res = await reviewLabel(files, application);
+      clearTimers();
+      setStatusStep(STEP_COMPLETE);
       setResult(res);
     } catch (err) {
+      clearTimers();
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
   }
+
+  // Decide what to show in the results panel
+  const showStatusBar = showBar && (loading || statusStep === STEP_COMPLETE);
+  const isDone = statusStep === STEP_COMPLETE;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -74,7 +93,7 @@ export default function SingleReview() {
           disabled={!canSubmit}
           className="mt-6 w-full rounded-lg bg-[#15396a] px-6 py-4 text-lg font-bold text-white hover:bg-[#0b1f3a] disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          {loading ? LOADING_STEPS[loadingStep] : "Step 3: Review Label"}
+          {loading ? "Processing…" : "Step 3: Review Label"}
         </button>
 
         {error && <p className="mt-3 text-base text-red-700">{error}</p>}
@@ -82,24 +101,20 @@ export default function SingleReview() {
 
       <div>
         <h2 className="text-2xl font-bold text-slate-900 mb-4">Review Results</h2>
-        {loading && (
-          <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
-            <div className="flex flex-col items-center gap-4 text-slate-500">
-              <svg className="animate-spin h-8 w-8 text-[#15396a]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-              <p className="text-base font-medium">{LOADING_STEPS[loadingStep]}</p>
-              <p className="text-sm text-slate-400">Typically completes in 3–7 seconds</p>
-            </div>
+
+        {showStatusBar && (
+          <div className="rounded-xl border border-slate-200 bg-white px-4 pt-4 pb-2 shadow-sm mb-4">
+            <ProcessingStatusBar step={statusStep} done={isDone} />
           </div>
         )}
-        {!loading && !result && (
+
+        {!showBar && !result && (
           <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-400">
             Fill out the application details, upload a label image, and click
             "Review Label" to see results here.
           </div>
         )}
+
         {result && <ResultsPanel result={result} files={files} />}
       </div>
     </div>
