@@ -41,7 +41,7 @@ export default function App() {
       <div className="bg-[#15396a] h-1.5" />
       <header className="bg-[#083c6f] border-b-4 border-[#ffbe2e]">
         <div className="max-w-6xl mx-auto px-4 py-6 flex flex-wrap items-center gap-4">
-          <img src="/ttb-logo.png" alt="TTB - Alcohol and Tobacco Tax and Trade Bureau, U.S. Department of the Treasury" className="h-16 w-auto flex-shrink-0" />
+          <img src="/ttb-logo.png" alt="TTB - Alcohol and Tobacco Tax and Trade Bureau, U.S. Department of the Treasury" className="h-20 w-auto flex-shrink-0" />
           <div>
             <h1 className="text-3xl font-bold text-white">Label Compliance Review Tool</h1>
             <p className="text-lg text-slate-200 mt-1">
