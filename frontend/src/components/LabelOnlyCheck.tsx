@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { checkLabelsBatch } from "../api";
 import { downloadCsv } from "../csv";
 import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
 import ImageDropzone from "./ImageDropzone";
 import LabelCheckResultsPanel from "./LabelCheckResultsPanel";
+import ProcessingStatusBar from "./ProcessingStatusBar";
 import StatusBadge from "./StatusBadge";
 
 interface Item {
@@ -15,12 +16,12 @@ function newItem(): Item {
   return { id: crypto.randomUUID(), files: [] };
 }
 
-const LOADING_STEPS = [
-  "Uploading images…",
-  "Reading label text…",
-  "Checking compliance…",
-  "Almost done…",
-];
+// Step indices for ProcessingStatusBar
+// 0 = Uploading  1 = Reading label  2 = Checking  3 = Complete
+const STEP_UPLOAD   = 0;
+const STEP_READING  = 1;
+const STEP_CHECKING = 2;
+const STEP_COMPLETE = 3;
 
 export default function LabelOnlyCheck() {
   const [items, setItems] = useState<Item[]>([newItem()]);
@@ -28,15 +29,21 @@ export default function LabelOnlyCheck() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [loadingStep, setLoadingStep] = useState(0);
+  const [statusStep, setStatusStep] = useState(-1);
+  const [showBar, setShowBar] = useState(false);
+  const stepTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  useEffect(() => {
-    if (!loading) { setLoadingStep(0); return; }
-    const interval = setInterval(() => {
-      setLoadingStep((s) => (s + 1 < LOADING_STEPS.length ? s + 1 : s));
-    }, 2500);
-    return () => clearInterval(interval);
-  }, [loading]);
+  function clearTimers() {
+    stepTimers.current.forEach(clearTimeout);
+    stepTimers.current = [];
+  }
+
+  function startProgressTimers() {
+    clearTimers();
+    setStatusStep(STEP_UPLOAD);
+    stepTimers.current.push(setTimeout(() => setStatusStep(STEP_READING), 1000));
+    stepTimers.current.push(setTimeout(() => setStatusStep(STEP_CHECKING), 4000));
+  }
 
   function updateItem(id: string, files: File[]) {
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, files } : item)));
@@ -51,16 +58,7 @@ export default function LabelOnlyCheck() {
   function exportCsv() {
     if (!results) return;
     const rows: string[][] = [
-      [
-        "Files",
-        "Beverage Type",
-        "Overall Status",
-        "Check",
-        "Check Status",
-        "TTB Requirement",
-        "Found on Label",
-        "Message",
-      ],
+      ["Files","Beverage Type","Overall Status","Check","Check Status","TTB Requirement","Found on Label","Message"],
     ];
     results.forEach((result) => {
       const files = result.filenames.join(", ");
@@ -72,16 +70,8 @@ export default function LabelOnlyCheck() {
         return;
       }
       result.checks.forEach((check) => {
-        rows.push([
-          files,
-          beverageType,
-          result.overall_status,
-          check.label_name,
-          check.status,
-          check.application_value ?? "",
-          check.label_value ?? "",
-          check.message,
-        ]);
+        rows.push([files, beverageType, result.overall_status, check.label_name, check.status,
+          check.application_value ?? "", check.label_value ?? "", check.message]);
       });
     });
     downloadCsv("label-check-results.csv", rows);
@@ -90,18 +80,25 @@ export default function LabelOnlyCheck() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    setShowBar(true);
     setError(null);
     setResults(null);
     setExpanded(null);
+    startProgressTimers();
     try {
       const res = await checkLabelsBatch(items.map((item) => ({ files: item.files })));
+      clearTimers();
+      setStatusStep(STEP_COMPLETE);
       setResults(res);
     } catch (err) {
+      clearTimers();
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
   }
+
+  const isDone = statusStep === STEP_COMPLETE;
 
   return (
     <div>
@@ -122,71 +119,44 @@ export default function LabelOnlyCheck() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-slate-900">Label {index + 1}</h2>
               {items.length > 1 && (
-                <button
-                  type="button"
-                  className="text-sm font-semibold text-red-600 underline"
-                  onClick={() => removeItem(item.id)}
-                >
-                  Remove
-                </button>
+                <button type="button" className="text-sm font-semibold text-red-600 underline"
+                  onClick={() => removeItem(item.id)}>Remove</button>
               )}
             </div>
-            <ImageDropzone
-              files={item.files}
-              onChange={(files) => updateItem(item.id, files)}
-              idPrefix={`labelcheck-${item.id}`}
-            />
+            <ImageDropzone files={item.files} onChange={(files) => updateItem(item.id, files)}
+              idPrefix={`labelcheck-${item.id}`} />
           </div>
         ))}
 
         <div className="flex flex-wrap items-center gap-4">
-          <button
-            type="button"
+          <button type="button"
             className="rounded-lg border-2 border-[#15396a] px-5 py-3 text-base font-bold text-[#15396a] hover:bg-blue-50"
-            onClick={() => setItems((prev) => [...prev, newItem()])}
-          >
+            onClick={() => setItems((prev) => [...prev, newItem()])}>
             + Add Another Label
           </button>
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="rounded-lg bg-[#15396a] px-6 py-3 text-lg font-bold text-white hover:bg-[#0b1f3a] disabled:cursor-not-allowed disabled:bg-slate-300"
-          >
-            {loading
-              ? LOADING_STEPS[loadingStep]
-              : `Check ${items.length} Label${items.length === 1 ? "" : "s"}`}
+          <button type="submit" disabled={!canSubmit}
+            className="rounded-lg bg-[#15396a] px-6 py-3 text-lg font-bold text-white hover:bg-[#0b1f3a] disabled:cursor-not-allowed disabled:bg-slate-300">
+            {loading ? "Processing…" : `Check ${items.length} Label${items.length === 1 ? "" : "s"}`}
           </button>
         </div>
 
         {error && <p className="text-base text-red-700">{error}</p>}
       </form>
 
-      {loading && (
-        <div className="mt-8 rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
-          <div className="flex flex-col items-center gap-4 text-slate-500">
-            <svg className="animate-spin h-8 w-8 text-[#15396a]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-            </svg>
-            <p className="text-base font-medium">{LOADING_STEPS[loadingStep]}</p>
-            <p className="text-sm text-slate-400">
-              Checking {items.length} label{items.length === 1 ? "" : "s"} — typically completes in 3–7 seconds each
-            </p>
-          </div>
+      {/* Processing status bar - shown during and just after processing */
+      showBar && (loading || isDone) && (
+        <div className="mt-6 rounded-xl border border-slate-200 bg-white px-4 pt-4 pb-2 shadow-sm">
+          <ProcessingStatusBar step={statusStep} done={isDone} />
         </div>
       )}
 
       {results && (
-        <div className="mt-10">
+        <div className="mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h2 className="text-2xl font-bold text-slate-900">Results</h2>
-            <button
-              type="button"
+            <button type="button"
               className="rounded-lg border-2 border-[#15396a] px-4 py-2 text-sm font-bold text-[#15396a] hover:bg-blue-50"
-              onClick={exportCsv}
-            >
-              Export CSV
-            </button>
+              onClick={exportCsv}>Export CSV</button>
           </div>
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <table className="w-full text-left">
@@ -204,31 +174,21 @@ export default function LabelOnlyCheck() {
                   const issues = result.checks.filter((c) => c.status !== "pass");
                   return (
                     <tr key={index}>
-                      <td className="p-4 font-medium text-slate-800">
-                        {result.filenames.join(", ")}
-                      </td>
+                      <td className="p-4 font-medium text-slate-800">{result.filenames.join(", ")}</td>
                       <td className="p-4 text-sm text-slate-600">
-                        {result.beverage_type
-                          ? BEVERAGE_TYPE_LABELS[result.beverage_type] ?? result.beverage_type
-                          : "-"}
+                        {result.beverage_type ? BEVERAGE_TYPE_LABELS[result.beverage_type] ?? result.beverage_type : "-"}
                       </td>
-                      <td className="p-4">
-                        <StatusBadge status={result.overall_status} size="sm" />
-                      </td>
+                      <td className="p-4"><StatusBadge status={result.overall_status} size="sm" /></td>
                       <td className="p-4 text-sm text-slate-600">
                         {result.error
                           ? <span className="text-red-600">{result.error}</span>
-                          : issues.length === 0
-                            ? "No issues found"
+                          : issues.length === 0 ? "No issues found"
                             : issues.map((c) => c.label_name).join(", ")}
                       </td>
                       <td className="p-4">
                         {!result.error && (
-                          <button
-                            type="button"
-                            className="text-sm font-semibold text-blue-700 underline"
-                            onClick={() => setExpanded(expanded === index ? null : index)}
-                          >
+                          <button type="button" className="text-sm font-semibold text-blue-700 underline"
+                            onClick={() => setExpanded(expanded === index ? null : index)}>
                             {expanded === index ? "Hide details" : "View details"}
                           </button>
                         )}
@@ -239,13 +199,9 @@ export default function LabelOnlyCheck() {
               </tbody>
             </table>
           </div>
-
           {expanded !== null && (
             <div className="mt-6">
-              <LabelCheckResultsPanel
-                result={results[expanded]}
-                files={items[expanded]?.files ?? []}
-              />
+              <LabelCheckResultsPanel result={results[expanded]} files={items[expanded]?.files ?? []} />
             </div>
           )}
         </div>
