@@ -1,4 +1,4 @@
-mport { useEffect, useMemo, useState } from "react";import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Confidence, FieldLocation } from "../types";
 
 const CONFIDENCE_COLORS: Record<Confidence, string> = {
