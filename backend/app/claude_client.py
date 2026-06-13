@@ -23,22 +23,25 @@ from anthropic import (
     RateLimitError,
 )
 from pydantic import ValidationError
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from .models import ExtractedLabelData
 
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+# Default to the faster/cheaper Haiku model for ~3-5x speed improvement.
+# Override with CLAUDE_MODEL env var (e.g. "claude-sonnet-4-6") if higher
+# accuracy is needed on complex labels.
+MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-3-5")
 
 # Module-level Anthropic client - reuses the underlying httpx connection pool
 # across all requests instead of creating a new client per call.
 _CLIENT = Anthropic()
 
-# Claude resizes images so the long edge is ~1568px before processing them
-# (anything larger is wasted upload bandwidth/latency with no quality
-# benefit). Downscaling phone-camera photos to this size client-side keeps
-# the matching field-location coordinates valid (they're fractions of width/
-# height) while cutting upload size and processing time substantially.
-MAX_IMAGE_DIMENSION = 1568
+# Claude resizes images so the long edge is at most MAX_IMAGE_DIMENSION px
+# before processing them. Keeping images at 1024px (down from 1568) cuts
+# upload bandwidth and latency meaningfully, while preserving enough detail
+# for text extraction on typical bottle photos. The field-location coordinates
+# remain valid because they are fractions of the (already-resized) image dimensions.
+MAX_IMAGE_DIMENSION = 1024
 
 # JSON-schema tool definition passed to Claude. Keep this in sync with
 # ExtractedLabelData in models.py - the tool's "input" is parsed directly
@@ -208,7 +211,6 @@ SYSTEM_PROMPT = (
     "calling the record_label_fields tool."
 )
 
-
 def _media_type_for(filename: str) -> str:
     """Guess the image MIME type from a filename's extension.
 
@@ -224,9 +226,8 @@ def _media_type_for(filename: str) -> str:
         "gif": "image/gif",
     }.get(ext, "image/jpeg")
 
-
 def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
-    """Downscale an image so its longest edge is at most MAX_IMAGE_DIMENSION px.
+    """Validate and downscale an image so its longest edge is at most MAX_IMAGE_DIMENSION px.
 
     Returns ``(image_bytes, media_type)`` - if the image was already within
     bounds it is returned unchanged. Downscaled images are always re-encoded
@@ -235,8 +236,18 @@ def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, st
 
     This is CPU-bound (Pillow) and should be called from a thread pool when
     inside an async context (see main.py).
+
+    Raises:
+        ValueError: If the bytes cannot be decoded as a valid image.
     """
-    img = Image.open(io.BytesIO(image_bytes))
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img.verify()  # Check for file truncation / corruption
+        # Re-open after verify() since verify() exhausts the stream
+        img = Image.open(io.BytesIO(image_bytes))
+    except (UnidentifiedImageError, Exception) as exc:
+        raise ValueError(f"Invalid or unreadable image file: {exc}") from exc
+
     w, h = img.size
     if max(w, h) <= MAX_IMAGE_DIMENSION:
         return image_bytes, media_type
@@ -252,7 +263,6 @@ def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, st
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=90)
     return buf.getvalue(), "image/jpeg"
-
 
 def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
     """Send label image(s) to Claude and return the extracted structured fields.
@@ -299,12 +309,13 @@ def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
             "one combined set of fields."
         )
 
-    # max_tokens is set to 2048 to give Claude enough room for labels with all
-    # four images, full field_locations arrays, and a notes entry. 1500 was
-    # occasionally too tight and caused truncated tool-use responses.
+    # max_tokens set to 800: enough for complete field extraction including
+    # field_locations array and notes, while avoiding wasteful padding that
+    # increases latency. Haiku is more token-efficient than Sonnet so 800
+    # is sufficient for all typical label configurations.
     response = _CLIENT.messages.create(
         model=MODEL,
-        max_tokens=2048,
+        max_tokens=800,
         system=SYSTEM_PROMPT,
         tools=[EXTRACTION_TOOL],
         tool_choice={"type": "tool", "name": "record_label_fields"},
