@@ -62,6 +62,10 @@ class ExtractedLabelData(BaseModel):
     origin_guess: Optional[Literal["domestic", "imported", "unknown"]] = None
     field_locations: list[FieldLocation] = Field(default_factory=list)
     notes: Optional[str] = None
+    sulfite_declaration: Optional[str] = None
+    allergen_statements: Optional[str] = None
+    age_statement: Optional[str] = None
+    commodity_statement: Optional[str] = None
     is_alcohol_beverage_label: bool = True
 
 
