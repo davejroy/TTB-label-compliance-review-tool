@@ -63,30 +63,30 @@ commit history (Dave, Jenny, Sarah, Marcus).
 ## 6. Architecture
 
 ```
-âââââââââââââââââââ        multipart/form-data         ââââââââââââââââââââââââ
-â   React + Vite   â âââââââââââââââââââââââââââââââââââ¶â  FastAPI (uvicorn)    â
-â   frontend       â /api/review, /api/review/batch,     â  backend/app/main.py â
-â                  â /api/label-check/batch               â                       â
-â                  âââââââââââââââââââââââââââââââââââââââ                       â
-âââââââââââââââââââ        JSON results                 ââââââââââââ¬âââââââââââââ
-                                                                     â
-                                                                     â image bytes +
-                                                                     â tool-call schema
-                                                                     â¼
-                                                          ââââââââââââââââââââââââ
-                                                          â  Anthropic API        â
-                                                          â  Claude (vision)      â
-                                                          â  claude_client.py     â
-                                                          ââââââââââââ¬âââââââââââââ
-                                                                     â
-                                                                     â structured fields
-                                                                     â (ExtractedLabelData)
-                                                                     â¼
-                                                          ââââââââââââââââââââââââ
-                                                          â  compliance.py        â
-                                                          â  matching & TTB       â
-                                                          â  requirement checks   â
-                                                          ââââââââââââââââââââââââ
+Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ        multipart/form-data         Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+Ã¢ÂÂ   React + Vite   Ã¢ÂÂ Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ¶Ã¢ÂÂ  FastAPI (uvicorn)    Ã¢ÂÂ
+Ã¢ÂÂ   frontend       Ã¢ÂÂ /api/review, /api/review/batch,     Ã¢ÂÂ  backend/app/main.py Ã¢ÂÂ
+Ã¢ÂÂ                  Ã¢ÂÂ /api/label-check/batch               Ã¢ÂÂ                       Ã¢ÂÂ
+Ã¢ÂÂ                  Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ                       Ã¢ÂÂ
+Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ        JSON results                 Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ¬Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+                                                                     Ã¢ÂÂ
+                                                                     Ã¢ÂÂ image bytes +
+                                                                     Ã¢ÂÂ tool-call schema
+                                                                     Ã¢ÂÂ¼
+                                                          Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+                                                          Ã¢ÂÂ  Anthropic API        Ã¢ÂÂ
+                                                          Ã¢ÂÂ  Claude (vision)      Ã¢ÂÂ
+                                                          Ã¢ÂÂ  claude_client.py     Ã¢ÂÂ
+                                                          Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ¬Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+                                                                     Ã¢ÂÂ
+                                                                     Ã¢ÂÂ structured fields
+                                                                     Ã¢ÂÂ (ExtractedLabelData)
+                                                                     Ã¢ÂÂ¼
+                                                          Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+                                                          Ã¢ÂÂ  compliance.py        Ã¢ÂÂ
+                                                          Ã¢ÂÂ  matching & TTB       Ã¢ÂÂ
+                                                          Ã¢ÂÂ  requirement checks   Ã¢ÂÂ
+                                                          Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 ```
 
 ### Backend (`backend/app/`)
@@ -278,6 +278,19 @@ implemented in the current codebase.
   `_FORMULA_DEPENDENT` notice: a label-level pass does NOT substitute for
   production/formula record review (actual SO2 ppm, specific additives, aging
   records, import documentation).
+
+
+### Phase 2 enhancements (this version)
+
+- **Per-field confidence thresholds** (`FIELD_CONFIDENCE_THRESHOLDS`): each field
+  has its own readability floor so Government Warning body text (long text on a
+  curved bottle) is allowed a lower score than brand name. A field below its
+  threshold fails with a named retake request.
+- **Multi-photo extraction and merging** (`merge_extracted_label_data`,
+  `photo_roles` batch param): front and back label photos can be extracted
+  independently and merged so each panel gets dedicated Claude attention.
+- `LabelCheckResult.photo_sources` records which photo roles contributed.
+- `ExtractedLabelData.per_field_confidence` dict added to model and schema.
 
 ## 10. Remaining next steps
 
