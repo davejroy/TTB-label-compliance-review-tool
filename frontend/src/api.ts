@@ -116,20 +116,40 @@ export async function reviewLabelsBatch(
 
 /** POST /api/label-check/batch - Label-Only Check mode. */
 export async function checkLabelsBatch(
-  items: { files: File[] }[]
+  items: { files: File[]; photoRoles?: string[] }[],
+  confirmedBeverageType?: string
 ): Promise<LabelCheckResult[]> {
   const formData = new FormData();
-  items.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
-  formData.append("image_counts", JSON.stringify(items.map((item) => item.files.length)));
+  const counts: number[] = [];
+  const allRoles: string[] = [];
+  let hasRoles = false;
 
-  const response = await safeFetch(`${API_BASE}/api/label-check/batch`, {
+  items.forEach((item) => {
+    counts.push(item.files.length);
+    item.files.forEach((file) => formData.append("files", file));
+    if (item.photoRoles && item.photoRoles.length === item.files.length) {
+      item.photoRoles.forEach((r) => allRoles.push(r));
+      hasRoles = true;
+    } else {
+      item.files.forEach(() => allRoles.push(""));
+    }
+  });
+
+  formData.append("image_counts", JSON.stringify(counts));
+  if (confirmedBeverageType) {
+    formData.append("confirmed_beverage_type", confirmedBeverageType);
+  }
+  if (hasRoles) {
+    formData.append("photo_roles", JSON.stringify(allRoles));
+  }
+
+  const res = await fetch(`${API_BASE}/label-check/batch`, {
     method: "POST",
     body: formData,
   });
-
-  if (!response.ok) {
-    const detail = await parseErrorBody(response);
-    throw new Error(`Label check failed (${response.status}): ${detail}`);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail ?? `HTTP ${res.status}`);
   }
-  return response.json() as Promise<LabelCheckResult[]>;
+  return res.json();
 }
