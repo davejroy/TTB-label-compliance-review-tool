@@ -13,6 +13,7 @@ and torn down on every call.
 import base64
 import io
 import os
+import logging
 
 from anthropic import (
     Anthropic,
@@ -25,6 +26,32 @@ from anthropic import (
 from pydantic import ValidationError
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 
+
+# Module-level logger - handlers/level configured by the application host
+# (uvicorn, gunicorn, etc.).  __name__ scopes records to this module.
+_log = logging.getLogger(__name__)
+
+
+class ImageQualityError(ValueError):
+        """Raised when an uploaded image cannot be read due to poor quality.
+
+            Inherits ValueError so legacy callers that catch ValueError still work.
+                The ``user_message`` attribute holds a short, plain-English string that
+                    is safe to return directly to the end-user (no internal detail leaked).
+
+                        Best-practice note (RFC 7807 / PEP 3151): using a dedicated exception
+                            class lets callers distinguish a user-actionable photo error from an
+                                unrelated system error without parsing message strings.
+                                    """
+
+    def __init__(self, user_message: str) -> None:
+                self.user_message = user_message
+                super().__init__(user_message)
+
+
+# Minimum pixel area (width * height) required after downscaling.  Images
+# smaller than this threshold rarely contain legible label text.
+_MIN_PIXEL_AREA = 100 * 100  # 10 000 px - roughly a 100x100 thumbnail
 from .models import ExtractedLabelData
 
 # Default to the faster/cheaper Haiku model for ~3-5x speed improvement.
@@ -270,7 +297,14 @@ def prepare_image(image_bytes: bytes, filename: str) -> tuple[bytes, str]:
         img.verify()
         img = Image.open(io.BytesIO(image_bytes))
     except (UnidentifiedImageError, Exception) as exc:
-        raise ValueError(f"Invalid or unreadable image file: {exc}") from exc
+                # Log the technical detail internally but give the user a friendly,
+                # actionable message (never expose raw exc str to end-users in prod).
+                _log.warning("Unreadable image '%s': %s", filename, exc)
+                raise ImageQualityError(
+                                "Photo quality is too low to read. The file could not be decoded "
+                                "as a valid image. Please submit a new, clear photo saved as "
+                                "JPEG or PNG."
+                ) from exc
 
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
@@ -281,6 +315,22 @@ def prepare_image(image_bytes: bytes, filename: str) -> tuple[bytes, str]:
         scale = MAX_IMAGE_DIMENSION / max(w, h)
         img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
 
+    # Reject images that are too small to contain readable label text.
+    # This catches heavily cropped screenshots, icons, and thumbnails
+    # that would waste an API call and produce unreliable OCR output.
+    # Best practice: validate inputs early and fail fast with a clear,
+    # user-actionable error rather than returning a low-confidence result.
+    w, h = img.size
+    if w * h < _MIN_PIXEL_AREA:
+            _log.warning(
+                            "Image '%s' too small (%dx%d px) - rejecting.", filename, w, h
+            )
+            raise ImageQualityError(
+                            f"Photo quality is too low to read. The image is only {w}x{h} "
+                            "pixels, which is too small for reliable text recognition. "
+                            "Please submit a new photo taken closer to the label."
+            )
+    
     img = _enhance_for_ocr(img)
 
     if img.mode not in ("RGB", "L"):
