@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { checkLabelsBatch } from "../api";
+import { checkLabelsBatch, wakeServerIfNeeded } from "../api";
 import { downloadCsv } from "../csv";
 import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
 import ImageDropzone from "./ImageDropzone";
@@ -123,6 +123,7 @@ export default function LabelOnlyCheck() {
    * null when no confirmation is pending.
    */
   const [pendingConfirmIdx, setPendingConfirmIdx] = useState<number | null>(null);
+  const [wakeMessage, setWakeMessage] = useState<string | null>(null);
 
   // Scroll on mount so the bottom of Label 1 image box is in view
   useEffect(() => {
@@ -193,7 +194,13 @@ export default function LabelOnlyCheck() {
       statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
     try {
+      // Wake the Render free-tier backend if it has spun down.
+      const wakeStatus = await wakeServerIfNeeded();
+      if (wakeStatus === "cold") {
+        setWakeMessage("Server is waking up (first use takes ~15 s) \u2026");
+      }
       const res = await checkLabelsBatch(items.map((item) => ({ files: item.files })));
+      setWakeMessage(null);
       clearTimers();
       setStatusStep(STEP_COMPLETE);
       setResults(res);
@@ -204,6 +211,7 @@ export default function LabelOnlyCheck() {
         resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }, 100);
     } catch (err) {
+      setWakeMessage(null);
       clearTimers();
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setTimeout(() => {
@@ -280,7 +288,7 @@ export default function LabelOnlyCheck() {
           </button>
           <button type="submit" disabled={!canSubmit}
             className="rounded-lg bg-[#15396a] px-6 py-3 text-lg font-bold text-white hover:bg-[#1a4a8a] disabled:opacity-50 disabled:cursor-not-allowed">
-            {loading ? "Processing…" : `Check ${items.length} Label${items.length !== 1 ? "s" : ""}`}
+            {loading ? "Processingâ¦" : `Check ${items.length} Label${items.length !== 1 ? "s" : ""}`}
           </button>
         </div>
 
@@ -291,6 +299,11 @@ export default function LabelOnlyCheck() {
 
       {showBar && (loading || isDone) && (
         <div ref={statusBarRef} className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm p-4">
+          {wakeMessage && (
+            <p className="mt-2 text-sm text-amber-700 font-medium animate-pulse text-center">
+              {wakeMessage}
+            </p>
+          )}
           <ProcessingStatusBar step={statusStep} done={isDone} />
         </div>
       )}
