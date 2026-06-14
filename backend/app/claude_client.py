@@ -216,31 +216,29 @@ EXTRACTION_TOOL = {
 }
 
 SYSTEM_PROMPT = (
-    "You are assisting a TTB (Alcohol and Tobacco Tax and Trade Bureau) compliance "
-    "agent in reading the text printed on an alcohol beverage label. You may be "
-    "given multiple images (e.g. front and back panels of the same bottle, or "
-    "multiple photos of the same panel) - treat them as views of a single label "
-    "and combine information from all of them into one set of fields. "
-    "Transcribe the text exactly as it appears, including original capitalization, "
-    "spacing, and punctuation - this is important because exact wording and "
-    "capitalization matter for compliance (especially for the Government Warning "
-    "statement). Do not correct, paraphrase, or 'clean up' the text. If a field is "
-    "not visible in any of the images, return an empty string for it. If an image is "
-    "low quality, at an angle, or partially obscured, do your best and note the "
-    "issue in the 'notes' field. For each field you do find, also record an entry "
-    "in 'field_locations' with an approximate bounding box (as fractions of that "
-    "image's width/height, with (0,0) at the top-left corner) showing where on the "
-    "image the text appears, the index of the image it appears in, and a confidence "
-    "level reflecting how certain you are in the transcription. "
-    "Important: label text often wraps across lines with end-of-line hyphens (e.g. "
-    "'Con-' on one line and 'sumption of' on the next). When transcribing, join "
-    "hyphenated line breaks back into the full word (e.g. 'Consumption of'), so the "
-    "government_warning_body and other fields contain the complete, unhyphenated text. "
-    "Always respond by calling the record_label_fields tool. "
-    "Important: set is_alcohol_beverage_label to False if the image is clearly "
-    "not an alcohol beverage label (e.g. a condiment, food item, soft drink, "
-    "household product, or any non-alcoholic product). Set it to True for beer, "
-    "wine, malt beverages, distilled spirits, and similar alcoholic drinks."
+    "You are a label image classifier and text extractor for a TTB (Alcohol and "
+    "Tobacco Tax and Trade Bureau) compliance tool. "
+    "FIRST: Determine whether the image shows an alcohol beverage label. Alcohol "
+    "beverage labels are for products such as beer, ale, lager, malt beverages, "
+    "wine, cider, mead, distilled spirits (whiskey, vodka, rum, gin, tequila, "
+    "brandy, liqueurs, etc.). If the image shows ANYTHING ELSE - such as vitamins, "
+    "supplements, food, condiments, soft drinks, cleaning products, medications, "
+    "or any non-alcoholic product - you MUST set is_alcohol_beverage_label to false. "
+    "Do NOT assume the image is an alcohol label just because you were asked to "
+    "analyze it. Look at the actual product shown in the image. "
+    "SECOND: If and only if it IS an alcohol beverage label, transcribe the label "
+    "text exactly as it appears, including original capitalization, spacing, and "
+    "punctuation. Do not correct, paraphrase, or 'clean up' the text. You may be "
+    "given multiple images (e.g. front and back panels of the same bottle) - treat "
+    "them as views of a single label and combine information from all of them. "
+    "If a field is not visible, return an empty string. If image quality is poor, "
+    "do your best and note the issue in 'notes'. For each field found, record an "
+    "entry in 'field_locations' with an approximate bounding box (fractions 0-1 of "
+    "the image's width/height, (0,0) at top-left), the image index, and confidence. "
+    "Important: label text often wraps with end-of-line hyphens (e.g. 'Con-' on "
+    "one line, 'sumption of' on the next). When transcribing, join hyphenated line "
+    "breaks back into the full word (e.g. 'Consumption of'). "
+    "Always respond by calling the record_label_fields tool."
 )
 
 
@@ -397,12 +395,11 @@ def extract_label_fields(
         })
 
     prompt_text = (
-        "Read this alcohol beverage label and record its fields."
+        "Analyze this product label image and record its fields."
         if len(images) == 1
         else (
-            f"These {len(images)} images show the same alcohol beverage label "
-            "(e.g. front and back panels). Read all of them together and record "
-            "one combined set of fields."
+            f"Analyze these {len(images)} product label images (they may show "
+            "different panels of the same product). Record one combined set of fields."
         )
     )
 
