@@ -143,7 +143,7 @@ export async function checkLabelsBatch(
     formData.append("photo_roles", JSON.stringify(allRoles));
   }
 
-  const res = await fetch(`${API_BASE}/label-check/batch`, {
+  const res = await safeFetch(`${API_BASE}/api/label-check/batch`, {
     method: "POST",
     body: formData,
   });
