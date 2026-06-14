@@ -276,6 +276,16 @@ size.
 - **Alternate Government Warning text for small containers (<= 100 mL).** Per 27 CFR 16.21(c), containers with capacity <= 100 mL may use an abbreviated body text that omits clause numbers (1) and (2). Both the full-form and short-form body text are accepted as a pass for small containers. `_is_small_container()` in `compliance.py` detects the container size using `_parse_net_contents`; the threshold is configurable via `SMALL_CONTAINER_THRESHOLD_ML` and `SMALL_CONTAINER_THRESHOLD_FLOZ`.
 - **Beverage-type confirmation dialog (frontend).** When the backend returns `needs_beverage_confirmation=True`, the Label-Only Check tab now automatically shows a `BeverageTypeDialog` modal with radio buttons for the three beverage types. The agent selects the correct type and clicks **Confirm & Re-check**; the label is re-submitted with `confirmed_beverage_type` set and the result row is updated in place. A **Confirm type** inline link also appears in the results table for any label still waiting for confirmation.
 
+## Bug fixes
+
+- **`api.ts` Label-Only Check 404 (commit `1eea52f`).** `checkLabelsBatch` was
+  calling `fetch()` with URL `${API_BASE}/label-check/batch` — missing the
+  `/api` path segment — so every submission returned HTTP 404 Not Found and
+  the UI hung until the request timed out. Fixed to `${API_BASE}/api/label-check/batch`.
+  Also replaced the raw `fetch()` call with `safeFetch()` so transient 429/503/529
+  errors are retried automatically, matching the behaviour of the other two API
+  functions.
+
 Possible next steps
 
 - Integrate with COLA to pull application data automatically.
