@@ -108,7 +108,7 @@ def _normalize_whitespace(text: str | None) -> str:
         return ""
     # Rejoin words split across lines with a hyphen (e.g. "CON-\nSUMPTION" -> "CONSUMPTION")
     text = re.sub(r"-\n\s*", "", text.strip())
-      return re.sub(r"\s+", " ", text.strip())
+    return re.sub(r"\s+", " ", text.strip())
 
 
 def _similarity(a: str, b: str) -> float:
