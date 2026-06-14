@@ -58,22 +58,30 @@ export.
   (`cd backend && pytest`), no API key required.
 - **Deploy:** see `render.yaml` for the Render.com deployment config.
 
-## Known gaps / suggested next steps
+## Recently implemented (previously "Known gaps")
 
-These are documented in more detail in `README.md` ("Possible next steps")
-and `docs/PDR.md` (section 9):
+The items below were listed as known gaps and have now been implemented:
 
-- Configurable tolerance rules per beverage class.
-- Let the agent confirm/override the detected beverage type
-  (`beverage_type_guess`) before Label-Only requirements are evaluated.
-- Validate net contents against authorized standards-of-fill sizes (27 CFR
-  4.72 / 5.203 / 7.70) - currently only confirms a quantity is stated.
-- Additional mandatory statements not yet checked: sulfite declaration (27
-  CFR 4.32(e)), aspartame/saccharin, FD&C Yellow No. 5, allergen labeling -
-  these need ingredient-level data not visible on most labels.
-- Age statement checks for straight whiskies aged < 4 years (27 CFR 5.74)
-  and commodity statement requirements for certain imported spirits.
+- **Configurable tolerance rules per beverage class.** `BEVERAGE_TOLERANCE` in
+  `compliance.py` maps each beverage class to its ABV tolerance and minimum
+  extraction-confidence threshold.
+- **Confidence-gated extraction.** `extraction_confidence` (0.0-1.0) is populated
+  by Claude. Images below the per-class threshold raise `LowConfidenceError`
+  (HTTP 422) and request a retake instead of silently passing.
+- **Beverage-type confirmation.** `check_label_requirements` now accepts
+  `confirmed_beverage_type` override; unknown types return
+  `needs_beverage_confirmation=True` so the agent can confirm before evaluation.
+- **Standards of fill validated.** Net contents now validated against 27 CFR
+  4.72 (wine) / 5.203 (spirits) / 7.70 (beer) authorised size lists.
+- **Formula-dependent caveats.** Sulfite, allergen, age-statement, and
+  commodity-statement checks now carry `_FORMULA_DEPENDENT` notices.
 
+## Remaining next steps
+
+- Integrate with COLA to pull application data automatically.
+- Add state-level ABV and label requirement checks.
+- Support alternate Government Warning text for small containers (<100 mL).
+- Add a frontend confirmation dialog for the beverage-type override flow.
 ## Where to look first
 
 - `README.md` - setup, running locally, feature overview.
