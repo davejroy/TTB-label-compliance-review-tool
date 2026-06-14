@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { checkLabelsBatch } from "../api";
 import { downloadCsv } from "../csv";
 import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
@@ -35,6 +35,22 @@ export default function LabelOnlyCheck() {
   // Refs for auto-scroll
   const statusBarRef = useRef<HTMLDivElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const label1BoxRef = useRef<HTMLDivElement>(null);
+
+  // Scroll on mount so the bottom of Label 1 image box is visible
+  useEffect(() => {
+    if (label1BoxRef.current) {
+      const el = label1BoxRef.current;
+      const rect = el.getBoundingClientRect();
+      const scrollBy = rect.bottom - window.innerHeight + 40;
+      if (scrollBy > 0) {
+        window.scrollBy({ top: scrollBy, behavior: 'smooth' });
+      } else {
+        el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        setTimeout(() => window.scrollBy({ top: 40, behavior: 'smooth' }), 400);
+      }
+    }
+  }, []);
 
   function clearTimers() {
     stepTimers.current.forEach(clearTimeout);
@@ -129,7 +145,7 @@ export default function LabelOnlyCheck() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {items.map((item, index) => (
-          <div key={item.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+          <div key={item.id} ref={index === 0 ? label1BoxRef : undefined} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-slate-900">Label {index + 1}</h2>
               {items.length > 1 && (
@@ -150,7 +166,7 @@ export default function LabelOnlyCheck() {
           </button>
           <button type="submit" disabled={!canSubmit}
             className="rounded-lg bg-[#15396a] px-6 py-3 text-lg font-bold text-white hover:bg-[#0b1f3a] disabled:cursor-not-allowed disabled:bg-slate-300">
-            {loading ? "Processing…" : `Check ${items.length} Label${items.length === 1 ? "" : "s"}`}
+            {loading ? "Processingâ¦" : `Check ${items.length} Label${items.length === 1 ? "" : "s"}`}
           </button>
         </div>
 
