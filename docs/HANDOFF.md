@@ -37,6 +37,11 @@ export.
 
 ## Recent changes (most recent first)
 
+- Fixed `checkLabelsBatch` in `api.ts`: the fetch URL was missing the `/api`
+  prefix (`/label-check/batch` instead of `/api/label-check/batch`), causing
+  every Label-Only Check submission to return HTTP 404 Not Found. Also switched
+  from raw `fetch()` to `safeFetch()` so transient 429/503/529 errors are
+  retried automatically.
 - Added step-by-step labels to the Single Label review form.
 - Stopped flagging missing country-of-origin on domestic labels (only
   flagged when `origin_guess` indicates an imported product).
