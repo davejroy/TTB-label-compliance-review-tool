@@ -72,6 +72,12 @@ export interface LabelCheckResult {
   extracted: ExtractedLabelData;
   processing_time_ms: number;
   error?: string;
+  /** True when check is paused waiting for agent to confirm beverage type. */
+  needs_beverage_confirmation?: boolean;
+  /** True when beverage type was explicitly confirmed by the agent. */
+  beverage_type_confirmed?: boolean;
+  /** Roles of photos merged to build extracted fields, e.g. ["front","back"]. */
+  photo_sources?: string[];
 }
 
 export const BEVERAGE_TYPE_LABELS: Record<string, string> = {
