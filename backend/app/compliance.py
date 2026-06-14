@@ -15,21 +15,101 @@ Two entry points are exported:
 Every check returns a ``FieldResult`` with a ``status`` of ``"pass"``,
 ``"warning"`` (needs human review), or ``"fail"``, plus a plain-language
 ``message`` explaining the result.
+
+New in this version
+-------------------
+* Confidence-gated extraction: LowConfidenceError is raised when the model's
+  overall extraction confidence falls below the per-class threshold defined in
+  BEVERAGE_TOLERANCE. Previously the tool would silently accept a best guess
+  and return a pass even when the image was unreadable.
+* Configurable tolerance rules per beverage class: BEVERAGE_TOLERANCE maps
+  each beverage class to its ABV tolerance AND a minimum extraction confidence
+  score below which the whole check is rejected.
+* Beverage-type confirmation flow: check_label_requirements now accepts an
+  optional confirmed_beverage_type parameter. When supplied (via the agent
+  override UI) it takes precedence over extracted.beverage_type_guess. When
+  absent the function returns an "unconfirmed_beverage_type" sentinel so the
+  caller can prompt the agent to verify before requirements are evaluated.
+* Standards-of-fill validation: _check_label_net_contents now validates the
+  extracted quantity against the authorised fill sizes per 27 CFR 4.72 /
+  5.203 / 7.70 rather than only confirming a number is present.
+* Formula-dependent caveats: sulfite declaration, allergen disclosures, age
+  statement, and commodity statement checks all carry an explicit caveat that
+  a label-level pass does not substitute for production/formula record review.
 """
 
 import re
 import logging
 from difflib import SequenceMatcher
-
+from typing import Optional
 
 # Module-level logger for compliance checks.
-# Enables audit-trail logging of every label's compliance outcome.
 _log = logging.getLogger(__name__)
 from .models import ApplicationData, ExtractedLabelData, FieldResult
 
-# Canonical Government Warning text per 27 CFR 16.21. Must appear verbatim,
-# with "GOVERNMENT WARNING:" in capital letters and bold (we can only check
-# the text/casing from an image, not boldness).
+
+# ---------------------------------------------------------------------------
+# Confidence gating
+# ---------------------------------------------------------------------------
+
+class LowConfidenceError(ValueError):
+    """Raised when extraction confidence is below the per-class minimum threshold.
+
+    Callers (main.py) should catch this and return HTTP 422 with the
+    user_message so the agent knows to retake the photo.
+    """
+
+    def __init__(self, user_message: str, confidence: float, threshold: float) -> None:
+        self.user_message = user_message
+        self.confidence = confidence
+        self.threshold = threshold
+        super().__init__(user_message)
+
+
+# ---------------------------------------------------------------------------
+# Configurable tolerance rules per beverage class
+# ---------------------------------------------------------------------------
+#
+# BEVERAGE_TOLERANCE is the single source of truth for both ABV tolerance and
+# extraction-confidence thresholds. Operators can adjust these values (or load
+# them from a config file / env vars) without touching logic code.
+#
+# Keys match BeverageType literals from models.py plus "unknown" sentinel.
+#
+# abv_tolerance   float  max allowed |app_pct - label_pct| before fail.
+# min_confidence  float  0-1. If ExtractedLabelData.extraction_confidence is
+#                        below this value the whole check is rejected and a
+#                        new photo is requested.
+
+BEVERAGE_TOLERANCE: dict[str, dict] = {
+    "distilled_spirits": {
+        "abv_tolerance": 0.3,       # 27 CFR 5.65(c)
+        "min_confidence": 0.70,
+    },
+    "wine": {
+        # Wine ABV tolerance is ABV-dependent; see _wine_abv_tolerance().
+        # The value here is the fallback used when ABV cannot be parsed.
+        "abv_tolerance": 1.0,       # 27 CFR 4.36(b)(1) (>14% ABV band)
+        "min_confidence": 0.70,
+    },
+    "beer": {
+        "abv_tolerance": 0.3,       # 27 CFR 7.65(c)
+        "min_confidence": 0.65,
+    },
+    "unknown": {
+        "abv_tolerance": 0.3,
+        "min_confidence": 0.75,     # Stricter: type-specific rules cannot be validated
+    },
+}
+
+# Default confidence threshold used when beverage class is not in the table.
+_DEFAULT_MIN_CONFIDENCE = 0.70
+
+
+# ---------------------------------------------------------------------------
+# Canonical government-warning text (27 CFR 16.21)
+# ---------------------------------------------------------------------------
+
 CANONICAL_WARNING_HEADER = "GOVERNMENT WARNING:"
 CANONICAL_WARNING_BODY = (
     "(1) According to the Surgeon General, women should not drink alcoholic "
@@ -38,20 +118,10 @@ CANONICAL_WARNING_BODY = (
     "car or operate machinery, and may cause health problems."
 )
 
-# ABV tolerances allowed by TTB regulations:
-# - Distilled spirits: +/-0.3 percentage points (27 CFR 5.65(c)).
-# - Wine: +/-1.0 percentage point if the labeled ABV is over 14%, or +/-1.5
-#   percentage points if 14% or below (27 CFR 4.36(b)(1)). See
-#   ``WINE_ABV_TOLERANCE_THRESHOLD`` and ``_wine_abv_tolerance``.
-# - Malt beverages (beer): +/-0.3 percentage points for products at or above
-#   0.5% ABV (27 CFR 7.65(c)).
-ABV_TOLERANCE = {
-    "distilled_spirits": 0.3,
-    "beer": 0.3,
-}
+# ---------------------------------------------------------------------------
+# Wine ABV tolerance helper (27 CFR 4.36(b)(1))
+# ---------------------------------------------------------------------------
 
-# Wine ABV percentage at/below which the wider +/-1.5 point tolerance applies
-# (27 CFR 4.36(b)(1)).
 WINE_ABV_TOLERANCE_THRESHOLD = 14.0
 WINE_ABV_TOLERANCE_LOW = 1.5
 WINE_ABV_TOLERANCE_HIGH = 1.0
@@ -60,23 +130,107 @@ WINE_ABV_TOLERANCE_HIGH = 1.0
 def _wine_abv_tolerance(app_pct: float, label_pct: float) -> float:
     """Return the wine ABV tolerance per 27 CFR 4.36(b)(1).
 
-    Wines containing more than 14% ABV get a +/-1.0 point tolerance; wines at
-    or below 14% get the wider +/-1.5 point tolerance. Since either value
-    could be the "true" ABV, the higher of the two is used to decide which
-    tolerance band applies.
+    Wines >14% ABV get +/-1.0 tolerance; wines <=14% get +/-1.5.
+    The higher of the two values is used to determine which band applies.
     """
     if max(app_pct, label_pct) > WINE_ABV_TOLERANCE_THRESHOLD:
         return WINE_ABV_TOLERANCE_HIGH
     return WINE_ABV_TOLERANCE_LOW
 
 
-def _normalize(text: str | None) -> str:
-    """Lowercase, strip punctuation, and collapse whitespace.
+# ---------------------------------------------------------------------------
+# Standards of fill (27 CFR 4.72 / 5.203 / 7.70)
+# ---------------------------------------------------------------------------
+# All values are in millilitres. FL OZ values are US customary equivalents
+# printed on domestic labels; both are accepted.
 
-    Used for case/punctuation-insensitive comparisons (e.g. brand name,
-    class/type) so that "STONE'S THROW" and "Stone's Throw" are treated as
-    the same value.
+# 27 CFR 4.72 - Wine
+_WINE_FILL_ML = frozenset({
+    100, 187, 250, 375, 500, 750, 1000, 1500, 3000, 4500,
+})
+_WINE_FILL_FLOZ = frozenset({
+    3.4, 6.3, 8.5, 12.7, 16.9, 25.4, 33.8, 50.7, 101.4, 152.2,
+})
+
+# 27 CFR 5.203 - Distilled spirits
+_SPIRITS_FILL_ML = frozenset({
+    50, 100, 200, 375, 500, 750, 1000, 1750,
+})
+_SPIRITS_FILL_FLOZ = frozenset({
+    1.7, 3.4, 6.8, 12.7, 16.9, 25.4, 33.8, 59.2,
+})
+
+# 27 CFR 7.70 - Malt beverages (beer)
+# Malt beverages do not have a federally mandated closed list of fill sizes;
+# 27 CFR 7.70 only requires the net contents to be stated accurately. We
+# therefore skip the enumerated-size check for beer and confirm a numeric
+# quantity is present.
+_BEER_FILL_UNRESTRICTED = True
+
+# Tolerance for fill-size matching: +/-1 mL or +/-0.1 fl oz to account for
+# rounding in label printing.
+_FILL_ML_TOLERANCE = 1.0
+_FILL_FLOZ_TOLERANCE = 0.1
+
+
+def _parse_net_contents(text: str) -> tuple:
+    """Parse a net-contents string into (quantity: float|None, unit: str|None).
+
+    Returns (float, 'ml'), (float, 'floz'), or (None, None).
+    Handles: '750 mL', '750ml', '25.4 fl oz', '12 FL. OZ.', '1 L', etc.
     """
+    if not text:
+        return None, None
+    t = text.lower().strip()
+    # Millilitres
+    m = re.search(r"([\d]+(?:[.,][\d]+)?)\s*(?:ml|milliliter|millilitre)s?", t)
+    if m:
+        return float(m.group(1).replace(",", ".")), "ml"
+    # Litres -> convert to mL
+    m = re.search(r"([\d]+(?:[.,][\d]+)?)\s*(?:l|liter|litre)(?!s?\s*oz)", t)
+    if m:
+        return float(m.group(1).replace(",", ".")) * 1000, "ml"
+    # Fluid ounces
+    m = re.search(r"([\d]+(?:[.,][\d]+)?)\s*(?:fl\.?\s*oz\.?|fluid\s+ounce)s?", t)
+    if m:
+        return float(m.group(1).replace(",", ".")), "floz"
+    # Plain number - ambiguous unit
+    m = re.search(r"([\d]+(?:[.,][\d]+)?)", t)
+    if m:
+        return float(m.group(1).replace(",", ".")), None
+    return None, None
+
+
+def _is_authorised_fill(qty: float, unit, beverage_type) -> bool:
+    """Return True/False if qty/unit is an authorised standard of fill.
+
+    Returns None if the check is not applicable or cannot be determined
+    (e.g. beer, or unknown unit).
+
+    Args:
+        qty:           Numeric quantity extracted from the label.
+        unit:          'ml', 'floz', or None.
+        beverage_type: 'wine', 'distilled_spirits', 'beer', or None/unknown.
+    """
+    if unit is None:
+        return None  # Cannot evaluate without a unit
+    if beverage_type == "beer":
+        return None  # No restricted list for malt beverages (27 CFR 7.70)
+    if unit == "ml":
+        authorised = _WINE_FILL_ML if beverage_type == "wine" else _SPIRITS_FILL_ML
+        return any(abs(qty - a) <= _FILL_ML_TOLERANCE for a in authorised)
+    if unit == "floz":
+        authorised = _WINE_FILL_FLOZ if beverage_type == "wine" else _SPIRITS_FILL_FLOZ
+        return any(abs(qty - a) <= _FILL_FLOZ_TOLERANCE for a in authorised)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Text normalisation helpers
+# ---------------------------------------------------------------------------
+
+def _normalize(text) -> str:
+    """Lowercase, strip punctuation, and collapse whitespace."""
     if not text:
         return ""
     text = text.strip().lower()
@@ -85,9 +239,8 @@ def _normalize(text: str | None) -> str:
     return text.strip()
 
 
-def _normalize_net_contents(text: str | None) -> str:
-    """Normalize net contents, treating equivalent unit abbreviations the same
-    (e.g. '12 FL. OZ.' and '12 oz' both normalize to '12 oz')."""
+def _normalize_net_contents(text) -> str:
+    """Normalise net contents, treating equivalent unit abbreviations the same."""
     norm = _normalize(text)
     norm = re.sub(r"\bfl(uid)?\b", "", norm)
     norm = re.sub(r"\bounces?\b", "oz", norm)
@@ -97,16 +250,10 @@ def _normalize_net_contents(text: str | None) -> str:
     return norm.strip()
 
 
-def _normalize_whitespace(text: str | None) -> str:
-    """Collapse runs of whitespace to a single space, preserving case.
-
-    Used for the Government Warning text, where casing matters (the header
-    must be all-caps) but incidental line-wrapping/spacing differences from
-    OCR/transcription should not cause a mismatch.
-    """
+def _normalize_whitespace(text) -> str:
+    """Collapse runs of whitespace to a single space, preserving case."""
     if not text:
         return ""
-    # Rejoin words split across lines with a hyphen (e.g. "CON-\nSUMPTION" -> "CONSUMPTION")
     text = re.sub(r"-\n\s*", "", text.strip())
     return re.sub(r"\s+", " ", text.strip())
 
@@ -116,8 +263,8 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
-def _extract_percent(text: str | None) -> float | None:
-    """Pull the first ``NN.N%`` style percentage out of free text, if any."""
+def _extract_percent(text) -> float:
+    """Pull the first NN.N% style percentage out of free text, if any."""
     if not text:
         return None
     match = re.search(r"(\d+(?:\.\d+)?)\s*%", text)
@@ -126,68 +273,98 @@ def _extract_percent(text: str | None) -> float | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Confidence-gate helper
+# ---------------------------------------------------------------------------
+
+def assert_extraction_confidence(extracted: ExtractedLabelData, beverage_type=None) -> None:
+    """Raise LowConfidenceError if extraction confidence is below threshold.
+
+    Must be called at the top of both entry-point functions so that
+    low-quality photos are rejected before any compliance check is run.
+
+    Args:
+        extracted:      The ExtractedLabelData returned by Claude.
+        beverage_type:  Resolved beverage type string; used to look up the
+                        per-class threshold from BEVERAGE_TOLERANCE.
+    """
+    confidence = getattr(extracted, "extraction_confidence", None)
+    if confidence is None:
+        # Field absent in older schema versions; skip gate to stay backward-compat.
+        return
+
+    bev_key = (beverage_type or "").lower()
+    class_cfg = BEVERAGE_TOLERANCE.get(bev_key, {})
+    threshold = class_cfg.get("min_confidence", _DEFAULT_MIN_CONFIDENCE)
+
+    if confidence < threshold:
+        _log.warning(
+            "Extraction confidence %.2f below threshold %.2f for class %r.",
+            confidence, threshold, bev_key,
+        )
+        raise LowConfidenceError(
+            user_message=(
+                f"Label photo quality is too low to evaluate reliably "
+                f"(confidence {confidence:.0%}, minimum required {threshold:.0%} "
+                f"for {bev_key or 'unknown'} labels). "
+                "Please retake the photo ensuring: good lighting, minimal glare, "
+                "all required label panels are fully in frame, and text is legible."
+            ),
+            confidence=confidence,
+            threshold=threshold,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Shared field-level checks (used by both run_compliance_checks and
+# check_label_requirements)
+# ---------------------------------------------------------------------------
+
 def _check_text_field(
     field: str,
     label_name: str,
     application_value: str,
-    label_value: str | None,
+    label_value,
     normalizer=_normalize,
 ) -> FieldResult:
     """Compare an application value to the corresponding label value.
 
-    - Missing on the label -> ``fail``.
-    - Equal after normalization -> ``pass``.
-    - Not equal but >=85% similar after normalization -> ``warning`` (likely
-      a cosmetic difference; flagged for a human to confirm).
-    - Otherwise -> ``fail``.
-
-    ``normalizer`` controls how values are normalized before comparison
-    (e.g. ``_normalize`` for case/punctuation-insensitive text,
-    ``_normalize_net_contents`` for unit-aware net-contents comparison).
+    - Missing on label -> fail.
+    - Equal after normalisation -> pass.
+    - >=85% similar after normalisation -> warning (cosmetic difference).
+    - Otherwise -> fail.
     """
     norm_app = normalizer(application_value)
     norm_label = normalizer(label_value)
 
     if not label_value:
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="fail",
-            application_value=application_value,
-            label_value=label_value,
+            field=field, label_name=label_name, status="fail",
+            application_value=application_value, label_value=label_value,
             message=f"{label_name} not found on label.",
         )
 
     if norm_app == norm_label:
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=application_value,
-            label_value=label_value,
+            field=field, label_name=label_name, status="pass",
+            application_value=application_value, label_value=label_value,
             message=f"{label_name} matches application.",
         )
 
     similarity = _similarity(norm_app, norm_label)
     if similarity >= 0.85:
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="warning",
-            application_value=application_value,
-            label_value=label_value,
+            field=field, label_name=label_name, status="warning",
+            application_value=application_value, label_value=label_value,
             message=(
                 f"{label_name} is a likely match but differs in formatting/casing "
-                f"from the application. Please confirm visually."
+                "from the application. Please confirm visually."
             ),
         )
 
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="fail",
-        application_value=application_value,
-        label_value=label_value,
+        field=field, label_name=label_name, status="fail",
+        application_value=application_value, label_value=label_value,
         message=f"{label_name} on label does not match application.",
     )
 
@@ -197,27 +374,16 @@ def _check_alcohol_content(
 ) -> FieldResult:
     """Compare the application's stated ABV to the label's ABV.
 
-    Percentages are parsed out of both values and compared numerically
-    against the applicable TTB tolerance for the application's beverage type
-    (wine uses the ABV-dependent tolerance from ``_wine_abv_tolerance`` per
-    27 CFR 4.36(b)(1); distilled spirits and beer use ``ABV_TOLERANCE``,
-    falling back to text comparison if either value has no parseable
-    percentage). A missing ABV on a wine/beer label is a ``warning`` rather
-    than a ``fail``, since some wine/beer labels are legally exempt from
-    stating ABV (27 CFR 4.36 / 7.65).
+    Uses BEVERAGE_TOLERANCE for per-class tolerance values.
     """
     label_value = extracted.alcohol_content
     field, label_name = "alcohol_content", "Alcohol Content"
 
     if not label_value:
-        # Some wines (<=14% ABV) and beers may legally omit ABV from the label.
         if application.beverage_type in ("wine", "beer"):
             return FieldResult(
-                field=field,
-                label_name=label_name,
-                status="warning",
-                application_value=application.alcohol_content,
-                label_value=label_value,
+                field=field, label_name=label_name, status="warning",
+                application_value=application.alcohol_content, label_value=label_value,
                 message=(
                     "Alcohol content not found on label. This may be acceptable "
                     f"for {application.beverage_type.replace('_', ' ')} "
@@ -225,11 +391,8 @@ def _check_alcohol_content(
                 ),
             )
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="fail",
-            application_value=application.alcohol_content,
-            label_value=label_value,
+            field=field, label_name=label_name, status="fail",
+            application_value=application.alcohol_content, label_value=label_value,
             message="Alcohol content not found on label.",
         )
 
@@ -242,7 +405,8 @@ def _check_alcohol_content(
     if application.beverage_type == "wine":
         tolerance = _wine_abv_tolerance(app_pct, label_pct)
     else:
-        tolerance = ABV_TOLERANCE.get(application.beverage_type, 0.3)
+        class_cfg = BEVERAGE_TOLERANCE.get(application.beverage_type, {})
+        tolerance = class_cfg.get("abv_tolerance", 0.3)
     diff = abs(app_pct - label_pct)
 
     if diff == 0:
@@ -250,50 +414,33 @@ def _check_alcohol_content(
     elif diff <= tolerance:
         status, message = (
             "warning",
-            f"Alcohol content differs by {diff:.2f}%, within the typical "
+            f"Alcohol content differs by {diff:.2f}%, within the "
             f"{tolerance}% TTB tolerance but should be confirmed.",
         )
     else:
         status, message = (
             "fail",
-            f"Alcohol content differs by {diff:.2f}%, exceeding the typical "
+            f"Alcohol content differs by {diff:.2f}%, exceeding the "
             f"{tolerance}% TTB tolerance.",
         )
 
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status=status,
-        application_value=application.alcohol_content,
-        label_value=label_value,
+        field=field, label_name=label_name, status=status,
+        application_value=application.alcohol_content, label_value=label_value,
         message=message,
     )
 
 
 def _check_government_warning(extracted: ExtractedLabelData) -> FieldResult:
-    """Validate the Government Warning statement (27 CFR 16.21).
-
-    This check is intentionally strict and shared by both
-    ``run_compliance_checks`` and ``check_label_requirements``:
-
-    - The statement must be present at all -> otherwise ``fail``.
-    - The header must read exactly ``GOVERNMENT WARNING:`` in capital
-      letters (title case is a ``fail``, not a warning).
-    - The body text must match the canonical statutory wording
-      case-insensitively. A near match (>=95% similarity) is reported as a
-      "minor wording differences" issue but is still an overall ``fail``,
-      since any deviation from the required text is non-compliant.
-    """
+    """Validate the Government Warning statement (27 CFR 16.21)."""
     field, label_name = "government_warning", "Government Warning"
 
     if not extracted.government_warning_present:
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="fail",
+            field=field, label_name=label_name, status="fail",
             application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
             label_value=None,
-            message="Government Warning statement not found on label. This is required on all alcohol beverage labels.",
+            message="Government Warning statement not found on label. Required on all alcohol beverage labels.",
         )
 
     header = (extracted.government_warning_header or "").strip()
@@ -316,34 +463,35 @@ def _check_government_warning(extracted: ExtractedLabelData) -> FieldResult:
 
     if not issues:
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
+            field=field, label_name=label_name, status="pass",
             application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
             label_value=header + " " + body,
             message="Government Warning statement matches the required text exactly.",
         )
 
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="fail",
+        field=field, label_name=label_name, status="fail",
         application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
         label_value=(header + " " + body).strip(),
         message="Government Warning issue(s): " + "; ".join(issues) + ".",
     )
 
 
+# ---------------------------------------------------------------------------
+# Application-vs-label entry point
+# ---------------------------------------------------------------------------
+
 def run_compliance_checks(
     application: ApplicationData, extracted: ExtractedLabelData
-) -> list[FieldResult]:
+) -> list:
     """Compare a label's extracted fields against the COLA application data.
 
-    Always checks brand name, class/type, alcohol content, net contents,
-    and the Government Warning. Name/address and country of origin are only
-    checked if the application provided values for them (they are optional
-    on ``ApplicationData``).
+    Calls assert_extraction_confidence first; raises LowConfidenceError if
+    the image quality is insufficient for reliable evaluation.
     """
+    bev_type = application.beverage_type
+    assert_extraction_confidence(extracted, bev_type)
+
     results = [
         _check_text_field(
             "brand_name", "Brand Name", application.brand_name, extracted.brand_name
@@ -385,55 +533,37 @@ def run_compliance_checks(
     return results
 
 
+# ---------------------------------------------------------------------------
+# Label-Only Check helpers
+# ---------------------------------------------------------------------------
+
 def _presence_check(
     field: str,
     label_name: str,
-    label_value: str | None,
+    label_value,
     requirement: str,
-    found_message: str | None = None,
+    found_message=None,
 ) -> FieldResult:
-    """Generic "is this required field present on the label?" check.
-
-    Used by ``check_label_requirements`` for fields that the TTB regulations
-    require to simply be present (brand name, class/type, name & address),
-    as opposed to fields that need value-level validation.
-    """
+    """Generic 'is this required field present?' check."""
     if label_value and label_value.strip():
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=requirement,
-            label_value=label_value,
+            field=field, label_name=label_name, status="pass",
+            application_value=requirement, label_value=label_value,
             message=found_message or f"{label_name} is present on the label.",
         )
-
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="fail",
-        application_value=requirement,
-        label_value=label_value,
+        field=field, label_name=label_name, status="fail",
+        application_value=requirement, label_value=label_value,
         message=f"{label_name} was not found on the label. {requirement}",
     )
 
 
 def _check_label_alcohol_content(
-    extracted: ExtractedLabelData, beverage_type: str | None
+    extracted: ExtractedLabelData, beverage_type
 ) -> FieldResult:
-    """Check the ABV statement against the per-beverage-type requirement.
+    """Check ABV statement against the per-beverage-type requirement.
 
-    Unlike ``_check_alcohol_content`` (which compares to an application
-    value), this only checks whether *some* ABV statement is present and
-    whether one is required at all for ``beverage_type``:
-
-    - Distilled spirits: required (27 CFR 5.63(a)(3) / 5.65) -> ``fail`` if missing.
-    - Wine: required over 14% ABV (27 CFR 4.36); below that it may be
-      omitted -> ``warning`` if missing (can't tell ABV without the value).
-    - Beer: not federally required unless alcohol is derived from added
-      flavors/ingredients (27 CFR 7.63(a)(3) / 7.65) -> ``pass`` if missing.
-    - Unknown beverage type: ``warning`` if missing, since we can't
-      determine the requirement.
+    Uses BEVERAGE_TOLERANCE for per-class tolerance values.
     """
     field, label_name = "alcohol_content", "Alcohol Content"
     requirement = (
@@ -448,42 +578,30 @@ def _check_label_alcohol_content(
     if label_value:
         if _extract_percent(label_value) is None:
             return FieldResult(
-                field=field,
-                label_name=label_name,
-                status="warning",
-                application_value=requirement,
-                label_value=label_value,
+                field=field, label_name=label_name, status="warning",
+                application_value=requirement, label_value=label_value,
                 message=(
                     "Alcohol content text was found but does not appear to include "
                     "a percentage. Verify the format (e.g. 'XX% Alc./Vol.')."
                 ),
             )
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=requirement,
-            label_value=label_value,
+            field=field, label_name=label_name, status="pass",
+            application_value=requirement, label_value=label_value,
             message=f"Alcohol content ({label_value}) is stated on the label.",
         )
 
     if beverage_type == "distilled_spirits":
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="fail",
-            application_value=requirement,
-            label_value=label_value,
+            field=field, label_name=label_name, status="fail",
+            application_value=requirement, label_value=label_value,
             message="Alcohol content statement is required on distilled spirits labels (27 CFR 5.63(a)(3) / 5.65) and was not found.",
         )
 
     if beverage_type == "wine":
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="warning",
-            application_value=requirement,
-            label_value=label_value,
+            field=field, label_name=label_name, status="warning",
+            application_value=requirement, label_value=label_value,
             message=(
                 "Alcohol content not found. Required for wines over 14% ABV "
                 "(27 CFR 4.36); wines at or below 14% ABV may omit it if labeled "
@@ -493,11 +611,8 @@ def _check_label_alcohol_content(
 
     if beverage_type == "beer":
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=requirement,
-            label_value=label_value,
+            field=field, label_name=label_name, status="pass",
+            application_value=requirement, label_value=label_value,
             message=(
                 "Alcohol content not stated. Federal law does not require an ABV "
                 "statement on malt beverage labels unless alcohol is derived from "
@@ -508,25 +623,29 @@ def _check_label_alcohol_content(
         )
 
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="warning",
-        application_value=requirement,
-        label_value=label_value,
+        field=field, label_name=label_name, status="warning",
+        application_value=requirement, label_value=label_value,
         message=(
             "Alcohol content not found and the beverage type could not be "
-            "determined. Verify whether an ABV statement is required for this "
-            "product."
+            "determined. Verify whether an ABV statement is required for this product."
         ),
     )
 
 
-def _check_label_net_contents(extracted: ExtractedLabelData) -> FieldResult:
-    """Check that the label states a net contents quantity (27 CFR 4.37 / 5.70 / 7.70).
+def _check_label_net_contents(extracted: ExtractedLabelData, beverage_type=None) -> FieldResult:
+    """Check that the label states a net contents quantity conforming to
+    the authorised standards of fill (27 CFR 4.72 / 5.203 / 7.70).
 
-    Only confirms a quantity-looking value is present; does not validate it
-    against the authorized standards-of-fill sizes (27 CFR 4.72 / 5.203 /
-    7.70) (see "Possible next steps" in docs/PDR.md).
+    Unlike the previous version which only confirmed a number was present,
+    this function now:
+    1. Parses the quantity and unit from the label text.
+    2. For wine and distilled spirits, validates the size against the
+       closed list of authorised fill sizes in 27 CFR 4.72 / 5.203.
+    3. For beer (27 CFR 7.70) confirms a numeric quantity is present
+       (no restricted size list applies).
+
+    A recognised quantity that falls outside the authorised list is a fail.
+    An unrecognised unit (so the list cannot be consulted) is a warning.
     """
     field, label_name = "net_contents", "Net Contents"
     requirement = (
@@ -537,47 +656,76 @@ def _check_label_net_contents(extracted: ExtractedLabelData) -> FieldResult:
 
     if not label_value or not label_value.strip():
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="fail",
-            application_value=requirement,
-            label_value=label_value,
+            field=field, label_name=label_name, status="fail",
+            application_value=requirement, label_value=label_value,
             message=f"Net contents not found on label. {requirement}",
         )
 
-    if not re.search(r"\d", label_value):
+    qty, unit = _parse_net_contents(label_value)
+
+    if qty is None:
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="warning",
-            application_value=requirement,
-            label_value=label_value,
-            message="Net contents text was found but does not appear to include a quantity. Verify the format.",
+            field=field, label_name=label_name, status="warning",
+            application_value=requirement, label_value=label_value,
+            message="Net contents text was found but does not appear to include a numeric quantity. Verify the format.",
         )
 
+    # Beer: no restricted list - just confirm a number is present.
+    if beverage_type == "beer":
+        return FieldResult(
+            field=field, label_name=label_name, status="pass",
+            application_value=requirement, label_value=label_value,
+            message=f"Net contents ({label_value}) is stated on the label (27 CFR 7.70).",
+        )
+
+    authorised = _is_authorised_fill(qty, unit, beverage_type)
+
+    if authorised is None:
+        # Could not determine (unit unknown or beverage type not yet confirmed).
+        if unit is None:
+            return FieldResult(
+                field=field, label_name=label_name, status="warning",
+                application_value=requirement, label_value=label_value,
+                message=(
+                    f"Net contents quantity {qty} was found but the unit could not be "
+                    "parsed. Confirm the fill size is an authorised standard of fill "
+                    "(27 CFR 4.72 / 5.203)."
+                ),
+            )
+        return FieldResult(
+            field=field, label_name=label_name, status="pass",
+            application_value=requirement, label_value=label_value,
+            message=f"Net contents ({label_value}) is stated on the label.",
+        )
+
+    if authorised:
+        return FieldResult(
+            field=field, label_name=label_name, status="pass",
+            application_value=requirement, label_value=label_value,
+            message=(
+                f"Net contents ({label_value}) is stated and matches an authorised "
+                "standard of fill (27 CFR 4.72 / 5.203)."
+            ),
+        )
+
+    # Not in the authorised list.
+    cfg_ref = "27 CFR 4.72" if beverage_type == "wine" else "27 CFR 5.203"
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="pass",
-        application_value=requirement,
-        label_value=label_value,
-        message=f"Net contents ({label_value}) is stated on the label.",
+        field=field, label_name=label_name, status="fail",
+        application_value=requirement, label_value=label_value,
+        message=(
+            f"Net contents {label_value} ({qty} {unit}) does not match any "
+            f"authorised standard of fill for {beverage_type or 'this beverage type'} "
+            f"({cfg_ref}). Verify the fill size and resubmit."
+        ),
     )
 
 
 def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult:
-    """Check for a country-of-origin statement, required only for imports.
+    """Check for country-of-origin statement, required only for imports.
 
-    A country-of-origin statement is only mandatory for imported products,
-    so a missing statement is judged using ``extracted.origin_guess``
-    (Claude's best guess, from cues like a "Product of <country>" or
-    "Imported by" statement) rather than always being flagged:
-
-    - Statement present -> ``pass``.
-    - Missing and the label appears domestic -> ``pass`` (not required).
-    - Missing and the label appears imported -> ``fail`` (required, missing).
-    - Missing and origin can't be determined -> ``warning`` so the agent can
-      verify whether the product is imported.
+    Uses extracted.origin_guess (Claude's best guess) when the statement
+    is absent to determine whether a fail or warning is appropriate.
     """
     field, label_name = "country_of_origin", "Country of Origin"
     requirement = (
@@ -588,21 +736,15 @@ def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult
 
     if label_value and label_value.strip():
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=requirement,
-            label_value=label_value,
+            field=field, label_name=label_name, status="pass",
+            application_value=requirement, label_value=label_value,
             message=f"Country of origin statement found: '{label_value}'.",
         )
 
     if extracted.origin_guess == "domestic":
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=requirement,
-            label_value=label_value,
+            field=field, label_name=label_name, status="pass",
+            application_value=requirement, label_value=label_value,
             message=(
                 "No country-of-origin statement found, but this label appears to "
                 "be a domestic (US) product, for which one is not required."
@@ -611,11 +753,8 @@ def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult
 
     if extracted.origin_guess == "imported":
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="fail",
-            application_value=requirement,
-            label_value=label_value,
+            field=field, label_name=label_name, status="fail",
+            application_value=requirement, label_value=label_value,
             message=(
                 "This label appears to be an imported product, but no "
                 "country-of-origin statement was found. " + requirement
@@ -623,11 +762,8 @@ def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult
         )
 
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="warning",
-        application_value=requirement,
-        label_value=label_value,
+        field=field, label_name=label_name, status="warning",
+        application_value=requirement, label_value=label_value,
         message=(
             "No country-of-origin statement found, and it could not be "
             "determined whether this product is domestic or imported. This is "
@@ -637,14 +773,32 @@ def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult
     )
 
 
+# ---------------------------------------------------------------------------
+# Formula-dependent checks
+# ---------------------------------------------------------------------------
+# The checks below operate on label text only. Whether a declaration is
+# REQUIRED is ultimately determined by actual ingredient/formula records
+# (SO2 ppm measurements, specific additives in the formula, aging records,
+# import status). A label-level pass means the required text was found; it
+# does NOT certify that the underlying formula data is compliant.
+#
+# Each function appends a FORMULA_DEPENDENT notice to its message to remind
+# agents that formula/production record review is still required.
 
-def _check_sulfite_declaration(extracted) -> FieldResult:
+_FORMULA_DEPENDENT = (
+    " NOTE: This check is based on label text only. Final determination "
+    "requires review of production/formula records."
+)
+
+
+def _check_sulfite_declaration(extracted: ExtractedLabelData) -> FieldResult:
     """Check for a sulfite declaration on wine labels (27 CFR 4.32(e)).
 
-    Wines containing 10 ppm or more of sulfur dioxide must bear the statement
-    'Contains Sulfites' (or equivalent). This check applies only to wine;
-    for other beverage types it returns a pass. If the label does not disclose
-    sulfite level, a warning is issued prompting the agent to verify with lab data.
+    Wines containing >=10 ppm SO2 must bear 'Contains Sulfites' or equivalent.
+    This check applies only to wine; other beverage types auto-pass.
+
+    FORMULA-DEPENDENT: Whether the declaration is required depends on the
+    actual measured SO2 level, not the label text alone.
     """
     field, label_name = "sulfite_declaration", "Sulfite Declaration"
     requirement = (
@@ -654,45 +808,38 @@ def _check_sulfite_declaration(extracted) -> FieldResult:
     bev = (extracted.beverage_type_guess or "").lower()
     if "wine" not in bev and bev not in ("", "unknown"):
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=None,
-            label_value="N/A",
+            field=field, label_name=label_name, status="pass",
+            application_value=None, label_value="N/A",
             message="Sulfite declaration is only required for wine products.",
         )
     val = extracted.sulfite_declaration
     if val and _normalize(val):
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=None,
-            label_value=val,
-            message="Sulfite declaration found on label.",
+            field=field, label_name=label_name, status="pass",
+            application_value=None, label_value=val,
+            message="Sulfite declaration found on label." + _FORMULA_DEPENDENT,
         )
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="warning",
-        application_value=None,
-        label_value=None,
+        field=field, label_name=label_name, status="warning",
+        application_value=None, label_value=None,
         message=(
             "No sulfite declaration found. If this wine contains >=10 ppm "
             "sulfur dioxide, 'Contains Sulfites' (or equivalent) is required "
-            "(27 CFR 4.32(e)). Verify SO\u2082 level with production data."
+            "(27 CFR 4.32(e)). Verify SO\u2082 level with production/lab data."
+            + _FORMULA_DEPENDENT
         ),
     )
 
 
-def _check_allergen_statements(extracted) -> FieldResult:
+def _check_allergen_statements(extracted: ExtractedLabelData) -> FieldResult:
     """Check for mandatory allergen / additive disclosure statements.
 
-    TTB regulations require disclosure of certain additives when present:
-    FD&C Yellow No. 5 (tartrazine), aspartame, saccharin, and cochineal
-    extract/carmine (27 CFR 4.32(f), 5.63(c), 7.63(c); TTB Ruling 2012-1).
-    Because ingredient presence cannot be determined from a label photo alone,
-    this check is always a warning prompting the agent to verify formula records.
+    TTB requires disclosure of FD&C Yellow No. 5 (tartrazine), aspartame,
+    saccharin, and cochineal extract/carmine when present
+    (27 CFR 4.32(f), 5.63(c), 7.63(c); TTB Ruling 2012-1).
+
+    FORMULA-DEPENDENT: Whether disclosure is required depends on whether
+    these additives are present in the formula/ingredients, not the label text.
     """
     field, label_name = "allergen_statements", "Allergen / Additive Declarations"
     requirement = (
@@ -703,34 +850,31 @@ def _check_allergen_statements(extracted) -> FieldResult:
     val = extracted.allergen_statements
     if val and _normalize(val):
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=None,
-            label_value=val,
-            message="Allergen/additive declaration(s) found on label.",
+            field=field, label_name=label_name, status="pass",
+            application_value=None, label_value=val,
+            message="Allergen/additive declaration(s) found on label." + _FORMULA_DEPENDENT,
         )
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="warning",
-        application_value=None,
-        label_value=None,
+        field=field, label_name=label_name, status="warning",
+        application_value=None, label_value=None,
         message=(
             "No allergen or additive declarations detected. Verify via "
             "formula/ingredient records: FD&C Yellow No. 5, aspartame, "
             "saccharin, and cochineal extract/carmine require mandatory label "
             "disclosure when present (27 CFR 4.32(f), 5.63(c), 7.63(c))."
+            + _FORMULA_DEPENDENT
         ),
     )
 
 
-def _check_age_statement(extracted) -> FieldResult:
-    """Check age statement requirements for straight whiskies (27 CFR 5.74).
+def _check_age_statement(extracted: ExtractedLabelData) -> FieldResult:
+    """Check age statement requirements for straight whiskies (27 CFR 5.74(a)).
 
-    Straight whiskies aged less than 4 years must state the age on the label.
-    Whiskies aged 4+ years need not show an age statement unless they choose
-    to do so. This check applies only to straight whiskies.
+    Straight whiskies aged <4 years must state the actual age.
+    Whiskies aged 4+ years need not show an age statement.
+
+    FORMULA-DEPENDENT: Whether an age statement is REQUIRED depends on the
+    actual age per production/aging records, not label text alone.
     """
     field, label_name = "age_statement", "Age Statement (Straight Whisky)"
     requirement = (
@@ -744,43 +888,37 @@ def _check_age_statement(extracted) -> FieldResult:
     )
     if not is_straight_whisky:
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=None,
-            label_value="N/A",
+            field=field, label_name=label_name, status="pass",
+            application_value=None, label_value="N/A",
             message="Age statement check applies only to straight whiskies.",
         )
     val = extracted.age_statement
     if val and _normalize(val):
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=None,
-            label_value=val,
-            message="Age statement found on label.",
+            field=field, label_name=label_name, status="pass",
+            application_value=None, label_value=val,
+            message="Age statement found on label." + _FORMULA_DEPENDENT,
         )
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="warning",
-        application_value=None,
-        label_value=None,
+        field=field, label_name=label_name, status="warning",
+        application_value=None, label_value=None,
         message=(
             "No age statement found on this straight whisky label. If the "
-            "product was aged less than 4 years, the age must be stated on "
-            "the label (27 CFR 5.74(a)). Verify aging records."
+            "product was aged less than 4 years, the age must be stated "
+            "(27 CFR 5.74(a)). Verify aging records."
+            + _FORMULA_DEPENDENT
         ),
     )
 
 
-def _check_commodity_statement(extracted) -> FieldResult:
+def _check_commodity_statement(extracted: ExtractedLabelData) -> FieldResult:
     """Check for commodity / importer statement on imported spirits (27 CFR 5.63).
 
     Imported distilled spirits must identify the importer and state the
-    class/type (27 CFR 5.63(a)(2), 5.66(b)). Only applied to imported products;
-    domestic products return pass. Unknown origin triggers a warning.
+    class/type (27 CFR 5.63(a)(2), 5.66(b)).
+
+    FORMULA-DEPENDENT: Whether this is required depends on the actual import
+    status of the product per import records, not label text alone.
     """
     field, label_name = "commodity_statement", "Commodity / Importer Statement"
     requirement = (
@@ -790,65 +928,104 @@ def _check_commodity_statement(extracted) -> FieldResult:
     bev = (extracted.beverage_type_guess or "").lower()
     if bev not in ("distilled_spirits", "", "unknown"):
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=None,
-            label_value="N/A",
+            field=field, label_name=label_name, status="pass",
+            application_value=None, label_value="N/A",
             message="Commodity statement check applies only to imported distilled spirits.",
         )
     origin = (extracted.origin_guess or "unknown").lower()
     if origin == "domestic":
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=None,
-            label_value="N/A",
+            field=field, label_name=label_name, status="pass",
+            application_value=None, label_value="N/A",
             message="Product appears domestic; commodity importer statement not required.",
         )
     if origin == "unknown":
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="warning",
-            application_value=None,
-            label_value=None,
+            field=field, label_name=label_name, status="warning",
+            application_value=None, label_value=None,
             message=(
                 "Could not determine whether product is imported. If imported, "
                 "the label must identify the importer and commodity per "
                 "27 CFR 5.63(a)(2) and 5.66(b). Verify import status."
+                + _FORMULA_DEPENDENT
             ),
         )
     val = extracted.commodity_statement
     if val and _normalize(val):
         return FieldResult(
-            field=field,
-            label_name=label_name,
-            status="pass",
-            application_value=None,
-            label_value=val,
-            message="Commodity/importer statement found on label.",
+            field=field, label_name=label_name, status="pass",
+            application_value=None, label_value=val,
+            message="Commodity/importer statement found on label." + _FORMULA_DEPENDENT,
         )
     return FieldResult(
-        field=field,
-        label_name=label_name,
-        status="fail",
-        application_value=None,
-        label_value=None,
+        field=field, label_name=label_name, status="fail",
+        application_value=None, label_value=None,
         message=(
             "Imported distilled spirits label is missing a commodity/importer "
             "statement. The label must identify the importer and state the "
             "class/type (27 CFR 5.63(a)(2), 5.66(b))."
+            + _FORMULA_DEPENDENT
         ),
     )
 
+# ---------------------------------------------------------------------------
+# Label-Only Check entry point
+# ---------------------------------------------------------------------------
+
+# Sentinel returned when beverage type has not been confirmed by the agent.
+# The frontend should display a confirmation dialog and resubmit with
+# confirmed_beverage_type set.
+UNCONFIRMED_BEVERAGE_TYPE = "unconfirmed_beverage_type"
+
 
 def check_label_requirements(
-    extracted: ExtractedLabelData, beverage_type: str | None = None
-) -> list[FieldResult]:
-    """Validate a label against TTB mandatory label requirements, independent of
-    any COLA application data."""
+    extracted: ExtractedLabelData,
+    beverage_type=None,
+    confirmed_beverage_type=None,
+) -> list:
+    """Validate a label against TTB mandatory label requirements, independent
+    of any COLA application data (Label-Only Check).
+
+    Beverage-type confirmation flow
+    --------------------------------
+    The ABV requirement, standards-of-fill validation, and formula-dependent
+    checks all depend on the beverage type.  Two sources are available:
+
+    1. confirmed_beverage_type - explicitly set by the agent via the UI
+       override after reviewing Claude's initial guess.  When present, this
+       value is used unconditionally and no confirmation prompt is shown.
+    2. beverage_type / extracted.beverage_type_guess - Claude's best guess
+       from label text.  Used only when no agent override is provided.
+
+    If neither source resolves to a known type the function raises
+    ValueError(UNCONFIRMED_BEVERAGE_TYPE) so the caller can prompt the agent
+    to confirm before evaluating requirements.
+
+    Confidence gate
+    ---------------
+    assert_extraction_confidence is called with the resolved beverage type
+    before any checks are run.  A LowConfidenceError means the photo needs
+    to be retaken - requirements are NOT evaluated on low-confidence images.
+
+    Args:
+        extracted:               ExtractedLabelData from Claude.
+        beverage_type:           Legacy positional arg kept for backward
+                                 compat; treated as confirmed_beverage_type
+                                 if confirmed_beverage_type is None.
+        confirmed_beverage_type: Agent-confirmed beverage type override.
+    """
+    # Resolve: confirmed override > legacy arg > extracted guess.
+    resolved_type = (
+        confirmed_beverage_type
+        or beverage_type
+        or (extracted.beverage_type_guess or "unknown").lower()
+    )
+    if resolved_type in (None, "", "unknown") and confirmed_beverage_type is None:
+        raise ValueError(UNCONFIRMED_BEVERAGE_TYPE)
+
+    # Confidence gate: reject low-quality images before running any checks.
+    assert_extraction_confidence(extracted, resolved_type)
+
     return [
         _presence_check(
             "brand_name",
@@ -862,8 +1039,8 @@ def check_label_requirements(
             extracted.class_type,
             "A class, type, or other required designation must be stated on the label (27 CFR 4.34 / 5.63(a)(2), 5.141 / 7.63(a)(2), 7.141).",
         ),
-        _check_label_alcohol_content(extracted, beverage_type),
-        _check_label_net_contents(extracted),
+        _check_label_alcohol_content(extracted, resolved_type),
+        _check_label_net_contents(extracted, resolved_type),
         _presence_check(
             "name_and_address",
             "Name and Address",
@@ -879,11 +1056,14 @@ def check_label_requirements(
     ]
 
 
-def overall_status(results: list[FieldResult]) -> str:
+# ---------------------------------------------------------------------------
+# Overall status roll-up
+# ---------------------------------------------------------------------------
+
+def overall_status(results: list) -> str:
     """Roll up a list of FieldResults into a single overall status.
 
-    ``fail`` if any field failed, else ``warning`` if any field needs
-    review, else ``pass``.
+    fail if any field failed, warning if any field needs review, else pass.
     """
     if any(r.status == "fail" for r in results):
         return "fail"
