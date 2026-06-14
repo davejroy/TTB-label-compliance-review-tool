@@ -1,3 +1,15 @@
+- **Per-field confidence thresholds.** `FIELD_CONFIDENCE_THRESHOLDS` in
+  `compliance.py` gives each field its own readability floor. Government Warning
+  body text is allowed a lower confidence score (0.45) than brand name (0.60)
+  because it is long text on a curved bottle surface. A field whose score falls
+  below its threshold fails with a targeted retake request naming the specific
+  field and explaining how to improve the photo.
+- **Multi-photo extraction and merging.** The `/api/label-check/batch` endpoint
+  now accepts an optional `photo_roles` form field (JSON array of strings, one
+  per file, e.g. `["front","back"]`). When roles differ, each photo is extracted
+  independently and merged via `merge_extracted_label_data`. ABV from the front
+  label and the Government Warning from the back label each receive dedicated
+  Claude attention rather than competing in a single multi-image prompt.
 # TTB Label Compliance Review Tool
 
 A prototype tool that helps TTB compliance agents quickly check whether the
