@@ -160,6 +160,18 @@ the architecture simple for a prototype.
   text, missing statement) is a Fail - this is the one check that is
   intentionally strict, per Jenny's note that this check is exact and agents
   reject labels for things like "Government Warning" in title case.
+- **Sulfite declaration (27 CFR 4.32(e)):** wines must bear "Contains Sulfites"
+  (or equivalent) if the product contains >=10 ppm SO2. Missing declaration
+  is "Needs Review" so the agent can verify with production/lab data.
+- **Allergen/additive disclosures (27 CFR 4.32(f), 5.63(c), 7.63(c)):** FD&C
+  Yellow No. 5, aspartame, saccharin, and cochineal extract/carmine must be
+  declared when present. "Needs Review" since presence requires formula verification.
+- **Age statement for straight whiskies (27 CFR 5.74(a)):** mandatory when
+  aged less than 4 years; optional at 4+ years. Only applies to straight
+  whiskies; others auto-pass. Missing statement on a straight whisky -> "Needs Review".
+- **Commodity/importer statement for imported spirits (27 CFR 5.63(a)(2),
+  5.66(b)):** imported distilled spirits must identify the importer. Only fires
+  for origin_guess == "imported"; domestic -> pass; unknown -> "Needs Review".
 
 **UI/UX:** Designed for a wide range of technical comfort levels per Sarah's
 notes - large text, big buttons, drag-and-drop image upload, color-coded
@@ -231,11 +243,7 @@ size.
 - **Standards of fill:** the Net Contents check currently only confirms a
   quantity is stated; it does not validate against the actual list of
   authorized standards of fill sizes per 27 CFR 4.72 / 5.203 / 7.70.
-- **Additional mandatory statements not yet checked:** sulfite declaration
-  ("Contains Sulfites") for wines with >=10ppm sulfur dioxide (27 CFR
-  4.32(e)), aspartame/saccharin declarations, FD&C Yellow No. 5, and allergen
-  labeling - these require ingredient-level information not visible on most
-  labels and would need additional application-level data.
-- **Age statement checks** for straight whiskies aged less than 4 years (27
-  CFR 5.74), and **commodity statement** requirements for certain imported
-  spirits.
+- **Formula-dependent verification:** sulfite declaration, allergen disclosures,
+  age statement, and commodity statement are now checked at the label-text level;
+  final determination still requires production/formula records for ingredient-level
+  confirmation (e.g., actual SO2 ppm, specific additives present).
