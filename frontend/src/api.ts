@@ -153,3 +153,36 @@ export async function checkLabelsBatch(
   }
   return res.json();
 }
+
+/**
+ * Ping the backend health endpoint and wait for it to respond.
+ * On Render free tier the server spins down after 15 minutes of inactivity;
+ * the first request after a spin-down can take 10-30 seconds to respond.
+ * Returns "warm" if the server responded quickly (<3 s) or "cold" if it
+ * needed to wake up. Throws if the server cannot be reached at all.
+ */
+export async function wakeServerIfNeeded(): Promise<"warm" | "cold"> {
+  const WARM_THRESHOLD_MS = 3000;
+  const WAKE_TIMEOUT_MS = 35000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WAKE_TIMEOUT_MS);
+  const t0 = Date.now();
+  try {
+    const res = await fetch(`${API_BASE}/api/health`, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`Health check returned ${res.status}`);
+    return Date.now() - t0 < WARM_THRESHOLD_MS ? "warm" : "cold";
+  } catch (err) {
+    clearTimeout(timer);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Could not reach the review server. Check your connection or try again in a moment.");
+    }
+    if (err instanceof TypeError) {
+      throw new Error("Could not reach the review server. Check your connection or try again in a moment.");
+    }
+    throw err;
+  }
+}
