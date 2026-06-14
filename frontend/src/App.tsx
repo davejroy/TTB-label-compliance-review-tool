@@ -1,14 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import SingleReview from "./components/SingleReview";
 import BatchReview from "./components/BatchReview";
 import LabelOnlyCheck from "./components/LabelOnlyCheck";
 
 type Tab = "single" | "batch" | "label-check";
-
-// Resolve the same API base that api.ts uses.
-const API_BASE = import.meta.env.VITE_API_HOST
-  ? `https://${import.meta.env.VITE_API_HOST}`
-  : "";
 
 /**
  * Top-level layout: header, the three review-mode tabs (Single Label,
@@ -20,21 +15,12 @@ const API_BASE = import.meta.env.VITE_API_HOST
  * ttb.gov's navy/gold color scheme (#083c6f background, #ffbe2e
  * accent border) so the tool reads as part of the TTB site family.
  *
- * On mount a fire-and-forget GET /api/health request is sent to warm up
- * the Render free-tier backend, which spins down after inactivity and
- * can take 30-60 s to wake. Sending the request while the user reads
- * the UI typically absorbs most or all of that latency.
+ * The cold-start health-check ping that previously fired on every page
+ * load has been removed: the backend now runs on a paid Standard instance
+ * that never sleeps, so the warm-up request is no longer needed.
  */
 export default function App() {
   const [tab, setTab] = useState<Tab>("single");
-
-  // Warm up the backend on page load to reduce cold-start latency on
-  // Render's free tier (services sleep after inactivity).
-  useEffect(() => {
-    fetch(`${API_BASE}/api/health`).catch(() => {
-      // Ignore - this is best-effort. The real request will show any error.
-    });
-  }, []);
 
   return (
     <div className="min-h-screen bg-slate-100">
