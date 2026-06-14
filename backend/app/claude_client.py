@@ -194,6 +194,40 @@ EXTRACTION_TOOL = {
                     "was acceptable."
                 ),
             },
+            "sulfite_declaration": {
+                "type": "string",
+                "description": (
+                    "The sulfite/sulfur dioxide disclosure statement as printed on the "
+                    "label, e.g. 'Contains Sulfites', 'Contains Sulfiting Agents'. "
+                    "Leave empty string if no such statement appears."
+                ),
+            },
+            "allergen_statements": {
+                "type": "string",
+                "description": (
+                    "Any allergen or additive disclosure statements on the label, "
+                    "e.g. 'FD&C Yellow No. 5', 'PHENYLKETONURICS: CONTAINS PHENYLALANINE' "
+                    "(aspartame), saccharin warnings, 'Contains: Cochineal Extract / Carmine'. "
+                    "Concatenate multiple statements with a semicolon. "
+                    "Leave empty string if none are present."
+                ),
+            },
+            "age_statement": {
+                "type": "string",
+                "description": (
+                    "The age statement as printed on the label for whiskies and other "
+                    "aged spirits, e.g. 'Aged 2 Years', 'Aged 18 Months', '12 Year Old'. "
+                    "Leave empty string if no age statement appears."
+                ),
+            },
+            "commodity_statement": {
+                "type": "string",
+                "description": (
+                    "The commodity or importer statement on imported spirits labels, "
+                    "e.g. 'Imported Scotch Whisky', 'Imported by XYZ Imports, New York, NY'. "
+                    "Leave empty string if no such statement appears or the product is domestic."
+                ),
+            },
             "is_alcohol_beverage_label": {
                 "type": "boolean",
                 "description": (
@@ -210,6 +244,8 @@ EXTRACTION_TOOL = {
             "name_and_address", "country_of_origin", "government_warning_header",
             "government_warning_body", "government_warning_present",
             "beverage_type_guess", "origin_guess", "field_locations", "notes",
+            "sulfite_declaration", "allergen_statements",
+            "age_statement", "commodity_statement",
             "is_alcohol_beverage_label",
         ],
     },
