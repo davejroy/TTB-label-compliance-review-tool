@@ -7,9 +7,9 @@ import ProcessingStatusBar from "./ProcessingStatusBar";
 import ResultsPanel from "./ResultsPanel";
 
 // Step indices for ProcessingStatusBar
-// 0 = Uploading  1 = Reading label  2 = Checking  3 = Complete
-const STEP_UPLOAD   = 0;
-const STEP_READING  = 1;
+// 0 = Uploading 1 = Reading label 2 = Checking 3 = Complete
+const STEP_UPLOAD = 0;
+const STEP_READING = 1;
 const STEP_CHECKING = 2;
 const STEP_COMPLETE = 3;
 
@@ -22,6 +22,9 @@ export default function SingleReview() {
   const [statusStep, setStatusStep] = useState(-1);
   const [showBar, setShowBar] = useState(false);
   const stepTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Refs for auto-scroll
+  const statusBarRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   function clearTimers() {
     stepTimers.current.forEach(clearTimeout);
@@ -54,14 +57,25 @@ export default function SingleReview() {
     setError(null);
     setResult(null);
     startProgressTimers();
+    // Scroll to status bar after a brief delay so it has rendered
+    setTimeout(() => {
+      statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
     try {
       const res = await reviewLabel(files, application);
       clearTimers();
       setStatusStep(STEP_COMPLETE);
       setResult(res);
+      // Scroll to results once they arrive
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
     } catch (err) {
       clearTimers();
       setError(err instanceof Error ? err.message : "Something went wrong.");
+      setTimeout(() => {
+        statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
     } finally {
       setLoading(false);
     }
@@ -103,7 +117,10 @@ export default function SingleReview() {
         <h2 className="text-2xl font-bold text-slate-900 mb-4">Review Results</h2>
 
         {showStatusBar && (
-          <div className="rounded-xl border border-slate-200 bg-white px-4 pt-4 pb-2 shadow-sm mb-4">
+          <div
+            ref={statusBarRef}
+            className="rounded-xl border border-slate-200 bg-white px-4 pt-4 pb-2 shadow-sm mb-4"
+          >
             <ProcessingStatusBar step={statusStep} done={isDone} />
           </div>
         )}
@@ -115,7 +132,11 @@ export default function SingleReview() {
           </div>
         )}
 
-        {result && <ResultsPanel result={result} files={files} />}
+        {result && (
+          <div ref={resultsRef}>
+            <ResultsPanel result={result} files={files} />
+          </div>
+        )}
       </div>
     </div>
   );
