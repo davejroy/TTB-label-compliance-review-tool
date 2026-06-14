@@ -76,6 +76,18 @@ The items below were listed as known gaps and have now been implemented:
 - **Formula-dependent caveats.** Sulfite, allergen, age-statement, and
   commodity-statement checks now carry `_FORMULA_DEPENDENT` notices.
 
+
+### Phase 2 improvements (this session)
+
+- **Per-field confidence thresholds** (`FIELD_CONFIDENCE_THRESHOLDS`): each field
+  gets its own readability floor. Gov Warning body text allowed 0.45 vs brand name
+  0.60 (long text on a curved bottle). Failed fields produce a named retake request.
+- **Multi-photo extraction and merging** (`merge_extracted_label_data`;
+  `photo_roles` batch param): front + back label photos extracted independently
+  then merged by highest-confidence field value. Fixes spurious Gov Warning failures.
+- `LabelCheckResult.photo_sources` records which photo roles contributed.
+- `ExtractedLabelData.per_field_confidence` dict in model, schema, and prompt.
+
 ## Remaining next steps
 
 - Integrate with COLA to pull application data automatically.
