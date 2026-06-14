@@ -23,9 +23,9 @@ function newItem(): BatchItem {
 }
 
 // Step indices for ProcessingStatusBar
-// 0 = Uploading  1 = Reading label  2 = Checking  3 = Complete
-const STEP_UPLOAD   = 0;
-const STEP_READING  = 1;
+// 0 = Uploading 1 = Reading label 2 = Checking 3 = Complete
+const STEP_UPLOAD = 0;
+const STEP_READING = 1;
 const STEP_CHECKING = 2;
 const STEP_COMPLETE = 3;
 
@@ -38,6 +38,9 @@ export default function BatchReview() {
   const [statusStep, setStatusStep] = useState(-1);
   const [showBar, setShowBar] = useState(false);
   const stepTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Refs for auto-scroll
+  const statusBarRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   function clearTimers() {
     stepTimers.current.forEach(clearTimeout);
@@ -98,6 +101,10 @@ export default function BatchReview() {
     setResults(null);
     setExpanded(null);
     startProgressTimers();
+    // Scroll to status bar after a brief delay so it has rendered
+    setTimeout(() => {
+      statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
     try {
       const res = await reviewLabelsBatch(
         items.map((item) => ({ files: item.files, application: item.application }))
@@ -105,9 +112,16 @@ export default function BatchReview() {
       clearTimers();
       setStatusStep(STEP_COMPLETE);
       setResults(res);
+      // Scroll to results once they arrive
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
     } catch (err) {
       clearTimers();
       setError(err instanceof Error ? err.message : "Something went wrong.");
+      setTimeout(() => {
+        statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
     } finally {
       setLoading(false);
     }
@@ -153,15 +167,15 @@ export default function BatchReview() {
         {error && <p className="text-base text-red-700">{error}</p>}
       </form>
 
-      {/* Processing status bar - shown during and just after processing */
-      showBar && (loading || isDone) && (
-        <div className="mt-6 rounded-xl border border-slate-200 bg-white px-4 pt-4 pb-2 shadow-sm">
+      {/* Processing status bar - shown during and just after processing */}
+      {showBar && (loading || isDone) && (
+        <div ref={statusBarRef} className="mt-6 rounded-xl border border-slate-200 bg-white px-4 pt-4 pb-2 shadow-sm">
           <ProcessingStatusBar step={statusStep} done={isDone} />
         </div>
       )}
 
       {results && (
-        <div className="mt-10">
+        <div ref={resultsRef} className="mt-10">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h2 className="text-2xl font-bold text-slate-900">Batch Results</h2>
             <button type="button"
@@ -183,7 +197,7 @@ export default function BatchReview() {
                 const issueText = result.error
                   ? <span className="text-red-600">{result.error}</span>
                   : issues.length === 0 ? "No issues found"
-                    : issues.map((f) => f.label_name).join(", ");
+                  : issues.map((f) => f.label_name).join(", ");
                 return (
                   <div key={index}>
                     {/* Mobile card layout */}
@@ -231,4 +245,3 @@ export default function BatchReview() {
     </div>
   );
 }
-
