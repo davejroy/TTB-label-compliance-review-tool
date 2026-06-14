@@ -33,20 +33,20 @@ _log = logging.getLogger(__name__)
 
 
 class ImageQualityError(ValueError):
-        """Raised when an uploaded image cannot be read due to poor quality.
+    """Raised when an uploaded image cannot be read due to poor quality.
 
-            Inherits ValueError so legacy callers that catch ValueError still work.
-                The ``user_message`` attribute holds a short, plain-English string that
-                    is safe to return directly to the end-user (no internal detail leaked).
+    Inherits ValueError so legacy callers that catch ValueError still work.
+    The ``user_message`` attribute holds a short, plain-English string that
+    is safe to return directly to the end-user (no internal detail leaked).
 
-                        Best-practice note (RFC 7807 / PEP 3151): using a dedicated exception
-                            class lets callers distinguish a user-actionable photo error from an
-                                unrelated system error without parsing message strings.
-                                    """
+    Best-practice note (RFC 7807 / PEP 3151): using a dedicated exception
+    class lets callers distinguish a user-actionable photo error from an
+    unrelated system error without parsing message strings.
+    """
 
     def __init__(self, user_message: str) -> None:
-                self.user_message = user_message
-                super().__init__(user_message)
+        self.user_message = user_message
+        super().__init__(user_message)
 
 
 # Minimum pixel area (width * height) required after downscaling.  Images
