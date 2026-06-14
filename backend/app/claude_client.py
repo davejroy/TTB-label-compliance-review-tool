@@ -194,12 +194,23 @@ EXTRACTION_TOOL = {
                     "was acceptable."
                 ),
             },
+            "is_alcohol_beverage_label": {
+                "type": "boolean",
+                "description": (
+                    "True if the image appears to be a label from an alcohol beverage "
+                    "(beer, wine, malt beverage, distilled spirits, or similar). "
+                    "False if the image is clearly NOT an alcohol beverage label "
+                    "(e.g. a food product, soft drink, cleaning product, or anything "
+                    "other than an alcoholic drink). When in doubt, return True."
+                ),
+            },
         },
         "required": [
             "brand_name", "class_type", "alcohol_content", "net_contents",
             "name_and_address", "country_of_origin", "government_warning_header",
             "government_warning_body", "government_warning_present",
             "beverage_type_guess", "origin_guess", "field_locations", "notes",
+            "is_alcohol_beverage_label",
         ],
     },
 }
@@ -225,7 +236,11 @@ SYSTEM_PROMPT = (
     "'Con-' on one line and 'sumption of' on the next). When transcribing, join "
     "hyphenated line breaks back into the full word (e.g. 'Consumption of'), so the "
     "government_warning_body and other fields contain the complete, unhyphenated text. "
-    "Always respond by calling the record_label_fields tool."
+    "Always respond by calling the record_label_fields tool. "
+    "Important: set is_alcohol_beverage_label to False if the image is clearly "
+    "not an alcohol beverage label (e.g. a condiment, food item, soft drink, "
+    "household product, or any non-alcoholic product). Set it to True for beer, "
+    "wine, malt beverages, distilled spirits, and similar alcoholic drinks."
 )
 
 
@@ -404,10 +419,19 @@ def extract_label_fields(
     for block in response.content:
         if block.type == "tool_use" and block.name == "record_label_fields":
             try:
-                return ExtractedLabelData(**block.input)
+                data = ExtractedLabelData(**block.input)
             except ValidationError as exc:
                 raise RuntimeError(
                     f"Claude returned a tool call with invalid field data: {exc}"
                 ) from exc
+            # Product type guard: reject non-alcohol labels before compliance checks.
+            if not data.is_alcohol_beverage_label:
+                raise ValueError(
+                    "The submitted image does not appear to be an alcohol beverage "
+                    "label. This tool only reviews labels for beer, wine, malt "
+                    "beverages, and distilled spirits. Please resubmit with a photo "
+                    "of an alcohol beverage label."
+                )
+            return data
 
     raise RuntimeError("Claude did not return structured label data")
