@@ -193,8 +193,12 @@ SYSTEM_PROMPT = (
     "in 'field_locations' with an approximate bounding box (as fractions of that "
     "image's width/height, with (0,0) at the top-left corner) showing where on the "
     "image the text appears, the index of the image it appears in, and a confidence "
-    "level reflecting how certain you are in the transcription. Always respond by "
-    "calling the record_label_fields tool."
+    "level reflecting how certain you are in the transcription. "
+    "Important: label text often wraps across lines with end-of-line hyphens (e.g. "
+    "'Con-' on one line and 'sumption of' on the next). When transcribing, join "
+    "hyphenated line breaks back into the full word (e.g. 'Consumption of'), so the "
+    "government_warning_body and other fields contain the complete, unhyphenated text. "
+    "Always respond by calling the record_label_fields tool."
 )
 
 
