@@ -148,6 +148,20 @@ CANONICAL_WARNING_BODY = (
     "car or operate machinery, and may cause health problems."
 )
 
+
+# Small-container Government Warning (27 CFR 16.21(c))
+# Containers with capacity <= 100 mL may use an abbreviated warning.
+SMALL_CONTAINER_THRESHOLD_ML = 100.0
+SMALL_CONTAINER_THRESHOLD_FLOZ = 3.381
+
+# Abbreviated warning body for containers <= 100 mL (omits clause numbers).
+CANONICAL_WARNING_BODY_SHORT = (
+    "According to the Surgeon General, women should not drink alcoholic "
+    "beverages during pregnancy because of the risk of birth defects. "
+    "Consumption of alcoholic beverages impairs your ability to drive a "
+    "car or operate machinery, and may cause health problems."
+)
+
 # ---------------------------------------------------------------------------
 # Wine ABV tolerance helper (27 CFR 4.36(b)(1))
 # ---------------------------------------------------------------------------
@@ -230,6 +244,15 @@ def _parse_net_contents(text: str) -> tuple:
         return float(m.group(1).replace(",", ".")), None
     return None, None
 
+
+def _is_small_container(net_contents) -> bool:
+    """Return True when the container is <= 100 mL (27 CFR 16.21(c))."""
+    if not net_contents:
+        return False
+    qty, unit = _parse_net_contents(net_contents)
+    if qty is None or unit is None:
+        return False
+    return (unit == "ml" and qty <= SMALL_CONTAINER_THRESHOLD_ML) or (unit == "floz" and qty <= SMALL_CONTAINER_THRESHOLD_FLOZ)
 
 def _is_authorised_fill(qty: float, unit, beverage_type) -> bool:
     """Return True/False if qty/unit is an authorised standard of fill.
@@ -491,12 +514,13 @@ def _check_alcohol_content(
     )
 
 
-def _check_government_warning(extracted):
+def _check_government_warning(extracted) -> FieldResult:
     """Validate the Government Warning statement (27 CFR 16.21).
 
-    Uses FIELD_CONFIDENCE_THRESHOLDS["government_warning_body"] (0.45) to
-    detect when the warning text was too blurry/curved to read reliably and
-    returns a targeted retake request rather than a low-confidence pass.
+    Supports the abbreviated short-form body for containers <= 100 mL
+    per 27 CFR 16.21(c): omits clause numbers (1)/(2). Both forms pass.
+    Also applies per-field confidence gate (government_warning_body threshold
+    = 0.45 per FIELD_CONFIDENCE_THRESHOLDS).
     """
     field, label_name = "government_warning", "Government Warning"
 
@@ -505,9 +529,7 @@ def _check_government_warning(extracted):
         threshold = FIELD_CONFIDENCE_THRESHOLDS.get("government_warning_body", _DEFAULT_FIELD_CONFIDENCE)
         if body_conf < threshold:
             return FieldResult(
-                field=field,
-                label_name=label_name,
-                status="fail",
+                field=field, label_name=label_name, status="fail",
                 application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
                 label_value=None,
                 message=(
@@ -530,34 +552,45 @@ def _check_government_warning(extracted):
     header = (extracted.government_warning_header or "").strip()
     body = _normalize_whitespace(extracted.government_warning_body)
     canonical_body = _normalize_whitespace(CANONICAL_WARNING_BODY)
+    canonical_short = _normalize_whitespace(CANONICAL_WARNING_BODY_SHORT)
+    is_small = _is_small_container(extracted.net_contents)
 
     issues = []
     if header != CANONICAL_WARNING_HEADER:
         issues.append(
-            f"header must read exactly '{CANONICAL_WARNING_HEADER}' in capital letters "
-            f"(found '{header}')"
+            "header must read exactly 'GOVERNMENT WARNING:' in capital letters "
+            + f"(found '{header}')"
         )
 
-    if body.lower() != canonical_body.lower():
-        similarity = _similarity(body.lower(), canonical_body.lower())
-        if similarity >= 0.95:
+    body_lower = body.lower()
+    if body_lower != canonical_body.lower():
+        if is_small and body_lower == canonical_short.lower():
+            pass  # Short form accepted
+        elif is_small and _similarity(body_lower, canonical_short.lower()) >= 0.90:
+            issues.append("warning text has minor wording differences from the permitted short-form text")
+        elif _similarity(body_lower, canonical_body.lower()) >= 0.95:
             issues.append("warning text has minor wording differences from the required text")
+        elif is_small:
+            issues.append("warning text does not match either the standard or the permitted short-form text (27 CFR 16.21(c))")
         else:
             issues.append("warning text does not match the required statement")
 
     if not issues:
+        note = ""
+        if is_small and body_lower == canonical_short.lower():
+            note = " (short-form variant accepted for containers <= 100 mL per 27 CFR 16.21(c))"
         return FieldResult(
             field=field, label_name=label_name, status="pass",
             application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
             label_value=header + " " + body,
-            message="Government Warning statement matches the required text exactly.",
+            message="Government Warning statement matches the required text exactly." + note,
         )
 
     return FieldResult(
         field=field, label_name=label_name, status="fail",
         application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
         label_value=(header + " " + body).strip(),
-        message="Government Warning issue(s): " + "; ".join(issues) + ".",
+        message="Government Warning issue(s): " + "; ".join(issues) + "."
     )
 
 def run_compliance_checks(
