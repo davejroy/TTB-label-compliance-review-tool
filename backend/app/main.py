@@ -95,7 +95,7 @@ async def _read_and_validate_file(
     except ImageQualityError as exc:
         # Surface the user-friendly message directly - no internal details.
         # HTTP 422 Unprocessable Entity signals a client-fixable input problem
-        # (per RFC 9110 Â§15.5.21), distinct from 400 (bad request structure).
+        # (per RFC 9110 ÃÂ§15.5.21), distinct from 400 (bad request structure).
         _log.info("Image quality rejected for '%s': %s", file.filename, exc.user_message)
         return exc.user_message
     except ValueError as exc:
@@ -171,6 +171,10 @@ async def _extract_fields_with_retry(
                 await asyncio.sleep(_RETRY_DELAY_S)
                 continue
             return None, f"Claude API error ({exc.status_code}): {exc.message}"
+        except ValueError as exc:
+            # Non-alcohol label guard (raised by extract_label_fields when
+            # is_alcohol_beverage_label is False). Surface directly to user.
+            return None, str(exc)
         except RuntimeError as exc:
             return None, f"Could not read label image(s): {exc}"
         except Exception as exc:  # noqa: BLE001
