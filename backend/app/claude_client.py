@@ -23,7 +23,7 @@ from anthropic import (
     RateLimitError,
 )
 from pydantic import ValidationError
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageEnhance, ImageFilter, UnidentifiedImageError
 
 from .models import ExtractedLabelData
 
@@ -211,6 +211,7 @@ SYSTEM_PROMPT = (
     "calling the record_label_fields tool."
 )
 
+
 def _media_type_for(filename: str) -> str:
     """Guess the image MIME type from a filename's extension.
 
@@ -226,13 +227,90 @@ def _media_type_for(filename: str) -> str:
         "gif": "image/gif",
     }.get(ext, "image/jpeg")
 
-def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
-    """Validate and downscale an image so its longest edge is at most MAX_IMAGE_DIMENSION px.
 
-    Returns ``(image_bytes, media_type)`` - if the image was already within
-    bounds it is returned unchanged. Downscaled images are always re-encoded
-    as JPEG to maximise compression savings; the returned ``media_type`` is
-    updated accordingly.
+def _enhance_for_ocr(img: Image.Image) -> Image.Image:
+    """Apply light image enhancements to improve text legibility for Claude.
+
+    The goal is to help Claude read labels shot in variable lighting or with
+    slight camera blur - common when agents photograph bottles in the field.
+    We apply three gentle, non-destructive steps in order:
+
+    1. Auto-levels (contrast stretch) - maps the actual min/max pixel values
+       to 0-255 so underexposed or washed-out photos get full tonal range.
+       Skips images that are already well-exposed (within 20% of full range).
+
+    2. Sharpening - applies an unsharp mask to crisp up slightly blurry text
+       without introducing harsh artefacts on already-sharp photos.
+
+    3. Mild brightness correction - if the image mean luminance is below 80
+       (dark) or above 200 (washed out) we nudge it toward the midrange.
+       The correction is intentionally small (factor 1.25 / 0.85) to avoid
+       over-processing photos that are simply high-contrast by design.
+
+    All operations work on a converted RGB copy so palette/RGBA modes are
+    handled correctly and the caller's original image is not mutated.
+    """
+    # Work in RGB throughout
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+
+    # --- Step 1: Auto-levels (per-channel histogram stretch) ---
+    import struct
+    pixels = list(img.getdata())
+    # Flatten to per-channel min/max
+    r_vals = [p[0] for p in pixels]
+    g_vals = [p[1] for p in pixels]
+    b_vals = [p[2] for p in pixels]
+    r_min, r_max = min(r_vals), max(r_vals)
+    g_min, g_max = min(g_vals), max(g_vals)
+    b_min, b_max = min(b_vals), max(b_vals)
+    # Only stretch if the image is noticeably compressed (range < 80% of 255)
+    needs_stretch = (
+        (r_max - r_min) < 204 or
+        (g_max - g_min) < 204 or
+        (b_max - b_min) < 204
+    )
+    if needs_stretch:
+        def stretch(val, lo, hi):
+            if hi == lo:
+                return val
+            return int((val - lo) * 255 / (hi - lo))
+        stretched = [
+            (stretch(p[0], r_min, r_max),
+             stretch(p[1], g_min, g_max),
+             stretch(p[2], b_min, b_max))
+            for p in pixels
+        ]
+        img.putdata(stretched)
+
+    # --- Step 2: Unsharp mask sharpening ---
+    # radius=1, percent=120, threshold=3 gives a gentle crispening that
+    # helps slightly soft phone-camera shots without over-sharpening.
+    img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=120, threshold=3))
+
+    # --- Step 3: Mild brightness correction ---
+    # Compute mean luminance from the green channel (perceptually dominant)
+    g_mean = sum(p[1] for p in list(img.getdata())) / (img.width * img.height)
+    if g_mean < 80:
+        # Dark image - boost brightness slightly
+        img = ImageEnhance.Brightness(img).enhance(1.25)
+    elif g_mean > 200:
+        # Washed-out image - reduce brightness slightly
+        img = ImageEnhance.Brightness(img).enhance(0.85)
+
+    return img
+
+
+def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
+    """Validate, enhance, and downscale an image for Claude.
+
+    Steps:
+    1. Validate the image bytes with Pillow (raises ValueError on corrupt files).
+    2. Apply ``_enhance_for_ocr`` to improve legibility on field-shot photos
+       with variable lighting or slight blur.
+    3. Downscale so the longest edge is at most MAX_IMAGE_DIMENSION px.
+
+    Returns ``(image_bytes, media_type)`` - always JPEG after this step.
 
     This is CPU-bound (Pillow) and should be called from a thread pool when
     inside an async context (see main.py).
@@ -248,21 +326,27 @@ def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, st
     except (UnidentifiedImageError, Exception) as exc:
         raise ValueError(f"Invalid or unreadable image file: {exc}") from exc
 
-    w, h = img.size
-    if max(w, h) <= MAX_IMAGE_DIMENSION:
-        return image_bytes, media_type
-
-    scale = MAX_IMAGE_DIMENSION / max(w, h)
-    new_w, new_h = int(w * scale), int(h * scale)
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-
-    # Convert palette/RGBA images before JPEG encoding.
+    # Convert palette / RGBA modes before processing
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
 
+    # Apply OCR-optimised enhancements (lighting normalisation + sharpening)
+    img = _enhance_for_ocr(img)
+
+    # Downscale if the longest edge exceeds the limit
+    w, h = img.size
+    if max(w, h) > MAX_IMAGE_DIMENSION:
+        scale = MAX_IMAGE_DIMENSION / max(w, h)
+        new_w, new_h = int(w * scale), int(h * scale)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    # Always encode as JPEG for consistent compression
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=90)
     return buf.getvalue(), "image/jpeg"
+
 
 def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
     """Send label image(s) to Claude and return the extracted structured fields.
@@ -284,7 +368,7 @@ def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
         APIConnectionError: Network-level connection failure.
         APIStatusError: Other non-2xx response from the Anthropic API.
         RuntimeError: Claude responded but did not call the expected tool,
-            or called it with a payload that doesn't match the schema.
+            or called it with a payload that does not match the schema.
     """
     image_blocks = []
     for image_bytes, filename in images:
