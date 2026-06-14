@@ -212,9 +212,11 @@ size.
   (27 CFR 16.21). Real labels for very small containers have alternate
   wording rules that aren't handled here.
 - **ABV tolerances** follow 27 CFR 4.36(b)(1) (wine), 5.65(c) (distilled
-  spirits), and 7.65(c) (malt beverages), but real-world products can have
-  additional class/type-specific rules and are intended to illustrate the
-  concept rather than be a substitute for legal review.
+  spirits), and 7.65(c) (malt beverages). Both the ABV tolerance and the
+  minimum extraction-confidence floor for each beverage class are configurable
+  in `BEVERAGE_TOLERANCE` in `compliance.py`. Real-world products may have
+  additional class/type-specific rules; this tool illustrates the concept and
+  is not a substitute for legal review.
 - **Net contents matching is exact-after-normalization** (e.g.
   "750mL" == "750 mL"); it does not convert between units (mL vs. fl oz).
 - **No persistence/database.** Each review is stateless and nothing is
@@ -233,17 +235,35 @@ size.
   Jenny's request, but extremely poor images will still be flagged via the
   "notes" field rather than silently guessed at.
 
-## Possible next steps
+## Implemented in this version (previously listed as "Possible next steps")
 
-- Configurable tolerance rules per beverage class.
-- **Label-Only Check enhancements:** the beverage type used for the ABV
-  requirement check is currently Claude's best guess from the label text
-  (`beverage_type_guess`). For higher-stakes use, let the agent confirm/
-  override the detected beverage type before the requirements are evaluated.
-- **Standards of fill:** the Net Contents check currently only confirms a
-  quantity is stated; it does not validate against the actual list of
-  authorized standards of fill sizes per 27 CFR 4.72 / 5.203 / 7.70.
-- **Formula-dependent verification:** sulfite declaration, allergen disclosures,
-  age statement, and commodity statement are now checked at the label-text level;
-  final determination still requires production/formula records for ingredient-level
-  confirmation (e.g., actual SO2 ppm, specific additives present).
+- **Configurable tolerance rules per beverage class.** `BEVERAGE_TOLERANCE` in
+  `compliance.py` maps each beverage class (`distilled_spirits`, `wine`, `beer`,
+  `unknown`) to its ABV tolerance and a minimum extraction-confidence threshold.
+  Operators can adjust both values without touching logic code.
+- **Confidence-gated extraction.** The new `extraction_confidence` field (0.0-1.0)
+  is populated by Claude and evaluated before any compliance check runs. Images
+  below the per-class confidence floor raise `LowConfidenceError` and return a
+  fail with a retake-photo prompt instead of silently passing on a best guess.
+- **Label-Only Check: beverage-type confirmation.** `check_label_requirements` now
+  accepts a `confirmed_beverage_type` parameter. When Claude's guess is `unknown`,
+  the result sets `needs_beverage_confirmation=True` and returns no checks so the
+  frontend can prompt the agent to confirm or override before requirements are
+  evaluated. The agent-confirmed type is also used for fill-size validation.
+- **Standards of fill validated (27 CFR 4.72 / 5.203 / 7.70).** Net contents
+  now validates the parsed quantity and unit against the closed list of authorised
+  fill sizes. Wine and distilled spirits sizes outside the CFR list are a fail;
+  beer is exempt from the enumerated list (27 CFR 7.70 requires accuracy but not
+  a specific size).
+- **Formula-dependent checks carry an explicit caveat.** Sulfite declaration,
+  allergen disclosures, age statement, and commodity statement checks all append
+  a FORMULA_DEPENDENT notice: a label-level pass does not substitute for
+  production/formula record review (e.g. actual SO2 ppm, specific additives,
+  aging records, import documentation).
+
+Possible next steps
+
+- Integrate with COLA to pull application data automatically.
+- Add state-level ABV and label requirement checks (states vary significantly).
+- Support alternate Government Warning text for small containers (<100 mL).
+- Add a frontend confirmation dialog for the beverage-type override flow.
