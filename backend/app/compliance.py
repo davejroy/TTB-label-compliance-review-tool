@@ -105,6 +105,36 @@ BEVERAGE_TOLERANCE: dict[str, dict] = {
 # Default confidence threshold used when beverage class is not in the table.
 _DEFAULT_MIN_CONFIDENCE = 0.70
 
+# ---------------------------------------------------------------------------
+# Per-field confidence thresholds
+# ---------------------------------------------------------------------------
+#
+# FIELD_CONFIDENCE_THRESHOLDS controls which per-field confidence score
+# (from ExtractedLabelData.per_field_confidence) triggers a field-level fail
+# with a request for a better photo rather than a low-confidence pass.
+#
+# Government Warning body text is set lower (0.45) because it is ~80 words
+# printed in small font on a curved bottle surface; vision models legitimately
+# score it lower than a short brand name even on a well-lit photo.
+# brand_name, alcohol_content, and net_contents are short high-stakes fields.
+# Fields absent from this table use _DEFAULT_FIELD_CONFIDENCE (0.50).
+
+FIELD_CONFIDENCE_THRESHOLDS: dict[str, float] = {
+    "brand_name":        0.60,
+    "alcohol_content":   0.60,
+    "net_contents":      0.60,
+    "class_type":        0.55,
+    "government_warning_body":   0.45,
+    "government_warning_header": 0.50,
+    "name_and_address":          0.45,
+    "sulfite_declaration":  0.40,
+    "allergen_statements":  0.40,
+    "age_statement":        0.40,
+    "commodity_statement":  0.40,
+}
+
+_DEFAULT_FIELD_CONFIDENCE = 0.50
+
 
 # ---------------------------------------------------------------------------
 # Canonical government-warning text (27 CFR 16.21)
@@ -277,48 +307,78 @@ def _extract_percent(text) -> float:
 # Confidence-gate helper
 # ---------------------------------------------------------------------------
 
-def assert_extraction_confidence(extracted: ExtractedLabelData, beverage_type=None) -> None:
+def assert_extraction_confidence(extracted, beverage_type=None):
     """Raise LowConfidenceError if extraction confidence is below threshold.
 
-    Must be called at the top of both entry-point functions so that
-    low-quality photos are rejected before any compliance check is run.
-
-    Args:
-        extracted:      The ExtractedLabelData returned by Claude.
-        beverage_type:  Resolved beverage type string; used to look up the
-                        per-class threshold from BEVERAGE_TOLERANCE.
+    Checks two levels:
+    1. Overall confidence (extracted.extraction_confidence) against the
+       per-class minimum in BEVERAGE_TOLERANCE.
+    2. Per-field confidence (extracted.per_field_confidence) against
+       FIELD_CONFIDENCE_THRESHOLDS.  If any key field has a score below its
+       threshold, a LowConfidenceError is raised naming the specific field.
     """
-    confidence = getattr(extracted, "extraction_confidence", None)
-    if confidence is None:
-        # Field absent in older schema versions; skip gate to stay backward-compat.
+    if extracted.extraction_confidence is None:
+        _log.debug("assert_extraction_confidence: no score emitted, skipping gate.")
         return
 
-    bev_key = (beverage_type or "").lower()
-    class_cfg = BEVERAGE_TOLERANCE.get(bev_key, {})
-    threshold = class_cfg.get("min_confidence", _DEFAULT_MIN_CONFIDENCE)
+    cls = str(beverage_type or "unknown").lower()
+    config = BEVERAGE_TOLERANCE.get(cls, BEVERAGE_TOLERANCE["unknown"])
+    threshold = config.get("min_confidence", _DEFAULT_MIN_CONFIDENCE)
+    conf = extracted.extraction_confidence
 
-    if confidence < threshold:
-        _log.warning(
-            "Extraction confidence %.2f below threshold %.2f for class %r.",
-            confidence, threshold, bev_key,
-        )
+    if conf < threshold:
+        _log.info("Low overall extraction confidence %.2f < %.2f (%s)", conf, threshold, cls)
         raise LowConfidenceError(
             user_message=(
-                f"Label photo quality is too low to evaluate reliably "
-                f"(confidence {confidence:.0%}, minimum required {threshold:.0%} "
-                f"for {bev_key or 'unknown'} labels). "
-                "Please retake the photo ensuring: good lighting, minimal glare, "
-                "all required label panels are fully in frame, and text is legible."
+                f"The label image quality is too low to reliably read the required fields "
+                f"(confidence {conf:.0%}, minimum {threshold:.0%} for {cls}). "
+                "Please retake the photo: ensure the label is flat-on, well-lit, in sharp "
+                "focus, and the entire label is visible within the frame."
             ),
-            confidence=confidence,
+            confidence=conf,
             threshold=threshold,
         )
 
+    if not extracted.per_field_confidence:
+        return
 
-# ---------------------------------------------------------------------------
-# Shared field-level checks (used by both run_compliance_checks and
-# check_label_requirements)
-# ---------------------------------------------------------------------------
+    field_issues = []
+    for field_name, field_score in extracted.per_field_confidence.items():
+        field_threshold = FIELD_CONFIDENCE_THRESHOLDS.get(field_name, _DEFAULT_FIELD_CONFIDENCE)
+        if field_score < field_threshold:
+            _log.info("Low per-field confidence for '%s': %.2f < %.2f", field_name, field_score, field_threshold)
+            field_issues.append((field_name, field_score, field_threshold))
+
+    if field_issues:
+        field_descriptions = {
+            "brand_name": "brand name",
+            "class_type": "class/type designation",
+            "alcohol_content": "alcohol content (ABV)",
+            "net_contents": "net contents / fill quantity",
+            "government_warning_header": "Government Warning header",
+            "government_warning_body": "Government Warning text body",
+            "name_and_address": "bottler/producer name and address",
+            "sulfite_declaration": "sulfite declaration",
+            "allergen_statements": "allergen statements",
+            "age_statement": "age statement",
+            "commodity_statement": "commodity statement",
+        }
+        readable_fields = [field_descriptions.get(fn, fn) for fn, _, _ in field_issues]
+        noun = "fields" if len(readable_fields) > 1 else "field"
+        listed = ", ".join(f'"{f}"' for f in readable_fields)
+        conf_detail = "; ".join(f"{fn} {fs:.0%}" for fn, fs, _ in field_issues)
+        raise LowConfidenceError(
+            user_message=(
+                f"The following label {noun} could not be read clearly enough "
+                f"to produce a reliable compliance result: {listed}. "
+                f"(Confidence scores: {conf_detail}.) "
+                "Please retake the photo focusing on the affected area: ensure "
+                "the label surface is fully visible, not curved into shadow, and "
+                "the text is sharply in focus."
+            ),
+            confidence=min(fs for _, fs, _ in field_issues),
+            threshold=min(ft for _, _, ft in field_issues),
+        )
 
 def _check_text_field(
     field: str,
@@ -431,9 +491,33 @@ def _check_alcohol_content(
     )
 
 
-def _check_government_warning(extracted: ExtractedLabelData) -> FieldResult:
-    """Validate the Government Warning statement (27 CFR 16.21)."""
+def _check_government_warning(extracted):
+    """Validate the Government Warning statement (27 CFR 16.21).
+
+    Uses FIELD_CONFIDENCE_THRESHOLDS["government_warning_body"] (0.45) to
+    detect when the warning text was too blurry/curved to read reliably and
+    returns a targeted retake request rather than a low-confidence pass.
+    """
     field, label_name = "government_warning", "Government Warning"
+
+    body_conf = extracted.per_field_confidence.get("government_warning_body")
+    if body_conf is not None:
+        threshold = FIELD_CONFIDENCE_THRESHOLDS.get("government_warning_body", _DEFAULT_FIELD_CONFIDENCE)
+        if body_conf < threshold:
+            return FieldResult(
+                field=field,
+                label_name=label_name,
+                status="fail",
+                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
+                label_value=None,
+                message=(
+                    f"Government Warning text could not be read clearly enough to verify "
+                    f"(confidence {body_conf:.0%}, minimum {threshold:.0%}). "
+                    "Please retake the back-label photo: hold the camera flat-on to the "
+                    "label surface (not at an angle), ensure the warning text is fully "
+                    "visible and sharply in focus, and avoid reflections or shadows."
+                ),
+            )
 
     if not extracted.government_warning_present:
         return FieldResult(
@@ -475,11 +559,6 @@ def _check_government_warning(extracted: ExtractedLabelData) -> FieldResult:
         label_value=(header + " " + body).strip(),
         message="Government Warning issue(s): " + "; ".join(issues) + ".",
     )
-
-
-# ---------------------------------------------------------------------------
-# Application-vs-label entry point
-# ---------------------------------------------------------------------------
 
 def run_compliance_checks(
     application: ApplicationData, extracted: ExtractedLabelData
@@ -1070,3 +1149,80 @@ def overall_status(results: list) -> str:
     if any(r.status == "warning" for r in results):
         return "warning"
     return "pass"
+
+# ---------------------------------------------------------------------------
+# Multi-photo field merging
+# ---------------------------------------------------------------------------
+
+def merge_extracted_label_data(extractions, photo_roles=None):
+    """Merge multiple single-photo extractions into one combined result.
+
+    When separate front and back label photos are submitted, extract each
+    independently and call this to merge into one ExtractedLabelData.
+    Strategy: for each field, pick the value from the extraction with the
+    highest per_field_confidence (or extraction_confidence as fallback).
+
+    Special handling:
+    - government_warning_present: True if ANY extraction found the warning.
+    - is_alcohol_beverage_label: True if ANY extraction flagged it.
+    - extraction_confidence: maximum across all extractions.
+    - per_field_confidence: max score per field.
+    - field_locations: concatenated.
+    - notes: concatenated with newlines.
+    """
+    if not extractions:
+        from .models import ExtractedLabelData as _ELD
+        return _ELD()
+    if len(extractions) == 1:
+        return extractions[0]
+
+    roles = photo_roles or [str(i + 1) for i in range(len(extractions))]
+
+    merged_pfc = {}
+    for ext in extractions:
+        for fn, score in ext.per_field_confidence.items():
+            merged_pfc[fn] = max(merged_pfc.get(fn, 0.0), score)
+
+    _TEXT_FIELDS = [
+        "brand_name", "class_type", "alcohol_content", "net_contents",
+        "name_and_address", "country_of_origin",
+        "government_warning_header", "government_warning_body",
+        "beverage_type_guess", "origin_guess",
+        "sulfite_declaration", "allergen_statements",
+        "age_statement", "commodity_statement",
+    ]
+
+    merged = {}
+    for field in _TEXT_FIELDS:
+        best_value = None
+        best_score = -1.0
+        for ext, role in zip(extractions, roles):
+            val = getattr(ext, field, None)
+            if val is None:
+                continue
+            score = ext.per_field_confidence.get(field, ext.extraction_confidence or 0.0)
+            if best_value is None or score > best_score:
+                best_value = val
+                best_score = score
+                _log.debug("merge: field='%s' score=%.2f from photo='%s'", field, score, role)
+        merged[field] = best_value
+
+    merged["government_warning_present"] = any(e.government_warning_present for e in extractions)
+    merged["is_alcohol_beverage_label"] = any(e.is_alcohol_beverage_label for e in extractions)
+    confs = [e.extraction_confidence for e in extractions if e.extraction_confidence is not None]
+    merged["extraction_confidence"] = max(confs) if confs else None
+    merged["per_field_confidence"] = merged_pfc
+    merged["field_locations"] = [loc for e in extractions for loc in e.field_locations]
+    notes_parts = [e.notes for e in extractions if e.notes]
+    merged["notes"] = "\n".join(notes_parts) if notes_parts else None
+
+    from .models import ExtractedLabelData as _ELD
+    result = _ELD(**merged)
+    _log.info(
+        "merge_extracted_label_data: merged %d photos %s -> gw=%s abv=%r net=%r conf=%.2f",
+        len(extractions), roles,
+        result.government_warning_present,
+        result.alcohol_content, result.net_contents,
+        result.extraction_confidence or 0.0,
+    )
+    return result
