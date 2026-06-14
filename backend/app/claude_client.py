@@ -36,11 +36,19 @@ MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-3-5")
 # across all requests instead of creating a new client per call.
 _CLIENT = Anthropic()
 
-# Claude resizes images so the long edge is at most MAX_IMAGE_DIMENSION px
-# before processing them. Keeping images at 1024px (down from 1568) cuts
-# upload bandwidth and latency meaningfully, while preserving enough detail
-# for text extraction on typical bottle photos.
-MAX_IMAGE_DIMENSION = 1024
+# Maximum pixel dimension for images sent to Claude. 800px gives Claude
+# enough detail to read label text while meaningfully cutting upload size
+# and Claude processing time vs. the previous 1024px limit.
+MAX_IMAGE_DIMENSION = 800
+
+# JPEG encode quality for processed images. 82 produces ~25% smaller files
+# than quality=90 with no meaningful loss in text legibility for a vision
+# model reading characters.
+JPEG_QUALITY = 82
+
+# Timeout in seconds for the Claude API call. Prevents the event loop from
+# hanging indefinitely if the API is slow or unresponsive.
+CLAUDE_TIMEOUT = 30.0
 
 # JSON-schema tool definition passed to Claude. Keep this in sync with
 # ExtractedLabelData in models.py - the tool's "input" is parsed directly
@@ -138,22 +146,10 @@ EXTRACTION_TOOL = {
                             "type": "integer",
                             "description": "0-based index of the image this field was read from.",
                         },
-                        "x": {
-                            "type": "number",
-                            "description": "Left edge of the field as a fraction of image width (0.0=left, 1.0=right).",
-                        },
-                        "y": {
-                            "type": "number",
-                            "description": "Top edge of the field as a fraction of image height (0.0=top, 1.0=bottom).",
-                        },
-                        "width": {
-                            "type": "number",
-                            "description": "Width of the field as a fraction of image width.",
-                        },
-                        "height": {
-                            "type": "number",
-                            "description": "Height of the field as a fraction of image height.",
-                        },
+                        "x": {"type": "number", "description": "Left edge as fraction of image width."},
+                        "y": {"type": "number", "description": "Top edge as fraction of image height."},
+                        "width": {"type": "number", "description": "Width as fraction of image width."},
+                        "height": {"type": "number", "description": "Height as fraction of image height."},
                         "confidence": {
                             "type": "string",
                             "enum": ["high", "medium", "low"],
@@ -173,19 +169,10 @@ EXTRACTION_TOOL = {
             },
         },
         "required": [
-            "brand_name",
-            "class_type",
-            "alcohol_content",
-            "net_contents",
-            "name_and_address",
-            "country_of_origin",
-            "government_warning_header",
-            "government_warning_body",
-            "government_warning_present",
-            "beverage_type_guess",
-            "origin_guess",
-            "field_locations",
-            "notes",
+            "brand_name", "class_type", "alcohol_content", "net_contents",
+            "name_and_address", "country_of_origin", "government_warning_header",
+            "government_warning_body", "government_warning_present",
+            "beverage_type_guess", "origin_guess", "field_locations", "notes",
         ],
     },
 }
@@ -231,58 +218,42 @@ def _enhance_for_ocr(img: Image.Image) -> Image.Image:
     """Apply memory-efficient enhancements to improve text legibility for Claude.
 
     Uses Pillow's built-in C-level operations throughout - no Python pixel
-    loops - so memory overhead is minimal even on the free 512 MB Render tier.
-
-    Steps:
-    1. ImageOps.autocontrast() - stretches the per-channel histogram to the
-       full 0-255 range, fixing underexposed or washed-out photos. The cutoff
-       parameter (1%) clips the top and bottom 1% of pixels before stretching
-       to avoid a single bright or dark speck dominating the stretch.
-
-    2. UnsharpMask filter - crispens slightly blurry phone-camera shots without
-       introducing harsh artefacts on already-sharp images.
-
-    3. Brightness nudge via ImageStat - measures mean channel luminance using
-       Pillow's C aggregation (no pixel list), then applies a small
-       ImageEnhance.Brightness correction only if the image is noticeably
-       dark (mean < 80) or washed out (mean > 200).
+    loops - so memory overhead is minimal even on constrained instances.
     """
     if img.mode != "RGB":
         img = img.convert("RGB")
-
-    # Step 1: Auto-contrast using Pillow's C-level histogram stretch.
-    # cutoff=1 clips 1% from each end before stretching to avoid outlier pixels
-    # dominating the range (e.g. a single white glare spot or black border).
+    # Auto-contrast: stretch histogram to full 0-255 range, clipping 1%
+    # of outlier pixels so a single glare spot does not dominate.
     img = ImageOps.autocontrast(img, cutoff=1)
-
-    # Step 2: Gentle unsharp mask - helps slightly blurry bottle-label photos.
+    # Gentle unsharp mask to crisphen slightly blurry phone-camera shots.
     img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=120, threshold=3))
-
-    # Step 3: Brightness correction using C-level channel statistics.
-    # ImageStat.Stat computes mean/stddev from the image histogram - no Python
-    # pixel iteration - so it is O(1) in memory regardless of image size.
+    # Brightness nudge: measure mean luminance via C-level histogram stats
+    # (no Python pixel iteration), then apply a small correction if needed.
     stat = ImageStat.Stat(img)
-    # Use mean of all three channels as a proxy for overall luminance.
     mean_luminance = sum(stat.mean) / 3
     if mean_luminance < 80:
         img = ImageEnhance.Brightness(img).enhance(1.25)
     elif mean_luminance > 200:
         img = ImageEnhance.Brightness(img).enhance(0.85)
-
     return img
 
 
-def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, str]:
-    """Validate, enhance, and downscale an image for Claude.
+def prepare_image(image_bytes: bytes, filename: str) -> tuple[bytes, str]:
+    """Validate, enhance, downscale, and JPEG-encode one uploaded image.
 
-    Steps:
-    1. Validate the image bytes with Pillow (raises ValueError on corrupt files).
-    2. Downscale so the longest edge is at most MAX_IMAGE_DIMENSION px.
-       Downscaling first keeps the enhancement step as cheap as possible.
-    3. Apply ``_enhance_for_ocr`` to improve legibility on field-shot photos
-       with variable lighting or slight blur.
+    This is the single processing step that replaces the old
+    ``_downscale_if_needed`` call. Callers should store the returned
+    ``(processed_bytes, "image/jpeg")`` and pass them directly to
+    ``extract_label_fields`` via the ``preprocessed`` argument to avoid
+    re-processing the same image twice.
 
-    Returns ``(image_bytes, media_type)`` - always JPEG after this step.
+    Steps (in order):
+    1. Validate with Pillow (raises ValueError on corrupt/unreadable files).
+    2. Convert palette/RGBA modes to RGB.
+    3. Downscale so the longest edge is at most MAX_IMAGE_DIMENSION px.
+       Downscaling first keeps enhancement work as cheap as possible.
+    4. Apply ``_enhance_for_ocr`` (auto-contrast, sharpening, brightness).
+    5. JPEG-encode at JPEG_QUALITY.
 
     This is CPU-bound (Pillow) and should be called from a thread pool when
     inside an async context (see main.py).
@@ -292,101 +263,88 @@ def _downscale_if_needed(image_bytes: bytes, media_type: str) -> tuple[bytes, st
     """
     try:
         img = Image.open(io.BytesIO(image_bytes))
-        img.verify()  # Check for file truncation / corruption
-        # Re-open after verify() since verify() exhausts the stream
+        img.verify()
         img = Image.open(io.BytesIO(image_bytes))
     except (UnidentifiedImageError, Exception) as exc:
         raise ValueError(f"Invalid or unreadable image file: {exc}") from exc
 
-    # Convert palette / RGBA modes before processing
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
 
-    # Downscale FIRST so that enhancement works on the smaller image,
-    # keeping memory and CPU usage to a minimum.
+    # Downscale FIRST so enhancement runs on the smaller image.
     w, h = img.size
     if max(w, h) > MAX_IMAGE_DIMENSION:
         scale = MAX_IMAGE_DIMENSION / max(w, h)
-        new_w, new_h = int(w * scale), int(h * scale)
-        img = img.resize((new_w, new_h), Image.LANCZOS)
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
 
-    # Apply OCR-optimised enhancements after downscaling
     img = _enhance_for_ocr(img)
 
-    # Always encode as JPEG for consistent compression
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90)
+    img.save(buf, format="JPEG", quality=JPEG_QUALITY)
     return buf.getvalue(), "image/jpeg"
 
 
-def extract_label_fields(images: list[tuple[bytes, str]]) -> ExtractedLabelData:
+# Keep the old name as an alias so existing callers in main.py are not broken
+# until they are updated to use prepare_image directly.
+_downscale_if_needed = prepare_image
+
+
+def extract_label_fields(
+    images: list[tuple[bytes, str]],
+    preprocessed: bool = False,
+) -> ExtractedLabelData:
     """Send label image(s) to Claude and return the extracted structured fields.
 
-    Uses the module-level ``_CLIENT`` singleton to reuse connection-pool
-    resources across requests.
-
     Args:
-        images: list of ``(image_bytes, filename)`` tuples. The filename is
-            only used to guess the MIME type.
+        images: list of ``(image_bytes, filename)`` tuples.
+        preprocessed: if True, ``image_bytes`` are already processed JPEG
+            bytes (output of ``prepare_image``) and the media type is always
+            ``image/jpeg``. Avoids re-running the expensive Pillow pipeline
+            on bytes that were already validated, enhanced, and downscaled.
+            If False (default), ``prepare_image`` is called on each image.
 
     Returns:
         The parsed ``ExtractedLabelData`` from the tool call.
 
     Raises:
-        AuthenticationError: API key is missing or invalid.
-        RateLimitError: Anthropic rate limit reached.
-        APITimeoutError: Request timed out.
-        APIConnectionError: Network-level connection failure.
-        APIStatusError: Other non-2xx response from the Anthropic API.
-        RuntimeError: Claude responded but did not call the expected tool,
-            or called it with a payload that does not match the schema.
+        AuthenticationError, RateLimitError, APITimeoutError,
+        APIConnectionError, APIStatusError, RuntimeError.
     """
     image_blocks = []
     for image_bytes, filename in images:
-        resized_bytes, media_type = _downscale_if_needed(image_bytes, _media_type_for(filename))
-        image_blocks.append(
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": base64.b64encode(resized_bytes).decode("utf-8"),
-                },
-            }
-        )
+        if preprocessed:
+            final_bytes, media_type = image_bytes, "image/jpeg"
+        else:
+            final_bytes, media_type = prepare_image(image_bytes, filename)
+        image_blocks.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": base64.b64encode(final_bytes).decode("utf-8"),
+            },
+        })
 
-    if len(images) == 1:
-        prompt_text = "Read this alcohol beverage label and record its fields."
-    else:
-        prompt_text = (
+    prompt_text = (
+        "Read this alcohol beverage label and record its fields."
+        if len(images) == 1
+        else (
             f"These {len(images)} images show the same alcohol beverage label "
             "(e.g. front and back panels). Read all of them together and record "
             "one combined set of fields."
         )
+    )
 
-    # max_tokens set to 800: enough for complete field extraction including
-    # field_locations array and notes, while avoiding wasteful padding that
-    # increases latency.
     response = _CLIENT.messages.create(
         model=MODEL,
         max_tokens=800,
         system=SYSTEM_PROMPT,
         tools=[EXTRACTION_TOOL],
         tool_choice={"type": "tool", "name": "record_label_fields"},
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    *image_blocks,
-                    {
-                        "type": "text",
-                        "text": prompt_text,
-                    },
-                ],
-            }
-        ],
+        timeout=CLAUDE_TIMEOUT,
+        messages=[{"role": "user", "content": [*image_blocks, {"type": "text", "text": prompt_text}]}],
     )
 
     for block in response.content:
