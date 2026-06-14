@@ -63,30 +63,30 @@ commit history (Dave, Jenny, Sarah, Marcus).
 ## 6. Architecture
 
 ```
-┌─────────────────┐        multipart/form-data         ┌──────────────────────┐
-│   React + Vite   │ ──────────────────────────────────▶│  FastAPI (uvicorn)    │
-│   frontend       │ /api/review, /api/review/batch,     │  backend/app/main.py │
-│                  │ /api/label-check/batch               │                       │
-│                  │◀────────────────────────────────────│                       │
-└─────────────────┘        JSON results                 └──────────┬────────────┘
-                                                                     │
-                                                                     │ image bytes +
-                                                                     │ tool-call schema
-                                                                     ▼
-                                                          ┌──────────────────────┐
-                                                          │  Anthropic API        │
-                                                          │  Claude (vision)      │
-                                                          │  claude_client.py     │
-                                                          └──────────┬────────────┘
-                                                                     │
-                                                                     │ structured fields
-                                                                     │ (ExtractedLabelData)
-                                                                     ▼
-                                                          ┌──────────────────────┐
-                                                          │  compliance.py        │
-                                                          │  matching & TTB       │
-                                                          │  requirement checks   │
-                                                          └──────────────────────┘
+âââââââââââââââââââ        multipart/form-data         ââââââââââââââââââââââââ
+â   React + Vite   â âââââââââââââââââââââââââââââââââââ¶â  FastAPI (uvicorn)    â
+â   frontend       â /api/review, /api/review/batch,     â  backend/app/main.py â
+â                  â /api/label-check/batch               â                       â
+â                  âââââââââââââââââââââââââââââââââââââââ                       â
+âââââââââââââââââââ        JSON results                 ââââââââââââ¬âââââââââââââ
+                                                                     â
+                                                                     â image bytes +
+                                                                     â tool-call schema
+                                                                     â¼
+                                                          ââââââââââââââââââââââââ
+                                                          â  Anthropic API        â
+                                                          â  Claude (vision)      â
+                                                          â  claude_client.py     â
+                                                          ââââââââââââ¬âââââââââââââ
+                                                                     â
+                                                                     â structured fields
+                                                                     â (ExtractedLabelData)
+                                                                     â¼
+                                                          ââââââââââââââââââââââââ
+                                                          â  compliance.py        â
+                                                          â  matching & TTB       â
+                                                          â  requirement checks   â
+                                                          ââââââââââââââââââââââââ
 ```
 
 ### Backend (`backend/app/`)
@@ -225,11 +225,15 @@ otherwise just open a redundant file picker.
   wording (27 CFR 16.21). Real labels for very small containers have
   alternate wording rules that aren't handled here.
 - **ABV tolerances** follow 27 CFR 4.36(b)(1) (wine), 5.65(c) (distilled
-  spirits), and 7.65(c) (malt beverages), but real-world products can have
-  additional class/type-specific rules and are intended to illustrate the
-  concept rather than be a substitute for legal review.
-- **Net contents matching is exact-after-normalization** (e.g. "750mL" ==
-  "750 mL"); it does not convert between units (mL vs. fl oz).
+  spirits), and 7.65(c) (malt beverages). Both the tolerance and the minimum
+  extraction-confidence floor are configurable per beverage class in
+  `BEVERAGE_TOLERANCE` (`compliance.py`). Real-world products may have
+  additional class/type-specific rules; this tool is not a substitute for
+  legal review.
+- **Net contents:** in the Application vs. Label review, matching is
+  exact-after-normalization (e.g. "750mL" == "750 mL"). In the Label-Only
+  Check, the parsed quantity is validated against the authorised standards
+  of fill (27 CFR 4.72 / 5.203); beer is exempt from the enumerated list.
 - **No persistence/database.** Each review is stateless and nothing is
   stored - a production version would need to address PII/document
   retention requirements.
@@ -246,18 +250,38 @@ otherwise just open a redundant file picker.
 - **Field location/confidence data is AI-generated** and approximate - it
   is a starting point for visual verification, not a guarantee of accuracy.
 
-## 9. Possible next steps
+## 9. Implemented enhancements (previously "Possible next steps")
 
-- Configurable tolerance rules per beverage class.
-- **Label-Only Check enhancements:** let the agent confirm/override the
-  detected beverage type (`beverage_type_guess`) before requirements are
-  evaluated.
-- **Standards of fill:** validate net contents against the authorized
-  standards-of-fill sizes per 27 CFR 4.72 / 5.203 / 7.70.
-- **Additional mandatory statements:** sulfite declaration ("Contains
-  Sulfites") for wines with >=10ppm sulfur dioxide (27 CFR 4.32(e)),
-  aspartame/saccharin declarations, FD&C Yellow No. 5, and allergen
-  labeling.
-- **Age statement checks** for straight whiskies aged less than 4 years (27
-  CFR 5.74), and **commodity statement** requirements for certain imported
-  spirits.
+The items below were listed as future work in earlier versions and have been
+implemented in the current codebase.
+
+- **Configurable tolerance rules per beverage class.** `BEVERAGE_TOLERANCE` in
+  `compliance.py` maps each beverage class to its ABV tolerance and a minimum
+  extraction-confidence threshold. Both values are operator-adjustable without
+  changing any logic.
+- **Confidence-gated extraction.** `ExtractedLabelData.extraction_confidence`
+  (0.0-1.0) is populated by Claude based on image readability. `assert_extraction_confidence()`
+  in `compliance.py` is called at the top of both entry points; images below the
+  per-class threshold raise `LowConfidenceError` (HTTP 422 in `main.py`) and
+  request a retake instead of silently passing on a low-quality best guess.
+- **Label-Only Check: beverage-type confirmation.** `check_label_requirements`
+  now accepts `confirmed_beverage_type` (agent override). When the type cannot
+  be resolved, `LabelCheckResult.needs_beverage_confirmation=True` is returned and
+  no checks are run; the frontend prompts the agent to confirm before evaluation.
+  `LabelCheckResult.beverage_type_confirmed` records whether the type was confirmed.
+- **Standards of fill validated (27 CFR 4.72 / 5.203 / 7.70).** `_check_label_net_contents`
+  now parses the quantity and unit and validates against the authorised size lists.
+  Wine and distilled spirits sizes outside the CFR list are a fail; beer is exempt
+  (no restricted size list under 27 CFR 7.70).
+- **Formula-dependent statements carry an explicit caveat.** Sulfite declaration,
+  allergen disclosures, age statement, and commodity statement checks append a
+  `_FORMULA_DEPENDENT` notice: a label-level pass does NOT substitute for
+  production/formula record review (actual SO2 ppm, specific additives, aging
+  records, import documentation).
+
+## 10. Remaining next steps
+
+- Integrate with COLA to pull application data automatically.
+- Add state-level ABV and label requirement checks.
+- Support alternate Government Warning text for small containers (<100 mL).
+- Add a frontend confirmation dialog for the beverage-type override flow.
