@@ -114,19 +114,19 @@ async def _read_images(
     Returns a list of (processed_bytes, filename) tuples on success, or an
     error string describing the first file that failed validation.
     """
-      # Enforce maximum-images-per-label limit before allocating any I/O resources.
-      # Returning a plain string signals an error to callers (_extract_fields).
-      if len(files) > MAX_IMAGES_PER_LABEL:
-                _log.warning(
-                              "Upload rejected: %d files submitted, limit is %d.",
-                              len(files),
-                              MAX_IMAGES_PER_LABEL,
-                )
-                return (
-                              f"A maximum of {MAX_IMAGES_PER_LABEL} images may be uploaded per label. "
-                              f"You submitted {len(files)}. Please resubmit with 4 or fewer photos."
-                )
-    read_results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
+    # Enforce maximum-images-per-label limit before allocating any I/O resources.
+    # Returning a plain string signals an error to callers (_extract_fields).
+    if len(files) > MAX_IMAGES_PER_LABEL:
+              _log.warning(
+                            "Upload rejected: %d files submitted, limit is %d.",
+                            len(files),
+                            MAX_IMAGES_PER_LABEL,
+              )
+              return (
+                            f"A maximum of {MAX_IMAGES_PER_LABEL} images may be uploaded per label. "
+                            f"You submitted {len(files)}. Please resubmit with 4 or fewer photos."
+              )
+  read_results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
     images: list[tuple[bytes, str]] = []
     for result in read_results:
         if isinstance(result, str):
