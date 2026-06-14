@@ -37,6 +37,11 @@ export interface ExtractedLabelData {
   origin_guess?: "domestic" | "imported" | "unknown";
   field_locations: FieldLocation[];
   notes?: string;
+  sulfite_declaration?: string;
+  allergen_statements?: string;
+  age_statement?: string;
+  commodity_statement?: string;
+  is_alcohol_beverage_label?: boolean;
 }
 
 export interface FieldResult {
