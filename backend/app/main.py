@@ -13,10 +13,13 @@ returned.
 
 Performance notes:
 - File reads within a single review are done concurrently with asyncio.gather.
-- Batch requests run all per-label reviews concurrently (each is an
-  independent Claude API call, so there is no ordering dependency).
-- CPU-bound Pillow work (image downscaling) is offloaded to a thread pool via
-  run_in_threadpool so it does not block the async event loop.
+- Batch requests run all per-label reviews concurrently.
+- CPU-bound Pillow work is offloaded to a thread pool via run_in_threadpool.
+- Images are prepared (validated, enhanced, downscaled) once in _read_and_validate_file
+  and the processed bytes are passed directly to extract_label_fields with
+  preprocessed=True, avoiding a second Pillow pass.
+- Transient Claude API errors (rate-limit, overloaded, timeout) are retried
+  once after a short delay before returning an error to the client.
 """
 
 import asyncio
@@ -35,7 +38,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
-from .claude_client import _downscale_if_needed, _media_type_for, extract_label_fields
+from .claude_client import extract_label_fields, prepare_image, _media_type_for
 from .compliance import check_label_requirements, overall_status, run_compliance_checks
 from .models import ApplicationData, ExtractedLabelData, LabelCheckResult, ReviewResult
 
@@ -55,6 +58,11 @@ app.add_middleware(
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per image
 MAX_IMAGES_PER_LABEL = 4
 
+# Retry config for transient Claude API errors.
+# One retry after a short delay handles most rate-limit / 529 overloaded blips.
+_RETRY_DELAY_S = 2.0
+_RETRYABLE = (RateLimitError, APITimeoutError, APIConnectionError)
+
 
 @app.get("/api/health")
 def health() -> dict:
@@ -64,27 +72,25 @@ def health() -> dict:
 async def _read_and_validate_file(
     file: UploadFile,
 ) -> tuple[bytes, str] | str:
-    """Read one uploaded file and return (bytes, filename) or an error string.
+    """Read one uploaded file, validate it, and return pre-processed bytes.
 
-    Validates file size, then offloads CPU-bound downscaling (which also
-    performs Pillow image validation) to a thread pool. Any corrupt or
-    unreadable image will return a descriptive error string rather than
-    raising, so the caller can surface a per-file error message.
+    Returns ``(processed_jpeg_bytes, filename)`` on success, or an error
+    string on failure. Using pre-processed bytes means extract_label_fields
+    can skip the Pillow pipeline entirely (preprocessed=True), avoiding
+    double-processing the same image.
     """
     image_bytes = await file.read()
     if len(image_bytes) > MAX_FILE_SIZE:
         return f"File '{file.filename}' exceeds 10 MB limit."
     try:
-        # _downscale_if_needed now validates the image via Pillow before
-        # downscaling, so corrupt or non-image files are caught here.
-        resized_bytes, _media_type = await run_in_threadpool(
-            _downscale_if_needed,
+        processed_bytes, _media_type = await run_in_threadpool(
+            prepare_image,
             image_bytes,
-            _media_type_for(file.filename or "label.jpg"),
+            file.filename or "label.jpg",
         )
     except ValueError as exc:
         return f"File '{file.filename}' could not be read as an image: {exc}"
-    return resized_bytes, file.filename or "label.jpg"
+    return processed_bytes, file.filename or "label.jpg"
 
 
 async def _read_images(
@@ -93,8 +99,8 @@ async def _read_images(
 ) -> list[tuple[bytes, str]] | str:
     """Read and validate all uploaded files concurrently.
 
-    Returns a list of (bytes, filename) tuples on success, or an error
-    string describing the first file that failed validation.
+    Returns a list of (processed_bytes, filename) tuples on success, or an
+    error string describing the first file that failed validation.
     """
     read_results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
     images: list[tuple[bytes, str]] = []
@@ -105,17 +111,58 @@ async def _read_images(
     return images
 
 
+async def _extract_fields_with_retry(
+    images: list[tuple[bytes, str]],
+) -> tuple[ExtractedLabelData | None, str | None]:
+    """Call extract_label_fields with one automatic retry on transient errors.
+
+    Images are passed as pre-processed JPEG bytes (preprocessed=True) so
+    Claude client skips the Pillow pipeline entirely.
+
+    Returns ``(extracted, None)`` on success or ``(None, error_msg)`` on
+    failure after exhausting retries.
+    """
+    for attempt in range(2):
+        try:
+            extracted = await run_in_threadpool(
+                extract_label_fields, images, True
+            )
+            return extracted, None
+        except AuthenticationError:
+            return None, "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
+        except _RETRYABLE as exc:
+            if attempt == 0:
+                # First attempt failed on a transient error - wait then retry.
+                await asyncio.sleep(_RETRY_DELAY_S)
+                continue
+            # Second attempt also failed.
+            if isinstance(exc, RateLimitError):
+                return None, "Anthropic rate limit reached. Please try again shortly."
+            if isinstance(exc, APITimeoutError):
+                return None, "The request to Claude timed out. Please try again."
+            return None, f"Network error contacting Claude API: {exc}"
+        except APIStatusError as exc:
+            # 529 = overloaded; retry once.
+            if attempt == 0 and exc.status_code == 529:
+                await asyncio.sleep(_RETRY_DELAY_S)
+                continue
+            return None, f"Claude API error ({exc.status_code}): {exc.message}"
+        except RuntimeError as exc:
+            return None, f"Could not read label image(s): {exc}"
+        except Exception as exc:  # noqa: BLE001
+            return None, f"Unexpected error during label extraction: {exc}"
+    return None, "Unexpected retry loop exit."
+
+
 async def _extract_fields(
     files: list[UploadFile],
     filenames: list[str],
 ) -> tuple[ExtractedLabelData | None, str | None]:
-    """Shared image-read + Claude-extraction pipeline used by both review
-    endpoints and the label-check endpoint.
+    """Shared image-read + Claude-extraction pipeline.
 
-    Returns ``(extracted, None)`` on success or ``(None, error_msg)`` on
-    any validation or API failure. All errors are caught and returned as
-    descriptive strings rather than raised so that batch callers can report
-    per-item errors without aborting the whole batch.
+    Reads and pre-processes all images, then calls Claude once with the
+    pre-processed bytes (no double Pillow pass). Retries once on transient
+    API errors. Returns ``(extracted, None)`` or ``(None, error_msg)``.
     """
     if not (1 <= len(files) <= MAX_IMAGES_PER_LABEL):
         return None, f"Upload between 1 and {MAX_IMAGES_PER_LABEL} images per label."
@@ -124,36 +171,11 @@ async def _extract_fields(
     if isinstance(images_or_error, str):
         return None, images_or_error
 
-    images: list[tuple[bytes, str]] = images_or_error
-
-    try:
-        extracted = extract_label_fields(images)
-        return extracted, None
-    except AuthenticationError:
-        return None, "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
-    except RateLimitError:
-        return None, "Anthropic rate limit reached. Please try again shortly."
-    except APITimeoutError:
-        return None, "The request to Claude timed out. Please try again."
-    except APIConnectionError as exc:
-        return None, f"Network error contacting Claude API: {exc}"
-    except APIStatusError as exc:
-        return None, f"Claude API error ({exc.status_code}): {exc.message}"
-    except RuntimeError as exc:
-        return None, f"Could not read label image(s): {exc}"
-    except Exception as exc:  # noqa: BLE001
-        return None, f"Unexpected error during label extraction: {exc}"
+    return await _extract_fields_with_retry(images_or_error)
 
 
 async def _review_single(files: list[UploadFile], application: ApplicationData) -> ReviewResult:
-    """Run an application-vs-label review for one label's image(s).
-
-    Validates the upload (image count and per-file size limits), reads all
-    files concurrently, then extracts fields via Claude and runs
-    run_compliance_checks. Any failure along the way is returned as a
-    ReviewResult with error set rather than raising, so a batch
-    request can report per-item errors without failing the whole batch.
-    """
+    """Run an application-vs-label review for one label's image(s)."""
     start = time.monotonic()
     filenames = [f.filename or "unknown" for f in files]
 
@@ -170,7 +192,6 @@ async def _review_single(files: list[UploadFile], application: ApplicationData) 
         )
 
     fields = run_compliance_checks(application, extracted)
-
     return ReviewResult(
         filenames=filenames,
         overall_status=overall_status(fields),
@@ -186,12 +207,11 @@ async def review_label(
     application: str = Form(...),
 ) -> ReviewResult:
     """Single-label review: 1-4 label images plus one JSON-encoded
-    ApplicationData form field (the "Single Review" mode)."""
+    ApplicationData form field."""
     try:
         application_data = ApplicationData(**json.loads(application))
     except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid application data: {exc}") from exc
-
     return await _review_single(files, application_data)
 
 
@@ -201,9 +221,7 @@ async def review_labels_batch(
     image_counts: str = Form(...),
     applications: str = Form(...),
 ) -> list[ReviewResult]:
-    """Batch review: all labels' images concatenated in files, with
-    image_counts (JSON array of ints) indicating how many files belong
-    to each label, and applications (JSON array of ApplicationData)."""
+    """Batch review: all labels' images concatenated in files."""
     try:
         counts: list[int] = json.loads(image_counts)
         application_list: list[ApplicationData] = [
@@ -220,27 +238,20 @@ async def review_labels_batch(
                 f"applications length ({len(application_list)})."
             ),
         )
-
     if sum(counts) != len(files):
         raise HTTPException(
             status_code=400,
             detail="Sum of image_counts must match the number of uploaded files.",
         )
 
-    # Split the flat file list into per-label groups.
     label_file_groups: list[list[UploadFile]] = []
     offset = 0
     for count in counts:
-        label_file_groups.append(files[offset : offset + count])
+        label_file_groups.append(files[offset: offset + count])
         offset += count
 
-    # Run all per-label reviews concurrently - each is an independent Claude
-    # API call, so there is no ordering dependency.
     results: list[ReviewResult] = await asyncio.gather(
-        *[
-            _review_single(label_files, app_data)
-            for label_files, app_data in zip(label_file_groups, application_list)
-        ]
+        *[_review_single(lf, ad) for lf, ad in zip(label_file_groups, application_list)]
     )
     return list(results)
 
@@ -263,7 +274,6 @@ async def _label_check_single(files: list[UploadFile]) -> LabelCheckResult:
         )
 
     checks = check_label_requirements(extracted, extracted.beverage_type_guess)
-
     return LabelCheckResult(
         filenames=filenames,
         overall_status=overall_status(checks),
@@ -279,9 +289,7 @@ async def label_check_batch(
     files: list[UploadFile] = File(...),
     image_counts: str = Form(...),
 ) -> list[LabelCheckResult]:
-    """Label-Only Check (batch): all labels' images concatenated in files,
-    with image_counts (JSON array of ints) indicating how many files belong
-    to each label. No application data is required."""
+    """Label-Only Check (batch): all labels' images concatenated in files."""
     try:
         counts: list[int] = json.loads(image_counts)
     except (json.JSONDecodeError, ValueError) as exc:
@@ -296,10 +304,10 @@ async def label_check_batch(
     label_file_groups: list[list[UploadFile]] = []
     offset = 0
     for count in counts:
-        label_file_groups.append(files[offset : offset + count])
+        label_file_groups.append(files[offset: offset + count])
         offset += count
 
     results: list[LabelCheckResult] = await asyncio.gather(
-        *[_label_check_single(label_files) for label_files in label_file_groups]
+        *[_label_check_single(lf) for lf in label_file_groups]
     )
     return list(results)
