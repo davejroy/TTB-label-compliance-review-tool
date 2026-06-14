@@ -168,42 +168,58 @@ export default function BatchReview() {
               className="rounded-lg border-2 border-[#15396a] px-4 py-2 text-sm font-bold text-[#15396a] hover:bg-blue-50"
               onClick={exportCsv}>Export CSV</button>
           </div>
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <table className="w-full text-left">
-              <thead className="bg-slate-50 text-sm uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="p-4">Files</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4">Issues</th>
-                  <th className="p-4"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {results.map((result, index) => {
-                  const issues = result.fields.filter((f) => f.status !== "pass");
-                  return (
-                    <tr key={index}>
-                      <td className="p-4 font-medium text-slate-800">{result.filenames.join(", ")}</td>
-                      <td className="p-4"><StatusBadge status={result.overall_status} size="sm" /></td>
-                      <td className="p-4 text-sm text-slate-600">
-                        {result.error
-                          ? <span className="text-red-600">{result.error}</span>
-                          : issues.length === 0 ? "No issues found"
-                            : issues.map((f) => f.label_name).join(", ")}
-                      </td>
-                      <td className="p-4">
+          {/* Mobile: card stack. Desktop: table. */}
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            {/* Desktop table header - hidden on mobile */}
+            <div className="hidden sm:grid sm:grid-cols-[2fr_auto_2fr_auto] text-xs font-semibold uppercase tracking-wide text-slate-500 bg-slate-50 border-b border-slate-200">
+              <div className="px-4 py-3">Files</div>
+              <div className="px-4 py-3">Status</div>
+              <div className="px-4 py-3">Issues</div>
+              <div className="px-4 py-3"></div>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {results.map((result, index) => {
+                const issues = result.fields.filter((f) => f.status !== "pass");
+                const issueText = result.error
+                  ? <span className="text-red-600">{result.error}</span>
+                  : issues.length === 0 ? "No issues found"
+                    : issues.map((f) => f.label_name).join(", ");
+                return (
+                  <div key={index}>
+                    {/* Mobile card layout */}
+                    <div className="sm:hidden p-4 space-y-2">
+                      <p className="font-medium text-slate-800 text-sm break-all">{result.filenames.join(", ")}</p>
+                      <div className="flex items-center gap-3">
+                        <StatusBadge status={result.overall_status} size="sm" />
+                      </div>
+                      <p className="text-sm text-slate-600">{issueText}</p>
+                      {!result.error && (
+                        <button type="button"
+                          className="w-full mt-1 rounded-lg border-2 border-blue-700 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                          onClick={() => setExpanded(expanded === index ? null : index)}>
+                          {expanded === index ? "Hide details" : "View details"}
+                        </button>
+                      )}
+                    </div>
+                    {/* Desktop row layout */}
+                    <div className="hidden sm:grid sm:grid-cols-[2fr_auto_2fr_auto] items-center">
+                      <div className="px-4 py-3 font-medium text-slate-800 text-sm break-all">{result.filenames.join(", ")}</div>
+                      <div className="px-4 py-3"><StatusBadge status={result.overall_status} size="sm" /></div>
+                      <div className="px-4 py-3 text-sm text-slate-600">{issueText}</div>
+                      <div className="px-4 py-3">
                         {!result.error && (
-                          <button type="button" className="text-sm font-semibold text-blue-700 underline"
+                          <button type="button"
+                            className="text-sm font-semibold text-blue-700 underline whitespace-nowrap"
                             onClick={() => setExpanded(expanded === index ? null : index)}>
                             {expanded === index ? "Hide details" : "View details"}
                           </button>
                         )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
           {expanded !== null && (
             <div className="mt-6">
