@@ -637,6 +637,213 @@ def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult
     )
 
 
+
+def _check_sulfite_declaration(extracted) -> FieldResult:
+    """Check for a sulfite declaration on wine labels (27 CFR 4.32(e)).
+
+    Wines containing 10 ppm or more of sulfur dioxide must bear the statement
+    'Contains Sulfites' (or equivalent). This check applies only to wine;
+    for other beverage types it returns a pass. If the label does not disclose
+    sulfite level, a warning is issued prompting the agent to verify with lab data.
+    """
+    field, label_name = "sulfite_declaration", "Sulfite Declaration"
+    requirement = (
+        "Wines containing 10 ppm or more of sulfur dioxide must bear the "
+        "statement 'Contains Sulfites' or equivalent (27 CFR 4.32(e))."
+    )
+    bev = (extracted.beverage_type_guess or "").lower()
+    if "wine" not in bev and bev not in ("", "unknown"):
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=None,
+            label_value="N/A",
+            message="Sulfite declaration is only required for wine products.",
+        )
+    val = extracted.sulfite_declaration
+    if val and _normalize(val):
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=None,
+            label_value=val,
+            message="Sulfite declaration found on label.",
+        )
+    return FieldResult(
+        field=field,
+        label_name=label_name,
+        status="warning",
+        application_value=None,
+        label_value=None,
+        message=(
+            "No sulfite declaration found. If this wine contains >=10 ppm "
+            "sulfur dioxide, 'Contains Sulfites' (or equivalent) is required "
+            "(27 CFR 4.32(e)). Verify SO\u2082 level with production data."
+        ),
+    )
+
+
+def _check_allergen_statements(extracted) -> FieldResult:
+    """Check for mandatory allergen / additive disclosure statements.
+
+    TTB regulations require disclosure of certain additives when present:
+    FD&C Yellow No. 5 (tartrazine), aspartame, saccharin, and cochineal
+    extract/carmine (27 CFR 4.32(f), 5.63(c), 7.63(c); TTB Ruling 2012-1).
+    Because ingredient presence cannot be determined from a label photo alone,
+    this check is always a warning prompting the agent to verify formula records.
+    """
+    field, label_name = "allergen_statements", "Allergen / Additive Declarations"
+    requirement = (
+        "FD&C Yellow No. 5, aspartame, saccharin, and cochineal extract / "
+        "carmine must be declared on labels when present (27 CFR 4.32(f), "
+        "5.63(c), 7.63(c); TTB Ruling 2012-1)."
+    )
+    val = extracted.allergen_statements
+    if val and _normalize(val):
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=None,
+            label_value=val,
+            message="Allergen/additive declaration(s) found on label.",
+        )
+    return FieldResult(
+        field=field,
+        label_name=label_name,
+        status="warning",
+        application_value=None,
+        label_value=None,
+        message=(
+            "No allergen or additive declarations detected. Verify via "
+            "formula/ingredient records: FD&C Yellow No. 5, aspartame, "
+            "saccharin, and cochineal extract/carmine require mandatory label "
+            "disclosure when present (27 CFR 4.32(f), 5.63(c), 7.63(c))."
+        ),
+    )
+
+
+def _check_age_statement(extracted) -> FieldResult:
+    """Check age statement requirements for straight whiskies (27 CFR 5.74).
+
+    Straight whiskies aged less than 4 years must state the age on the label.
+    Whiskies aged 4+ years need not show an age statement unless they choose
+    to do so. This check applies only to straight whiskies.
+    """
+    field, label_name = "age_statement", "Age Statement (Straight Whisky)"
+    requirement = (
+        "Straight whiskies aged less than 4 years must state the actual age "
+        "on the label (27 CFR 5.74(a)). Optional for those aged 4+ years."
+    )
+    class_type = _normalize(extracted.class_type or "")
+    is_straight_whisky = (
+        ("whisky" in class_type or "whiskey" in class_type or "bourbon" in class_type)
+        and "straight" in class_type
+    )
+    if not is_straight_whisky:
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=None,
+            label_value="N/A",
+            message="Age statement check applies only to straight whiskies.",
+        )
+    val = extracted.age_statement
+    if val and _normalize(val):
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=None,
+            label_value=val,
+            message="Age statement found on label.",
+        )
+    return FieldResult(
+        field=field,
+        label_name=label_name,
+        status="warning",
+        application_value=None,
+        label_value=None,
+        message=(
+            "No age statement found on this straight whisky label. If the "
+            "product was aged less than 4 years, the age must be stated on "
+            "the label (27 CFR 5.74(a)). Verify aging records."
+        ),
+    )
+
+
+def _check_commodity_statement(extracted) -> FieldResult:
+    """Check for commodity / importer statement on imported spirits (27 CFR 5.63).
+
+    Imported distilled spirits must identify the importer and state the
+    class/type (27 CFR 5.63(a)(2), 5.66(b)). Only applied to imported products;
+    domestic products return pass. Unknown origin triggers a warning.
+    """
+    field, label_name = "commodity_statement", "Commodity / Importer Statement"
+    requirement = (
+        "Imported distilled spirits must state the class/type and bear the "
+        "importer's name and address (27 CFR 5.63(a)(2), 5.66(b))."
+    )
+    bev = (extracted.beverage_type_guess or "").lower()
+    if bev not in ("distilled_spirits", "", "unknown"):
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=None,
+            label_value="N/A",
+            message="Commodity statement check applies only to imported distilled spirits.",
+        )
+    origin = (extracted.origin_guess or "unknown").lower()
+    if origin == "domestic":
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=None,
+            label_value="N/A",
+            message="Product appears domestic; commodity importer statement not required.",
+        )
+    if origin == "unknown":
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="warning",
+            application_value=None,
+            label_value=None,
+            message=(
+                "Could not determine whether product is imported. If imported, "
+                "the label must identify the importer and commodity per "
+                "27 CFR 5.63(a)(2) and 5.66(b). Verify import status."
+            ),
+        )
+    val = extracted.commodity_statement
+    if val and _normalize(val):
+        return FieldResult(
+            field=field,
+            label_name=label_name,
+            status="pass",
+            application_value=None,
+            label_value=val,
+            message="Commodity/importer statement found on label.",
+        )
+    return FieldResult(
+        field=field,
+        label_name=label_name,
+        status="fail",
+        application_value=None,
+        label_value=None,
+        message=(
+            "Imported distilled spirits label is missing a commodity/importer "
+            "statement. The label must identify the importer and state the "
+            "class/type (27 CFR 5.63(a)(2), 5.66(b))."
+        ),
+    )
+
+
 def check_label_requirements(
     extracted: ExtractedLabelData, beverage_type: str | None = None
 ) -> list[FieldResult]:
@@ -665,6 +872,10 @@ def check_label_requirements(
         ),
         _check_government_warning(extracted),
         _check_label_country_of_origin(extracted),
+        _check_sulfite_declaration(extracted),
+        _check_allergen_statements(extracted),
+        _check_age_statement(extracted),
+        _check_commodity_statement(extracted),
     ]
 
 
