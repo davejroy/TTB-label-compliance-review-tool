@@ -18,8 +18,13 @@ Every check returns a ``FieldResult`` with a ``status`` of ``"pass"``,
 """
 
 import re
+import logging
 from difflib import SequenceMatcher
 
+
+# Module-level logger for compliance checks.
+# Enables audit-trail logging of every label's compliance outcome.
+_log = logging.getLogger(__name__)
 from .models import ApplicationData, ExtractedLabelData, FieldResult
 
 # Canonical Government Warning text per 27 CFR 16.21. Must appear verbatim,
