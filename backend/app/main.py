@@ -44,6 +44,7 @@ from .compliance import (
     LowConfidenceError,
     UNCONFIRMED_BEVERAGE_TYPE,
     check_label_requirements,
+    merge_extracted_label_data,
     overall_status,
     run_compliance_checks,
 )
@@ -101,7 +102,7 @@ async def _read_and_validate_file(
     except ImageQualityError as exc:
         # Surface the user-friendly message directly - no internal details.
         # HTTP 422 Unprocessable Entity signals a client-fixable input problem
-        # (per RFC 9110 ÃÂÃÂ§15.5.21), distinct from 400 (bad request structure).
+        # (per RFC 9110 ÃÂÃÂÃÂÃÂ§15.5.21), distinct from 400 (bad request structure).
         _log.info("Image quality rejected for '%s': %s", file.filename, exc.user_message)
         return exc.user_message
     except ValueError as exc:
@@ -188,25 +189,47 @@ async def _extract_fields_with_retry(
     return None, "Unexpected retry loop exit."
 
 
+
 async def _extract_fields(
     files: list[UploadFile],
     filenames: list[str],
-) -> tuple[ExtractedLabelData | None, str | None]:
-    """Shared image-read + Claude-extraction pipeline.
+    photo_roles: list[str] | None = None,
+) -> tuple[ExtractedLabelData | None, str | None, list[str]]:
+    """Shared image-read + Claude-extraction pipeline with multi-photo merging.
 
-    Reads and pre-processes all images, then calls Claude once with the
-    pre-processed bytes (no double Pillow pass). Retries once on transient
-    API errors. Returns ``(extracted, None)`` or ``(None, error_msg)``.
+    When photo_roles identifies multiple distinct panels (e.g. "front" and "back"),
+    each photo is extracted independently then merged via merge_extracted_label_data.
+    Returns (merged_extraction, error_msg, effective_roles).
     """
     if not (1 <= len(files) <= MAX_IMAGES_PER_LABEL):
-        return None, f"Upload between 1 and {MAX_IMAGES_PER_LABEL} images per label."
+        return None, f"Upload between 1 and {MAX_IMAGES_PER_LABEL} images per label.", []
 
     images_or_error = await _read_images(files, filenames)
     if isinstance(images_or_error, str):
-        return None, images_or_error
+        return None, images_or_error, []
 
-    return await _extract_fields_with_retry(images_or_error)
+    images: list[tuple[bytes, str]] = images_or_error
+    effective_roles: list[str] = photo_roles or []
+    unique_roles = set(effective_roles) if effective_roles else set()
+    do_per_role = (
+        len(images) > 1
+        and len(effective_roles) == len(images)
+        and len(unique_roles) > 1
+    )
 
+    if not do_per_role:
+        extracted, error_msg = await _extract_fields_with_retry(images)
+        return extracted, error_msg, effective_roles
+
+    extractions: list[ExtractedLabelData] = []
+    for img, role in zip(images, effective_roles):
+        ext, err = await _extract_fields_with_retry([img])
+        if err:
+            return None, f"Extraction failed for {role} photo: {err}", effective_roles
+        extractions.append(ext)
+
+    merged = await run_in_threadpool(merge_extracted_label_data, extractions, effective_roles)
+    return merged, None, effective_roles
 
 async def _review_single(files: list[UploadFile], application: ApplicationData) -> ReviewResult:
     """Run an application-vs-label review for one label's image(s)."""
@@ -293,17 +316,19 @@ async def review_labels_batch(
 async def _label_check_single(
     files: list[UploadFile],
     confirmed_beverage_type: str | None = None,
+    photo_roles: list[str] | None = None,
 ) -> LabelCheckResult:
     """Run a label-only requirements check for one label's image(s).
 
-    Args:
-        files:                   Uploaded label image file(s).
-        confirmed_beverage_type: Agent-confirmed beverage type override.
+    photo_roles: optional list of role strings ("front", "back", etc.).
+    When roles differ, per-role extraction + merge is used.
     """
     start = time.monotonic()
     filenames = [f.filename or "unknown" for f in files]
 
-    extracted, error_msg = await _extract_fields(files, filenames)
+    extracted, error_msg, effective_roles = await _extract_fields(
+        files, filenames, photo_roles=photo_roles
+    )
 
     if error_msg:
         return LabelCheckResult(
@@ -331,6 +356,7 @@ async def _label_check_single(
             beverage_type_confirmed=type_confirmed,
             processing_time_ms=int((time.monotonic() - start) * 1000),
             error=exc.user_message,
+            photo_sources=effective_roles,
         )
     except ValueError as exc:
         if str(exc) == UNCONFIRMED_BEVERAGE_TYPE:
@@ -343,6 +369,7 @@ async def _label_check_single(
                 beverage_type_confirmed=False,
                 needs_beverage_confirmation=True,
                 processing_time_ms=int((time.monotonic() - start) * 1000),
+                photo_sources=effective_roles,
             )
         raise
     return LabelCheckResult(
@@ -354,6 +381,7 @@ async def _label_check_single(
         checks=checks,
         extracted=extracted,
         processing_time_ms=int((time.monotonic() - start) * 1000),
+        photo_sources=effective_roles,
     )
 
 
@@ -362,17 +390,22 @@ async def label_check_batch(
     files: list[UploadFile] = File(...),
     image_counts: str = Form(...),
     confirmed_beverage_type: str = Form(default=""),
+    photo_roles: str = Form(default=""),
 ) -> list[LabelCheckResult]:
-    """Label-Only Check (batch): all labels' images concatenated in files.
-
-    The optional confirmed_beverage_type form field lets the frontend pass
-    through an agent-confirmed beverage type. An empty string means no
-    confirmation (Claude's best guess is used, or confirmation requested).
+    """Label-Only Check (batch). photo_roles: optional JSON array of role
+    strings per file e.g. '["front","back"]' for per-panel extraction + merge.
     """
     try:
         counts: list[int] = json.loads(image_counts)
     except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid image_counts: {exc}") from exc
+
+    roles_list: list[str] = []
+    if photo_roles.strip():
+        try:
+            roles_list = json.loads(photo_roles)
+        except (json.JSONDecodeError, ValueError):
+            roles_list = []
 
     if sum(counts) != len(files):
         raise HTTPException(
@@ -381,15 +414,25 @@ async def label_check_batch(
         )
 
     label_file_groups: list[list[UploadFile]] = []
+    label_role_groups: list[list[str] | None] = []
     offset = 0
     for count in counts:
         label_file_groups.append(files[offset: offset + count])
+        if roles_list and len(roles_list) >= offset + count:
+            label_role_groups.append(roles_list[offset: offset + count])
+        else:
+            label_role_groups.append(None)
         offset += count
 
     results: list[LabelCheckResult] = await asyncio.gather(
         *[
-        _label_check_single(lf, confirmed_beverage_type=confirmed_beverage_type or None)
-        for lf in label_file_groups
-    ]
+            _label_check_single(
+                lf,
+                confirmed_beverage_type=confirmed_beverage_type or None,
+                photo_roles=lr,
+            )
+            for lf, lr in zip(label_file_groups, label_role_groups)
+        ]
     )
     return list(results)
+
