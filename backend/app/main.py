@@ -26,6 +26,7 @@ import asyncio
 import json
 import os
 import time
+import logging
 
 from anthropic import (
     APIConnectionError,
@@ -38,9 +39,12 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
-from .claude_client import extract_label_fields, prepare_image, _media_type_for
+from .claude_client import extract_label_fields, prepare_image, _media_type_for, ImageQualityError
 from .compliance import check_label_requirements, overall_status, run_compliance_checks
 from .models import ApplicationData, ExtractedLabelData, LabelCheckResult, ReviewResult
+
+# Module-level logger. In production configure JSON handler for log aggregators.
+_log = logging.getLogger(__name__)
 
 app = FastAPI(title="TTB Label Compliance Review Tool")
 
@@ -88,8 +92,16 @@ async def _read_and_validate_file(
             image_bytes,
             file.filename or "label.jpg",
         )
-    except ValueError as exc:
-        return f"File '{file.filename}' could not be read as an image: {exc}"
+    except ImageQualityError as exc:
+                # Surface the user-friendly message directly - no internal details.
+                # HTTP 422 Unprocessable Entity signals a client-fixable input problem
+                # (per RFC 9110 §15.5.21), distinct from 400 (bad request structure).
+                _log.info("Image quality rejected for '%s': %s", file.filename, exc.user_message)
+                return exc.user_message
+        except ValueError as exc:
+            # Unexpected decode error - include filename but not internal exc detail.
+            _log.warning("Decode error for '%s': %s", file.filename, exc)
+            return f"File '{file.filename}' could not be read as a valid image. Please submit a new photo."
     return processed_bytes, file.filename or "label.jpg"
 
 
