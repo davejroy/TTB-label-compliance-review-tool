@@ -5,6 +5,18 @@ result types produced by ``compliance.py``.
 These models are also the source of truth for the frontend's TypeScript
 types in ``frontend/src/types.ts`` - keep the two in sync when changing
 fields here.
+
+Changes in this version
+------------------------
+* ``ExtractedLabelData.extraction_confidence`` - new float 0-1 field that
+  Claude populates to signal overall label-image readability.  Used by
+  ``compliance.assert_extraction_confidence`` to gate low-quality photos.
+* ``LabelCheckResult.beverage_type_confirmed`` - bool flag indicating whether
+  the beverage type was explicitly confirmed by the agent (True) or is still
+  Claude's best guess (False).
+* ``LabelCheckResult.needs_beverage_confirmation`` - bool flag; True when the
+  label-only check could not resolve a beverage type and is waiting for the
+  agent to confirm before requirements are evaluated.
 """
 
 from typing import Literal, Optional
@@ -33,13 +45,8 @@ class ApplicationData(BaseModel):
 
 
 class FieldLocation(BaseModel):
-    """Approximate location of an extracted field within one of the uploaded
-    images, plus Claude's confidence in that reading. Coordinates are
-    fractions (0-1) of the image's width/height, with (0, 0) at the top-left."""
+    """Approximate bounding box for a field on the label image."""
 
-    field: str
-    image_index: int = 0
-    confidence: Confidence = "medium"
     x: float
     y: float
     width: float
@@ -67,6 +74,19 @@ class ExtractedLabelData(BaseModel):
     age_statement: Optional[str] = None
     commodity_statement: Optional[str] = None
     is_alcohol_beverage_label: bool = True
+    # Overall extraction confidence: 0.0 (no readable text) to 1.0 (crystal clear).
+    # Set by Claude based on image readability; used by assert_extraction_confidence()
+    # in compliance.py to gate low-quality photos before any check is run.
+    extraction_confidence: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Overall readability score 0.0-1.0 assigned by Claude. "
+            "Below the per-class threshold in BEVERAGE_TOLERANCE a "
+            "LowConfidenceError is raised and a new photo is requested."
+        ),
+    )
 
 
 class FieldResult(BaseModel):
@@ -86,8 +106,7 @@ class FieldResult(BaseModel):
 
 
 class ReviewResult(BaseModel):
-    """Response body for ``/api/review`` and ``/api/review/batch``: an
-    application-vs-label comparison for one label."""
+    """Response body for ``/api/review`` and ``/api/review/batch``."""
 
     filenames: list[str]
     overall_status: Status
@@ -99,11 +118,25 @@ class ReviewResult(BaseModel):
 
 class LabelCheckResult(BaseModel):
     """Result of validating a label against TTB mandatory label requirements,
-    independent of any COLA application data."""
+    independent of any COLA application data (Label-Only Check).
+
+    New fields
+    ----------
+    beverage_type_confirmed : bool
+        True if the agent explicitly confirmed/overrode the beverage type.
+        False if the result used Claude's best-guess beverage_type_guess.
+    needs_beverage_confirmation : bool
+        True when the label-only check could not resolve a beverage type and
+        is waiting for the agent to confirm before requirements are evaluated.
+        When True, ``checks`` is empty and the frontend should show a
+        confirmation prompt.
+    """
 
     filenames: list[str]
     overall_status: Status
     beverage_type: Optional[str] = None
+    beverage_type_confirmed: bool = False
+    needs_beverage_confirmation: bool = False
     checks: list[FieldResult]
     extracted: ExtractedLabelData
     processing_time_ms: int
