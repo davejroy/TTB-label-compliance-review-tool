@@ -237,6 +237,17 @@ EXTRACTION_TOOL = {
                     "(e.g. a food product, soft drink, cleaning product, or anything "
                     "other than an alcoholic drink). When in doubt, return True."
                 ),
+            "extraction_confidence": {
+                "type": "number",
+                "description": (
+                    "Overall readability / extraction confidence: a float from 0.0 "
+                    "(image completely unreadable - blank, blurred, or wrong subject) "
+                    "to 1.0 (crystal-clear label, all text perfectly legible). "
+                    "Score based on: focus/blur, lighting/glare, label coverage, "
+                    "and how confidently each required field could be read. "
+                    "0.0-0.49 = unreliable; 0.50-0.69 = marginal; 0.70-0.89 = good; 0.90-1.0 = excellent."
+                ),
+            },
             },
         },
         "required": [
@@ -247,6 +258,7 @@ EXTRACTION_TOOL = {
             "sulfite_declaration", "allergen_statements",
             "age_statement", "commodity_statement",
             "is_alcohol_beverage_label",
+            "extraction_confidence",
         ],
     },
 }
@@ -274,7 +286,13 @@ SYSTEM_PROMPT = (
     "Important: label text often wraps with end-of-line hyphens (e.g. 'Con-' on "
     "one line, 'sumption of' on the next). When transcribing, join hyphenated line "
     "breaks back into the full word (e.g. 'Consumption of'). "
-    "Always respond by calling the record_label_fields tool."
+    "Always respond by calling the record_label_fields tool. "
+    "THIRD: Set extraction_confidence to a float 0.0-1.0 reflecting overall "
+    "image readability (0.0 = completely unreadable; 1.0 = perfectly legible). "
+    "Consider: focus/blur, lighting/glare, how much of the label is visible, "
+    "and how confidently each required field could be extracted. "
+    "A score below 0.70 means the image quality is too low for reliable compliance "
+    "checking and the agent will be asked to retake the photo."
 )
 
 
