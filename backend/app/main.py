@@ -93,15 +93,15 @@ async def _read_and_validate_file(
             file.filename or "label.jpg",
         )
     except ImageQualityError as exc:
-                # Surface the user-friendly message directly - no internal details.
-                # HTTP 422 Unprocessable Entity signals a client-fixable input problem
-                # (per RFC 9110 §15.5.21), distinct from 400 (bad request structure).
-                _log.info("Image quality rejected for '%s': %s", file.filename, exc.user_message)
-                return exc.user_message
-        except ValueError as exc:
-            # Unexpected decode error - include filename but not internal exc detail.
-            _log.warning("Decode error for '%s': %s", file.filename, exc)
-            return f"File '{file.filename}' could not be read as a valid image. Please submit a new photo."
+        # Surface the user-friendly message directly - no internal details.
+        # HTTP 422 Unprocessable Entity signals a client-fixable input problem
+        # (per RFC 9110 Â§15.5.21), distinct from 400 (bad request structure).
+        _log.info("Image quality rejected for '%s': %s", file.filename, exc.user_message)
+        return exc.user_message
+    except ValueError as exc:
+        # Unexpected decode error - include filename but not internal exc detail.
+        _log.warning("Decode error for '%s': %s", file.filename, exc)
+        return f"File '{file.filename}' could not be read as a valid image. Please submit a new photo."
     return processed_bytes, file.filename or "label.jpg"
 
 
@@ -117,16 +117,16 @@ async def _read_images(
     # Enforce maximum-images-per-label limit before allocating any I/O resources.
     # Returning a plain string signals an error to callers (_extract_fields).
     if len(files) > MAX_IMAGES_PER_LABEL:
-              _log.warning(
-                            "Upload rejected: %d files submitted, limit is %d.",
-                            len(files),
-                            MAX_IMAGES_PER_LABEL,
-              )
-              return (
-                            f"A maximum of {MAX_IMAGES_PER_LABEL} images may be uploaded per label. "
-                            f"You submitted {len(files)}. Please resubmit with 4 or fewer photos."
-              )
-  read_results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
+        _log.warning(
+            "Upload rejected: %d files submitted, limit is %d.",
+            len(files),
+            MAX_IMAGES_PER_LABEL,
+        )
+        return (
+            f"A maximum of {MAX_IMAGES_PER_LABEL} images may be uploaded per label. "
+            f"You submitted {len(files)}. Please resubmit with 4 or fewer photos."
+        )
+    read_results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
     images: list[tuple[bytes, str]] = []
     for result in read_results:
         if isinstance(result, str):
