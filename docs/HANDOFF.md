@@ -88,12 +88,17 @@ The items below were listed as known gaps and have now been implemented:
 - `LabelCheckResult.photo_sources` records which photo roles contributed.
 - `ExtractedLabelData.per_field_confidence` dict in model, schema, and prompt.
 
+### Phase 3 enhancements (this session)
+
+- **Small-container alternate Government Warning text** (`SMALL_CONTAINER_THRESHOLD_ML = 100.0` in `compliance.py`): containers <= 100 mL accept either the full-form or the abbreviated body that omits clause numbers (1)/(2). Pass message notes which form was used. Per 27 CFR 16.21(c).
+- **Beverage-type confirmation dialog** (`BeverageTypeDialog` in `LabelOnlyCheck.tsx`): when `needs_beverage_confirmation=True` the UI shows a modal with radio buttons for the three beverage types. Agent confirms; label is re-checked with `confirmed_beverage_type`; result updated in place without a full form re-submit.
+- **Frontend types.ts updated**: `LabelCheckResult` now includes `needs_beverage_confirmation?`, `beverage_type_confirmed?`, `photo_sources?`.
+- **`checkLabelsBatch` in `api.ts` updated**: accepts and passes `confirmedBeverageType` and `photoRoles` to the backend.
+
 ## Remaining next steps
 
 - Integrate with COLA to pull application data automatically.
 - Add state-level ABV and label requirement checks.
-- Support alternate Government Warning text for small containers (<100 mL).
-- Add a frontend confirmation dialog for the beverage-type override flow.
 ## Where to look first
 
 - `README.md` - setup, running locally, feature overview.
