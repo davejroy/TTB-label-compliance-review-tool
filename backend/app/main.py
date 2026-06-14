@@ -40,7 +40,13 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
 from .claude_client import extract_label_fields, prepare_image, _media_type_for, ImageQualityError
-from .compliance import check_label_requirements, overall_status, run_compliance_checks
+from .compliance import (
+    LowConfidenceError,
+    UNCONFIRMED_BEVERAGE_TYPE,
+    check_label_requirements,
+    overall_status,
+    run_compliance_checks,
+)
 from .models import ApplicationData, ExtractedLabelData, LabelCheckResult, ReviewResult
 
 # Module-level logger. In production configure JSON handler for log aggregators.
@@ -95,7 +101,7 @@ async def _read_and_validate_file(
     except ImageQualityError as exc:
         # Surface the user-friendly message directly - no internal details.
         # HTTP 422 Unprocessable Entity signals a client-fixable input problem
-        # (per RFC 9110 ÃÂ§15.5.21), distinct from 400 (bad request structure).
+        # (per RFC 9110 ÃÂÃÂ§15.5.21), distinct from 400 (bad request structure).
         _log.info("Image quality rejected for '%s': %s", file.filename, exc.user_message)
         return exc.user_message
     except ValueError as exc:
@@ -284,8 +290,16 @@ async def review_labels_batch(
     return list(results)
 
 
-async def _label_check_single(files: list[UploadFile]) -> LabelCheckResult:
-    """Run a label-only requirements check for one label's image(s)."""
+async def _label_check_single(
+    files: list[UploadFile],
+    confirmed_beverage_type: str | None = None,
+) -> LabelCheckResult:
+    """Run a label-only requirements check for one label's image(s).
+
+    Args:
+        files:                   Uploaded label image file(s).
+        confirmed_beverage_type: Agent-confirmed beverage type override.
+    """
     start = time.monotonic()
     filenames = [f.filename or "unknown" for f in files]
 
@@ -301,11 +315,42 @@ async def _label_check_single(files: list[UploadFile]) -> LabelCheckResult:
             error=error_msg,
         )
 
-    checks = check_label_requirements(extracted, extracted.beverage_type_guess)
+    type_confirmed = confirmed_beverage_type is not None
+    try:
+        checks = check_label_requirements(
+            extracted,
+            confirmed_beverage_type=confirmed_beverage_type,
+        )
+    except LowConfidenceError as exc:
+        return LabelCheckResult(
+            filenames=filenames,
+            overall_status="fail",
+            checks=[],
+            extracted=extracted,
+            beverage_type=confirmed_beverage_type or extracted.beverage_type_guess,
+            beverage_type_confirmed=type_confirmed,
+            processing_time_ms=int((time.monotonic() - start) * 1000),
+            error=exc.user_message,
+        )
+    except ValueError as exc:
+        if str(exc) == UNCONFIRMED_BEVERAGE_TYPE:
+            return LabelCheckResult(
+                filenames=filenames,
+                overall_status="warning",
+                checks=[],
+                extracted=extracted,
+                beverage_type=extracted.beverage_type_guess,
+                beverage_type_confirmed=False,
+                needs_beverage_confirmation=True,
+                processing_time_ms=int((time.monotonic() - start) * 1000),
+            )
+        raise
     return LabelCheckResult(
         filenames=filenames,
         overall_status=overall_status(checks),
-        beverage_type=extracted.beverage_type_guess,
+        beverage_type=confirmed_beverage_type or extracted.beverage_type_guess,
+        beverage_type_confirmed=type_confirmed,
+        needs_beverage_confirmation=False,
         checks=checks,
         extracted=extracted,
         processing_time_ms=int((time.monotonic() - start) * 1000),
@@ -316,8 +361,14 @@ async def _label_check_single(files: list[UploadFile]) -> LabelCheckResult:
 async def label_check_batch(
     files: list[UploadFile] = File(...),
     image_counts: str = Form(...),
+    confirmed_beverage_type: str = Form(default=""),
 ) -> list[LabelCheckResult]:
-    """Label-Only Check (batch): all labels' images concatenated in files."""
+    """Label-Only Check (batch): all labels' images concatenated in files.
+
+    The optional confirmed_beverage_type form field lets the frontend pass
+    through an agent-confirmed beverage type. An empty string means no
+    confirmation (Claude's best guess is used, or confirmation requested).
+    """
     try:
         counts: list[int] = json.loads(image_counts)
     except (json.JSONDecodeError, ValueError) as exc:
@@ -336,6 +387,9 @@ async def label_check_batch(
         offset += count
 
     results: list[LabelCheckResult] = await asyncio.gather(
-        *[_label_check_single(lf) for lf in label_file_groups]
+        *[
+        _label_check_single(lf, confirmed_beverage_type=confirmed_beverage_type or None)
+        for lf in label_file_groups
+    ]
     )
     return list(results)
