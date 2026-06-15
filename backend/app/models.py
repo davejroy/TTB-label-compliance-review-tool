@@ -1,4 +1,4 @@
-"""Pydantic models shared across the API.
+h"""Pydantic models shared across the API.
 
 Changes in this version
 ------------------------
@@ -13,7 +13,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-BeverageType = Literal["distilled_spirits", "wine", "beer"]
+BeverageType = Literal["distilled_spirits", "wine", "beer"]h
 Status = Literal["pass", "warning", "fail"]
 Confidence = Literal["high", "medium", "low"]
 
@@ -107,7 +107,7 @@ class LabelCheckResult(BaseModel):
 
     filenames: list[str]
     overall_status: Status
-    fields: list[FieldResult]
+    checks: list[FieldResult]
     extracted: ExtractedLabelData
     processing_time_ms: int
     error: Optional[str] = None
