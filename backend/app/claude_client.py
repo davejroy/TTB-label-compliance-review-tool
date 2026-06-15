@@ -237,7 +237,6 @@ EXTRACTION_TOOL = {
                     "(e.g. a food product, soft drink, cleaning product, or anything "
                     "other than an alcoholic drink). When in doubt, return True."
                 ),
-            },
             "extraction_confidence": {
                 "type": "number",
                 "description": (
@@ -249,20 +248,8 @@ EXTRACTION_TOOL = {
                     "0.0-0.49 = unreliable; 0.50-0.69 = marginal; 0.70-0.89 = good; 0.90-1.0 = excellent."
                 ),
             },
-            "per_field_confidence": {
-                "type": "object",
-                "description": (
-                    "Per-field readability scores: a JSON object mapping each field "
-                    "you populated to a float 0.0-1.0 reflecting how clearly you read "
-                    "that specific field. Lower score = harder to read. Government Warning "
-                    "body text on a curved bottle legitimately scores 0.50-0.65 even on "
-                    "a well-lit photo. Example: {brand_name: 0.95, government_warning_body: "
-                    "0.55, alcohol_content: 0.88}. Drives per-field confidence gating so "
-                    "unreadable fields fail with a targeted retake request."
-                ),
-                "additionalProperties": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             },
-
+        },
         "required": [
             "brand_name", "class_type", "alcohol_content", "net_contents",
             "name_and_address", "country_of_origin", "government_warning_header",
@@ -307,10 +294,6 @@ SYSTEM_PROMPT = (
     "A score below 0.70 means the image quality is too low for reliable compliance "
     "checking and the agent will be asked to retake the photo."
 )
-    "FOURTH: For per_field_confidence set a JSON object mapping each extracted field to "
-    "a score 0.0-1.0 for how clearly that specific field was readable. High (0.85+) = "
-    "sharp text; low (<0.55) = blurred or partially visible. Government Warning body "
-    "text on a curved bottle legitimately scores 0.50-0.65 on a good photo."
 
 
 def _media_type_for(filename: str) -> str:
