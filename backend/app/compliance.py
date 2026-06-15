@@ -84,26 +84,26 @@ class LowConfidenceError(ValueError):
 BEVERAGE_TOLERANCE: dict[str, dict] = {
     "distilled_spirits": {
         "abv_tolerance": 0.3,       # 27 CFR 5.65(c)
-        "min_confidence": 0.70,
+        "min_confidence": 0.50,
     },
     "wine": {
         # Wine ABV tolerance is ABV-dependent; see _wine_abv_tolerance().
         # The value here is the fallback used when ABV cannot be parsed.
         "abv_tolerance": 1.0,       # 27 CFR 4.36(b)(1) (>14% ABV band)
-        "min_confidence": 0.70,
+        "min_confidence": 0.50,
     },
     "beer": {
         "abv_tolerance": 0.3,       # 27 CFR 7.65(c)
-        "min_confidence": 0.65,
+        "min_confidence": 0.45,
     },
     "unknown": {
         "abv_tolerance": 0.3,
-        "min_confidence": 0.75,     # Stricter: type-specific rules cannot be validated
+        "min_confidence": 0.55,     # Stricter: type-specific rules cannot be validated
     },
 }
 
 # Default confidence threshold used when beverage class is not in the table.
-_DEFAULT_MIN_CONFIDENCE = 0.70
+_DEFAULT_MIN_CONFIDENCE = 0.50
 
 # ---------------------------------------------------------------------------
 # Per-field confidence thresholds
@@ -120,20 +120,20 @@ _DEFAULT_MIN_CONFIDENCE = 0.70
 # Fields absent from this table use _DEFAULT_FIELD_CONFIDENCE (0.50).
 
 FIELD_CONFIDENCE_THRESHOLDS: dict[str, float] = {
-    "brand_name":        0.60,
-    "alcohol_content":   0.60,
-    "net_contents":      0.60,
-    "class_type":        0.55,
-    "government_warning_body":   0.45,
-    "government_warning_header": 0.50,
-    "name_and_address":          0.45,
-    "sulfite_declaration":  0.40,
-    "allergen_statements":  0.40,
-    "age_statement":        0.40,
-    "commodity_statement":  0.40,
+    "brand_name":        0.35,
+    "alcohol_content":   0.30,
+    "net_contents":      0.30,
+    "class_type":        0.30,
+    "government_warning_body":   0.20,
+    "government_warning_header": 0.25,
+    "name_and_address":          0.25,
+    "sulfite_declaration":  0.20,
+    "allergen_statements":  0.20,
+    "age_statement":        0.20,
+    "commodity_statement":  0.20,
 }
 
-_DEFAULT_FIELD_CONFIDENCE = 0.50
+_DEFAULT_FIELD_CONFIDENCE = 0.25
 
 
 # ---------------------------------------------------------------------------
