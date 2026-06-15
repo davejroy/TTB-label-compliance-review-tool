@@ -57,7 +57,7 @@ from .models import ExtractedLabelData
 # Default to the faster/cheaper Haiku model for ~3-5x speed improvement.
 # Override with CLAUDE_MODEL env var (e.g. "claude-sonnet-4-6") if higher
 # accuracy is needed on complex labels.
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-3-5")
+MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5")
 
 # Module-level Anthropic client - reuses the underlying httpx connection pool
 # across all requests instead of creating a new client per call.
@@ -66,7 +66,7 @@ _CLIENT = Anthropic()
 # Maximum pixel dimension for images sent to Claude. 800px gives Claude
 # enough detail to read label text while meaningfully cutting upload size
 # and Claude processing time vs. the previous 1024px limit.
-MAX_IMAGE_DIMENSION = 800
+MAX_IMAGE_DIMENSION = 1600
 
 # JPEG encode quality for processed images. 82 produces ~25% smaller files
 # than quality=90 with no meaningful loss in text legibility for a vision
@@ -75,7 +75,7 @@ JPEG_QUALITY = 82
 
 # Timeout in seconds for the Claude API call. Prevents the event loop from
 # hanging indefinitely if the API is slow or unresponsive.
-CLAUDE_TIMEOUT = 30.0
+CLAUDE_TIMEOUT = 60.0
 
 # JSON-schema tool definition passed to Claude. Keep this in sync with
 # ExtractedLabelData in models.py - the tool's "input" is parsed directly
@@ -308,10 +308,10 @@ SYSTEM_PROMPT = (
     "checking and the agent will be asked to retake the photo. "
     "FOURTH: For per_field_confidence, set a JSON object mapping each extracted field name "
     "to a score 0.0-1.0 for how clearly that specific field was readable. High (0.85+) = "
-    "sharp, legible text. Low (<0.35) = blurred, partially obscured, or uncertain. "
+    "sharp, legible text. Medium (0.35-0.60) = somewhat blurry or curved but human-readable. Low (<0.35) = very difficult to read. "
     "Government Warning body text on a curved bottle legitimately scores 0.50-0.65 on a "
     "good photo. Include scores for: brand_name, class_type, alcohol_content, net_contents, "
-    "name_and_address, country_of_origin, government_warning_header, government_warning_body."
+    "name_and_address, government_warning_header, government_warning_body. For country_of_origin: use 0.0 ONLY if the field is absent (domestic product) - this is normal and expected, not a photo quality issue."
 )
 
 
@@ -478,7 +478,7 @@ def extract_label_fields(
 
     response = _CLIENT.messages.create(
         model=MODEL,
-        max_tokens=800,
+        max_tokens=1500,
         system=SYSTEM_PROMPT,
         tools=[EXTRACTION_TOOL],
         tool_choice={"type": "tool", "name": "record_label_fields"},
