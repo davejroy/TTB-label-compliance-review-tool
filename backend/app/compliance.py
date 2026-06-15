@@ -566,9 +566,9 @@ def _check_government_warning(extracted) -> FieldResult:
     if body_lower != canonical_body.lower():
         if is_small and body_lower == canonical_short.lower():
             pass  # Short form accepted
-        elif is_small and _similarity(body_lower, canonical_short.lower()) >= 0.90:
+        elif is_small and _similarity(body_lower, canonical_short.lower()) >= 0.88:
             issues.append("warning text has minor wording differences from the permitted short-form text")
-        elif _similarity(body_lower, canonical_body.lower()) >= 0.95:
+        elif _similarity(body_lower, canonical_body.lower()) >= 0.88:
             issues.append("warning text has minor wording differences from the required text")
         elif is_small:
             issues.append("warning text does not match either the standard or the permitted short-form text (27 CFR 16.21(c))")
