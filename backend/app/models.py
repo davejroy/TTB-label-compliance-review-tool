@@ -1,4 +1,4 @@
-h"""Pydantic models shared across the API.
+"""Pydantic models shared across the API.
 
 Changes in this version
 ------------------------
@@ -13,7 +13,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-BeverageType = Literal["distilled_spirits", "wine", "beer"]h
+BeverageType = Literal["distilled_spirits", "wine", "beer"]
 Status = Literal["pass", "warning", "fail"]
 Confidence = Literal["high", "medium", "low"]
 
