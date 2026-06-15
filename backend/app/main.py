@@ -102,7 +102,7 @@ async def _read_and_validate_file(
     except ImageQualityError as exc:
         # Surface the user-friendly message directly - no internal details.
         # HTTP 422 Unprocessable Entity signals a client-fixable input problem
-        # (per RFC 9110 ÃÂÃÂÃÂÃÂ§15.5.21), distinct from 400 (bad request structure).
+        # (per RFC 9110 ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ§15.5.21), distinct from 400 (bad request structure).
         _log.info("Image quality rejected for '%s': %s", file.filename, exc.user_message)
         return exc.user_message
     except ValueError as exc:
@@ -236,7 +236,7 @@ async def _review_single(files: list[UploadFile], application: ApplicationData) 
     start = time.monotonic()
     filenames = [f.filename or "unknown" for f in files]
 
-    extracted, error_msg = await _extract_fields(files, filenames)
+    extracted, error_msg, _roles = await _extract_fields(files, filenames)
 
     if error_msg:
         return ReviewResult(
