@@ -237,6 +237,19 @@ EXTRACTION_TOOL = {
                     "(e.g. a food product, soft drink, cleaning product, or anything "
                     "other than an alcoholic drink). When in doubt, return True."
                 ),
+            },
+            "per_field_confidence": {
+                "type": "object",
+                "description": (
+                    "Per-field readability scores 0.0-1.0. For each of brand_name, "
+                    "class_type, alcohol_content, net_contents, name_and_address, "
+                    "country_of_origin, government_warning_header, "
+                    "government_warning_body set a score: 1.0 = perfectly legible, "
+                    "0.0 = completely unreadable. Government Warning body on a curved "
+                    "bottle legitimately scores 0.50-0.65 on a good photo."
+                ),
+                "additionalProperties": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            },
             "extraction_confidence": {
                 "type": "number",
                 "description": (
@@ -258,6 +271,7 @@ EXTRACTION_TOOL = {
             "sulfite_declaration", "allergen_statements",
             "age_statement", "commodity_statement",
             "is_alcohol_beverage_label",
+            "per_field_confidence",
             "extraction_confidence",
         ],
     },
@@ -292,7 +306,13 @@ SYSTEM_PROMPT = (
     "Consider: focus/blur, lighting/glare, how much of the label is visible, "
     "and how confidently each required field could be extracted. "
     "A score below 0.70 means the image quality is too low for reliable compliance "
-    "checking and the agent will be asked to retake the photo."
+    "checking and the agent will be asked to retake the photo. "
+    "FOURTH: For per_field_confidence, set a JSON object mapping each extracted field name "
+    "to a score 0.0-1.0 for how clearly that specific field was readable. High (0.85+) = "
+    "sharp, legible text. Low (<0.55) = blurred, partially obscured, or uncertain. "
+    "Government Warning body text on a curved bottle legitimately scores 0.50-0.65 on a "
+    "good photo. Include scores for: brand_name, class_type, alcohol_content, net_contents, "
+    "name_and_address, country_of_origin, government_warning_header, government_warning_body."
 )
 
 
