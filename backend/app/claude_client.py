@@ -237,6 +237,7 @@ EXTRACTION_TOOL = {
                     "(e.g. a food product, soft drink, cleaning product, or anything "
                     "other than an alcoholic drink). When in doubt, return True."
                 ),
+            },
             "extraction_confidence": {
                 "type": "number",
                 "description": (
@@ -248,8 +249,6 @@ EXTRACTION_TOOL = {
                     "0.0-0.49 = unreliable; 0.50-0.69 = marginal; 0.70-0.89 = good; 0.90-1.0 = excellent."
                 ),
             },
-            },
-        },
             "per_field_confidence": {
                 "type": "object",
                 "description": (
