@@ -367,8 +367,8 @@ def assert_extraction_confidence(extracted, beverage_type=None):
 
     field_issues = []
     for field_name, field_score in extracted.per_field_confidence.items():
-            if field_name == "country_of_origin" and field_score == 0.0:
-                        continue  # Absent on domestic labels - not a photo quality issue
+        if field_name == "country_of_origin" and field_score == 0.0:
+            continue  # Absent on domestic labels - not a photo quality issue
         field_threshold = FIELD_CONFIDENCE_THRESHOLDS.get(field_name, _DEFAULT_FIELD_CONFIDENCE)
         if field_score < field_threshold:
             _log.info("Low per-field confidence for '%s': %.2f < %.2f", field_name, field_score, field_threshold)
