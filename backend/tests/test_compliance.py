@@ -195,11 +195,11 @@ def test_label_requirements_all_present_passes():
         make_extracted(name_and_address="Old Tom Distillery, Bardstown, KY"),
         beverage_type="distilled_spirits",
     )
-        # Formula-dependent checks return "warning" by design when label data is absent
-        _formula_fields = {"sulfite_declaration", "allergen_statements", "age_statement", "commodity_statement"}
+    # Formula-dependent checks return "warning" by design when label data is absent
+    _formula_fields = {"sulfite_declaration", "allergen_statements", "age_statement", "commodity_statement"}
     assert all(r.status == "pass" for r in results if r.field not in _formula_fields | {"country_of_origin"})
-        # country_of_origin and formula-dependent checks (allergen, age, commodity)
-        # return "warning" - that keeps the overall status at "warning".
+    # country_of_origin and formula-dependent checks (allergen, age, commodity)
+    # return "warning" - that keeps the overall status at "warning".
     coo = next(r for r in results if r.field == "country_of_origin")
     assert coo.status == "warning"
     assert overall_status(results) == "warning"
