@@ -107,10 +107,11 @@ class LabelCheckResult(BaseModel):
 
     filenames: list[str]
     overall_status: Status
-    fields: list[FieldResult]
+    checks: list[FieldResult]
     extracted: ExtractedLabelData
     processing_time_ms: int
     error: Optional[str] = None
+    beverage_type: Optional[str] = None
     beverage_type_confirmed: bool = False
     needs_beverage_confirmation: bool = False
     photo_sources: list[str] = Field(
@@ -120,3 +121,4 @@ class LabelCheckResult(BaseModel):
             "['front', 'back']. Empty list when photo roles were not supplied."
         ),
     )
+
