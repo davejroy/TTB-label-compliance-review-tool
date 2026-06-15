@@ -261,7 +261,6 @@ EXTRACTION_TOOL = {
                     "0.0-0.49 = unreliable; 0.50-0.69 = marginal; 0.70-0.89 = good; 0.90-1.0 = excellent."
                 ),
             },
-            },
         },
         "required": [
             "brand_name", "class_type", "alcohol_content", "net_contents",
