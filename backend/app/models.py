@@ -107,6 +107,7 @@ class LabelCheckResult(BaseModel):
 
     filenames: list[str]
     overall_status: Status
+    beverage_type: Optional[str] = None
     checks: list[FieldResult]
     extracted: ExtractedLabelData
     processing_time_ms: int
