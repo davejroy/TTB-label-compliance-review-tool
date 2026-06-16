@@ -1,3 +1,18 @@
+# ✅ PRODUCTION REPOSITORY
+
+> **This is the live, TTB-facing production repository.**
+>
+> All changes must be developed and tested in the [development repository](https://github.com/davejroy/TTB-label-compliance-review-tool-dev) before being promoted here.
+>
+> | Channel | Repository | Purpose |
+> |---------|-----------|---------|
+> | 🔧 **Development** | [TTB-label-compliance-review-tool-dev](https://github.com/davejroy/TTB-label-compliance-review-tool-dev) | Feature development, bug fixes, testing |
+> | ✅ **Production** (this repo) | [TTB-label-compliance-review-tool](https://github.com/davejroy/TTB-label-compliance-review-tool) | Live, reviewed, TTB-facing deployments |
+
+> ⚠️ **Do not commit untested changes directly to this repository.** All changes should go through the development repo first.
+
+---
+
 - **Per-field confidence thresholds.** `FIELD_CONFIDENCE_THRESHOLDS` in
   `compliance.py` gives each field its own readability floor. Government Warning
   body text is allowed a lower confidence score (0.45) than brand name (0.60)
