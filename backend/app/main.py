@@ -25,6 +25,7 @@ Performance notes:
 import asyncio
 import json
 import os
+import secrets
 import time
 import logging
 
@@ -35,9 +36,10 @@ from anthropic import (
     AuthenticationError,
     RateLimitError,
 )
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 
 from .claude_client import extract_label_fields, prepare_image, _media_type_for, ImageQualityError
 from .compliance import (
@@ -56,23 +58,68 @@ _log = logging.getLogger(__name__)
 app = FastAPI(title="TTB Label Compliance Review Tool")
 
 # CORS - in production lock this down to the frontend's Render hostname via
-# the CORS_ORIGINS environment variable (comma-separated). Defaults to "*"
-# so local dev works without extra config.
-_cors_origins = os.environ.get("CORS_ORIGINS", "*").split(",")
+# CORS_ORIGINS (comma-separated). Local defaults keep dev friction low.
+def _parse_cors_origins(raw: str | None) -> list[str]:
+    if not raw or not raw.strip():
+        return ["http://localhost:5173", "http://127.0.0.1:5173"]
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if "*" in origins:
+        return ["*"]
+    return origins
+
+
+_cors_origins = _parse_cors_origins(os.environ.get("CORS_ORIGINS"))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per image
 MAX_IMAGES_PER_LABEL = 4
+_ALLOWED_BEVERAGE_TYPES = {"distilled_spirits", "wine", "beer"}
+_API_AUTH_TOKEN = os.environ.get("API_AUTH_TOKEN", "").strip()
 
 # Retry config for transient Claude API errors.
 # One retry after a short delay handles most rate-limit / 529 overloaded blips.
 _RETRY_DELAY_S = 2.0
 _RETRYABLE = (RateLimitError, APITimeoutError, APIConnectionError)
+
+
+def _apply_security_headers(response: Response, request: Request) -> Response:
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+    )
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        )
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).lower()
+    if scheme == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
+@app.middleware("http")
+async def _security_middleware(request: Request, call_next):
+    if (
+        _API_AUTH_TOKEN
+        and request.url.path.startswith("/api/")
+        and request.url.path != "/api/health"
+    ):
+        supplied = request.headers.get("x-api-key", "")
+        if not supplied or not secrets.compare_digest(supplied, _API_AUTH_TOKEN):
+            response = JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+            return _apply_security_headers(response, request)
+    response = await call_next(request)
+    return _apply_security_headers(response, request)
 
 
 @app.get("/api/health")
@@ -171,7 +218,8 @@ async def _extract_fields_with_retry(
                 return None, "Anthropic rate limit reached. Please try again shortly."
             if isinstance(exc, APITimeoutError):
                 return None, "The request to Claude timed out. Please try again."
-            return None, f"Network error contacting Claude API: {exc}"
+            _log.warning("Claude connection error after retry: %s", exc)
+            return None, "Network error contacting Claude API. Please try again shortly."
         except APIStatusError as exc:
             # 529 = overloaded; retry once.
             if attempt == 0 and exc.status_code == 529:
@@ -183,9 +231,11 @@ async def _extract_fields_with_retry(
             # is_alcohol_beverage_label is False). Surface directly to user.
             return None, str(exc)
         except RuntimeError as exc:
-            return None, f"Could not read label image(s): {exc}"
+            _log.warning("Runtime extraction error: %s", exc)
+            return None, "Could not process label image(s). Please submit clearer photos."
         except Exception as exc:  # noqa: BLE001
-            return None, f"Unexpected error during label extraction: {exc}"
+            _log.exception("Unexpected extraction error")
+            return None, "Unexpected error during label extraction. Please try again."
     return None, "Unexpected retry loop exit."
 
 
@@ -268,7 +318,7 @@ async def review_label(
     try:
         application_data = ApplicationData(**json.loads(application))
     except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid application data: {exc}") from exc
+        raise HTTPException(status_code=400, detail="Invalid application data.") from exc
     return await _review_single(files, application_data)
 
 
@@ -285,7 +335,18 @@ async def review_labels_batch(
             ApplicationData(**a) for a in json.loads(applications)
         ]
     except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid batch parameters: {exc}") from exc
+        raise HTTPException(status_code=400, detail="Invalid batch parameters.") from exc
+
+    if not counts or any(not isinstance(c, int) or c < 1 for c in counts):
+        raise HTTPException(
+            status_code=400,
+            detail="image_counts must be a JSON array of positive integers.",
+        )
+    if any(c > MAX_IMAGES_PER_LABEL for c in counts):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Each image count must be <= {MAX_IMAGES_PER_LABEL}.",
+        )
 
     if len(counts) != len(application_list):
         raise HTTPException(
@@ -398,14 +459,40 @@ async def label_check_batch(
     try:
         counts: list[int] = json.loads(image_counts)
     except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid image_counts: {exc}") from exc
+        raise HTTPException(status_code=400, detail="Invalid image_counts.") from exc
+
+    if not counts or any(not isinstance(c, int) or c < 1 for c in counts):
+        raise HTTPException(
+            status_code=400,
+            detail="image_counts must be a JSON array of positive integers.",
+        )
+    if any(c > MAX_IMAGES_PER_LABEL for c in counts):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Each image count must be <= {MAX_IMAGES_PER_LABEL}.",
+        )
+    if (
+        confirmed_beverage_type
+        and confirmed_beverage_type not in _ALLOWED_BEVERAGE_TYPES
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="confirmed_beverage_type must be one of: distilled_spirits, wine, beer.",
+        )
 
     roles_list: list[str] = []
     if photo_roles.strip():
         try:
             roles_list = json.loads(photo_roles)
-        except (json.JSONDecodeError, ValueError):
-            roles_list = []
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid photo_roles.") from exc
+        if not isinstance(roles_list, list) or any(
+            not isinstance(role, str) for role in roles_list
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="photo_roles must be a JSON array of strings.",
+            )
 
     if sum(counts) != len(files):
         raise HTTPException(
@@ -435,4 +522,3 @@ async def label_check_batch(
         ]
     )
     return list(results)
-
