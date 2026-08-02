@@ -129,7 +129,8 @@ npm run build   # outputs to frontend/dist
 
 Serve `frontend/dist` with any static file host, and run the FastAPI app
 behind a process manager (e.g. `uvicorn app.main:app` with a reverse proxy).
-Set `ANTHROPIC_API_KEY` (and optionally `CLAUDE_MODEL`) as environment
+Set `ANTHROPIC_API_KEY` (and optionally `CLAUDE_MODEL`, `CORS_ORIGINS`, and
+`API_AUTH_TOKEN`) as environment
 variables for the backend process.
 
 ## Deploying to Render
@@ -148,10 +149,13 @@ To deploy:
    add `ANTHROPIC_API_KEY` with your Anthropic API key (this is marked
    `sync: false` in the blueprint so it isn't stored in the repo - you must
    set it manually).
-4. Trigger a deploy of `ttb-label-frontend` (it needs `VITE_API_HOST` to be
+4. (Optional but recommended) set `API_AUTH_TOKEN` on the backend and include
+   the same value as an `X-API-Key` request header from trusted clients to
+   require authenticated API access.
+5. Trigger a deploy of `ttb-label-frontend` (it needs `VITE_API_HOST` to be
    resolved from the backend service, which happens automatically once the
    backend exists).
-5. Once both are live, open the frontend's `.onrender.com` URL.
+6. Once both are live, open the frontend's `.onrender.com` URL.
 
 Note: on Render's free tier, services "spin down" after inactivity and the
 first request after idling can take 30-60 seconds while it wakes up.
