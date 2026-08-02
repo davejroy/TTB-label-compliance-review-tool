@@ -80,6 +80,16 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per image
 MAX_IMAGES_PER_LABEL = 4
 _ALLOWED_BEVERAGE_TYPES = {"distilled_spirits", "wine", "beer"}
 _API_AUTH_TOKEN = os.environ.get("API_AUTH_TOKEN", "").strip()
+_APP_ENV = os.environ.get("APP_ENV", "").strip().lower()
+
+# Fail-closed: refuse to start in production without an auth token.
+# Set APP_ENV=production in your deployment environment (e.g. render.yaml)
+# and configure API_AUTH_TOKEN at deploy time so all endpoints are protected.
+if _APP_ENV == "production" and not _API_AUTH_TOKEN:
+    raise RuntimeError(
+        "API_AUTH_TOKEN must be set when APP_ENV=production. "
+        "Configure it in your deployment environment before starting the server."
+    )
 
 # Retry config for transient Claude API errors.
 # One retry after a short delay handles most rate-limit / 529 overloaded blips.
