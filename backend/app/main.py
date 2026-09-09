@@ -35,9 +35,10 @@ from anthropic import (
     AuthenticationError,
     RateLimitError,
 )
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .claude_client import extract_label_fields, prepare_image, _media_type_for, ImageQualityError
 from .compliance import (
@@ -54,6 +55,27 @@ from .models import ApplicationData, ExtractedLabelData, LabelCheckResult, Revie
 _log = logging.getLogger(__name__)
 
 app = FastAPI(title="TTB Label Compliance Review Tool")
+
+
+class RequestTimingMiddleware(BaseHTTPMiddleware):
+    """Middleware to log request duration and add X-Process-Time header."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        start_time = time.perf_counter()
+        response = await call_next(request)
+        process_time_ms = (time.perf_counter() - start_time) * 1000
+        response.headers["X-Process-Time"] = f"{process_time_ms:.2f}ms"
+        _log.info(
+            "RequestTiming: %s %s completed in %.2fms (status %d)",
+            request.method,
+            request.url.path,
+            process_time_ms,
+            response.status_code,
+        )
+        return response
+
+
+app.add_middleware(RequestTimingMiddleware)
 
 # CORS - in production lock this down to the frontend's Render hostname via
 # the CORS_ORIGINS environment variable (comma-separated). Defaults to "*"
@@ -221,10 +243,13 @@ async def _extract_fields(
         extracted, error_msg = await _extract_fields_with_retry(images)
         return extracted, error_msg, effective_roles
 
+    # Extract all distinct role photos concurrently to optimize multi-photo latency
+    results = await asyncio.gather(
+        *[_extract_fields_with_retry([img]) for img in images]
+    )
     extractions: list[ExtractedLabelData] = []
-    for img, role in zip(images, effective_roles):
-        ext, err = await _extract_fields_with_retry([img])
-        if err:
+    for (ext, err), role in zip(results, effective_roles):
+        if err or ext is None:
             return None, f"Extraction failed for {role} photo: {err}", effective_roles
         extractions.append(ext)
 
