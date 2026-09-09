@@ -46,4 +46,4 @@ This document lists all user-facing error messages returned by the API, their ca
 
 ---
 
-*Last updated: June 2026*
+*Last updated: September 2026*

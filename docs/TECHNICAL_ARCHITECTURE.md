@@ -96,7 +96,7 @@ Structured errors and their user-facing messages, causes, and remediation are do
 
 ## Observability
 
-Logging is via the backend application logs (e.g. a warning when `CORS_ORIGINS` is unset). There is currently no dedicated metrics, tracing, or alerting stack. **TBD:** structured request logging with correlation IDs and dashboards would be needed for production operations.
+Logging is via the backend application logs (e.g. a warning when `CORS_ORIGINS` is unset). The application includes `RequestTimingMiddleware` which logs latency per request (`RequestTiming: <method> <path> completed in <ms> (status <code>)`) and emits an `X-Process-Time` HTTP response header for performance tracking. **TBD:** external metrics, distributed tracing, or dashboards would be needed for larger scale production operations.
 
 ## Security Architecture
 
@@ -134,3 +134,4 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | Date | Change | Author |
 |---|---|---|
 | 2026-07-07 | Initial architecture document created under documentation-governance skill; promoted to production | davejroy |
+| 2026-09-09 | Add RequestTiming middleware observability notes and concurrent multi-photo merge architecture | davejroy |
