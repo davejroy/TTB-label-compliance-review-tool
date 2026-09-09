@@ -286,9 +286,10 @@ implemented in the current codebase.
   has its own readability floor so Government Warning body text (long text on a
   curved bottle) is allowed a lower score than brand name. A field below its
   threshold fails with a named retake request.
-- **Multi-photo extraction and merging** (`merge_extracted_label_data`,
-  `photo_roles` batch param): front and back label photos can be extracted
-  independently and merged so each panel gets dedicated Claude attention.
+- **Concurrent multi-photo extraction and merging** (`merge_extracted_label_data`,
+  `photo_roles` batch param): front and back label photos are extracted
+  concurrently and merged so each panel gets dedicated Claude attention with minimal latency.
+- **RequestTiming middleware**: logs request timings (`RequestTiming`) and returns `X-Process-Time` HTTP header.
 - `LabelCheckResult.photo_sources` records which photo roles contributed.
 - `ExtractedLabelData.per_field_confidence` dict added to model and schema.
 
