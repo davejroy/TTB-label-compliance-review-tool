@@ -1,6 +1,8 @@
 from app.compliance import (
     CANONICAL_WARNING_BODY,
     CANONICAL_WARNING_HEADER,
+    LowConfidenceError,
+    assert_extraction_confidence,
     check_label_requirements,
     overall_status,
     run_compliance_checks,
@@ -284,3 +286,61 @@ def test_label_requirements_missing_country_of_origin_with_unknown_origin_is_war
     )
     coo = next(r for r in results if r.field == "country_of_origin")
     assert coo.status == "warning"
+
+
+# ---------------------------------------------------------------------------
+# W10 Regression Tests: Brand Name Validation & Anti-Hallucination
+# ---------------------------------------------------------------------------
+
+def test_w10_empty_brand_name_in_application_match_fails():
+    results = run_compliance_checks(
+        make_application(brand_name="Old Tom Distillery"),
+        make_extracted(brand_name=""),
+    )
+    brand_result = next(r for r in results if r.field == "brand_name")
+    assert brand_result.status == "fail"
+    assert "not found on label" in brand_result.message
+    assert overall_status(results) == "fail"
+
+
+def test_w10_both_application_and_label_brand_empty_fails():
+    # Brand name is a mandatory requirement; empty brand can never pass
+    results = run_compliance_checks(
+        make_application(brand_name=""),
+        make_extracted(brand_name=""),
+    )
+    brand_result = next(r for r in results if r.field == "brand_name")
+    assert brand_result.status == "fail"
+    assert overall_status(results) == "fail"
+
+
+def test_w10_whitespace_brand_name_fails():
+    results = check_label_requirements(
+        make_extracted(brand_name="   "), beverage_type="distilled_spirits"
+    )
+    brand_result = next(r for r in results if r.field == "brand_name")
+    assert brand_result.status == "fail"
+
+
+def test_w10_low_confidence_brand_name_raises_low_confidence_error():
+    import pytest
+    extracted = make_extracted(
+        brand_name="",
+        per_field_confidence={"brand_name": 0.20},
+    )
+    with pytest.raises(LowConfidenceError) as exc_info:
+        run_compliance_checks(make_application(), extracted)
+    assert "brand name" in exc_info.value.user_message.lower()
+    assert "retake" in exc_info.value.user_message.lower()
+
+
+def test_w10_low_confidence_brand_name_in_label_requirements_raises_error():
+    import pytest
+    extracted = make_extracted(
+        brand_name="",
+        per_field_confidence={"brand_name": 0.15},
+    )
+    with pytest.raises(LowConfidenceError) as exc_info:
+        check_label_requirements(extracted, beverage_type="distilled_spirits")
+    assert "brand name" in exc_info.value.user_message.lower()
+
