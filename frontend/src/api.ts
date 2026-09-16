@@ -1,3 +1,5 @@
+import { authHeader } from "./authStore";
+import { ensureImagesResized } from "./imageUtils";
 import type { ApplicationData, LabelCheckResult, ReviewResult } from "./types";
 
 // In production the frontend and backend are deployed as separate Render
@@ -55,7 +57,8 @@ async function safeFetch(url: string, init: RequestInit): Promise<Response> {
     } catch (err) {
       if (err instanceof TypeError) {
         throw new Error(
-          "Could not reach the review server. Check your connection or try again in a moment."
+          "Could not reach the review server. Check your connection or try again in a moment.",
+          { cause: err },
         );
       }
       throw err;
@@ -77,12 +80,14 @@ export async function reviewLabel(
   files: File[],
   application: ApplicationData
 ): Promise<ReviewResult> {
+  const resizedFiles = await ensureImagesResized(files);
   const formData = new FormData();
-  files.forEach((file) => formData.append("files", file));
+  resizedFiles.forEach((file) => formData.append("files", file));
   formData.append("application", JSON.stringify(application));
 
   const response = await safeFetch(`${API_BASE}/api/review`, {
     method: "POST",
+    headers: { ...authHeader() },
     body: formData,
   });
 
@@ -97,13 +102,21 @@ export async function reviewLabel(
 export async function reviewLabelsBatch(
   items: { files: File[]; application: ApplicationData }[]
 ): Promise<ReviewResult[]> {
+  const processedItems = await Promise.all(
+    items.map(async (item) => ({
+      ...item,
+      files: await ensureImagesResized(item.files),
+    }))
+  );
+
   const formData = new FormData();
-  items.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
-  formData.append("image_counts", JSON.stringify(items.map((item) => item.files.length)));
-  formData.append("applications", JSON.stringify(items.map((item) => item.application)));
+  processedItems.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
+  formData.append("image_counts", JSON.stringify(processedItems.map((item) => item.files.length)));
+  formData.append("applications", JSON.stringify(processedItems.map((item) => item.application)));
 
   const response = await safeFetch(`${API_BASE}/api/review/batch`, {
     method: "POST",
+    headers: { ...authHeader() },
     body: formData,
   });
 
@@ -114,17 +127,109 @@ export async function reviewLabelsBatch(
   return response.json() as Promise<ReviewResult[]>;
 }
 
+/**
+ * POST /api/review/batch/stream — Streaming batch review via NDJSON.
+ *
+ * Calls the streaming endpoint and invokes `onResult` for each label result as
+ * it arrives, allowing the UI to render results progressively without waiting
+ * for all labels to complete.
+ *
+ * @param items  Batch items (files + application data).
+ * @param onResult  Called with (index, result) each time a label completes.
+ * @returns  Promise that resolves when all results have been received.
+ */
+export async function reviewLabelsBatchStream(
+  items: { files: File[]; application: ApplicationData }[],
+  onResult: (index: number, result: ReviewResult) => void,
+): Promise<void> {
+  const processedItems = await Promise.all(
+    items.map(async (item) => ({
+      ...item,
+      files: await ensureImagesResized(item.files),
+    }))
+  );
+
+  const formData = new FormData();
+  processedItems.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
+  formData.append("image_counts", JSON.stringify(processedItems.map((item) => item.files.length)));
+  formData.append("applications", JSON.stringify(processedItems.map((item) => item.application)));
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/review/batch/stream`, {
+      method: "POST",
+      headers: { ...authHeader() },
+      body: formData,
+    });
+  } catch (err) {
+    throw new Error(
+      "Could not reach the review server. Check your connection or try again in a moment.",
+      { cause: err },
+    );
+  }
+
+  if (!response.ok) {
+    const detail = await parseErrorBody(response);
+    throw new Error(`Batch stream failed (${response.status}): ${detail}`);
+  }
+
+  if (!response.body) {
+    throw new Error("Streaming response body is null — browser may not support ReadableStream.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    // The last element may be an incomplete line — keep it in buffer
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          "index" in parsed &&
+          "result" in parsed
+        ) {
+          const { index, result } = parsed as { index: number; result: ReviewResult };
+          onResult(index, result);
+        }
+        // Ignore the {done: true} sentinel line — it's informational only
+      } catch {
+        // Malformed line — skip silently
+      }
+    }
+  }
+}
+
 /** POST /api/label-check/batch - Label-Only Check mode. */
 export async function checkLabelsBatch(
   items: { files: File[]; photoRoles?: string[] }[],
   confirmedBeverageType?: string
 ): Promise<LabelCheckResult[]> {
+  const processedItems = await Promise.all(
+    items.map(async (item) => ({
+      ...item,
+      files: await ensureImagesResized(item.files),
+    }))
+  );
+
   const formData = new FormData();
   const counts: number[] = [];
   const allRoles: string[] = [];
   let hasRoles = false;
 
-  items.forEach((item) => {
+  processedItems.forEach((item) => {
     counts.push(item.files.length);
     item.files.forEach((file) => formData.append("files", file));
     if (item.photoRoles && item.photoRoles.length === item.files.length) {
@@ -145,6 +250,7 @@ export async function checkLabelsBatch(
 
   const res = await safeFetch(`${API_BASE}/api/label-check/batch`, {
     method: "POST",
+    headers: { ...authHeader() },
     body: formData,
   });
   if (!res.ok) {
@@ -178,10 +284,16 @@ export async function wakeServerIfNeeded(): Promise<"warm" | "cold"> {
   } catch (err) {
     clearTimeout(timer);
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("Could not reach the review server. Check your connection or try again in a moment.");
+      throw new Error(
+        "Could not reach the review server. Check your connection or try again in a moment.",
+        { cause: err },
+      );
     }
     if (err instanceof TypeError) {
-      throw new Error("Could not reach the review server. Check your connection or try again in a moment.");
+      throw new Error(
+        "Could not reach the review server. Check your connection or try again in a moment.",
+        { cause: err },
+      );
     }
     throw err;
   }

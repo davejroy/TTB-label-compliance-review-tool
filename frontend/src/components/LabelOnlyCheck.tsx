@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { checkLabelsBatch, wakeServerIfNeeded } from "../api";
+import { checkLabelsBatch } from "../api";
 import { downloadCsv } from "../csv";
 import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
 import ImageDropzone from "./ImageDropzone";
@@ -30,11 +30,13 @@ const STEP_COMPLETE = 3;
 function BeverageTypeDialog({
   guessedType,
   labelFiles,
+  loading,
   onConfirm,
   onDismiss,
 }: {
   guessedType: string | undefined;
   labelFiles: File[];
+  loading?: boolean;
   onConfirm: (type: string) => void;
   onDismiss: () => void;
 }) {
@@ -77,6 +79,7 @@ function BeverageTypeDialog({
                   name="beverage_type_confirm"
                   value={key}
                   checked={selected === key}
+                  disabled={loading}
                   onChange={() => setSelected(key)}
                   className="accent-blue-600"
                 />
@@ -87,17 +90,19 @@ function BeverageTypeDialog({
         <div className="flex gap-3">
           <button
             type="button"
-            className="flex-1 rounded-lg border-2 border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            disabled={loading}
+            className="flex-1 rounded-lg border-2 border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={onDismiss}
           >
             Skip (keep unconfirmed)
           </button>
           <button
             type="button"
-            className="flex-1 rounded-lg bg-[#15396a] px-4 py-2 text-sm font-bold text-white hover:bg-[#1a4a8a]"
+            disabled={loading}
+            className="flex-1 rounded-lg bg-[#15396a] px-4 py-2 text-sm font-bold text-white hover:bg-[#1a4a8a] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() => onConfirm(selected)}
           >
-            Confirm &amp; Re-check
+            {loading ? "Re-checking…" : "Confirm & Re-check"}
           </button>
         </div>
       </div>
@@ -113,6 +118,10 @@ export default function LabelOnlyCheck() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [statusStep, setStatusStep] = useState<number>(STEP_UPLOAD);
   const [showBar, setShowBar] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  // Submit guard refs
+  const submittingRef = useRef(false);
   const stepTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const statusBarRef = useRef<HTMLDivElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -123,7 +132,6 @@ export default function LabelOnlyCheck() {
    * null when no confirmation is pending.
    */
   const [pendingConfirmIdx, setPendingConfirmIdx] = useState<number | null>(null);
-  const [wakeMessage, setWakeMessage] = useState<string | null>(null);
 
   // Scroll on mount so the bottom of Label 1 image box is in view
   useEffect(() => {
@@ -140,27 +148,57 @@ export default function LabelOnlyCheck() {
   function clearTimers() {
     stepTimers.current.forEach(clearTimeout);
     stepTimers.current = [];
+    setStatusMessage(null);
   }
 
   function startProgressTimers() {
     clearTimers();
     setStatusStep(STEP_UPLOAD);
-    stepTimers.current.push(setTimeout(() => setStatusStep(STEP_READING), 1000));
-    stepTimers.current.push(setTimeout(() => setStatusStep(STEP_CHECKING), 4000));
+    setStatusMessage("Uploading label image(s)…");
+
+    stepTimers.current.push(
+      setTimeout(() => {
+        setStatusStep(STEP_READING);
+        setStatusMessage("Reading label text and Government Warning…");
+      }, 1000)
+    );
+
+    stepTimers.current.push(
+      setTimeout(() => {
+        setStatusStep(STEP_CHECKING);
+        setStatusMessage("Checking mandatory TTB requirements…");
+      }, 4000)
+    );
+
+    stepTimers.current.push(
+      setTimeout(() => {
+        setStatusMessage(
+          "Server is waking up / analyzing with Claude Vision… (first request may take ~15–30s)"
+        );
+      }, 10000)
+    );
+
+    stepTimers.current.push(
+      setTimeout(() => {
+        setStatusMessage("Still working… completing label requirement check…");
+      }, 20000)
+    );
   }
 
   function updateItem(id: string, files: File[]) {
+    if (loading) return;
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, files } : item)));
   }
 
   function removeItem(id: string) {
+    if (loading) return;
     setItems((prev) => (prev.length > 1 ? prev.filter((item) => item.id !== id) : prev));
   }
 
   const canSubmit = !loading && items.some((item) => item.files.length > 0);
 
   function exportCsv() {
-    if (!results) return;
+    if (!results || loading) return;
     const rows: string[][] = [
       ["Files","Beverage Type","Overall Status","Check","Check Status","TTB Requirement","Label Value","Notes"],
     ];
@@ -183,6 +221,8 @@ export default function LabelOnlyCheck() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRef.current || loading || !canSubmit) return;
+    submittingRef.current = true;
     setLoading(true);
     setShowBar(true);
     setError(null);
@@ -194,13 +234,7 @@ export default function LabelOnlyCheck() {
       statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
     try {
-      // Wake the Render free-tier backend if it has spun down.
-      const wakeStatus = await wakeServerIfNeeded();
-      if (wakeStatus === "cold") {
-        setWakeMessage("Server is waking up (first use takes ~15 s) \u2026");
-      }
       const res = await checkLabelsBatch(items.map((item) => ({ files: item.files })));
-      setWakeMessage(null);
       clearTimers();
       setStatusStep(STEP_COMPLETE);
       setResults(res);
@@ -211,21 +245,22 @@ export default function LabelOnlyCheck() {
         resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }, 100);
     } catch (err) {
-      setWakeMessage(null);
       clearTimers();
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setTimeout(() => {
         statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }, 100);
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   }
 
   /** Re-run the check for one label with an agent-confirmed beverage type. */
   async function confirmBeverageType(idx: number, beverageType: string) {
+    if (submittingRef.current || loading || !results) return;
+    submittingRef.current = true;
     setPendingConfirmIdx(null);
-    if (!results) return;
     setLoading(true);
     setError(null);
     startProgressTimers();
@@ -245,8 +280,10 @@ export default function LabelOnlyCheck() {
       const nextPending = results.findIndex((r, i) => i > idx && r.needs_beverage_confirmation);
       if (nextPending !== -1) setPendingConfirmIdx(nextPending);
     } catch (err) {
+      clearTimers();
       setError(err instanceof Error ? err.message : "Re-check failed. Please try again.");
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   }
@@ -271,8 +308,14 @@ export default function LabelOnlyCheck() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-slate-900">Label {index + 1}</h2>
               {items.length > 1 && (
-                <button type="button" className="text-sm font-semibold text-red-600 hover:text-red-800"
-                  onClick={() => removeItem(item.id)}>Remove</button>
+                <button
+                  type="button"
+                  disabled={loading}
+                  className="text-sm font-semibold text-red-600 hover:text-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => removeItem(item.id)}
+                >
+                  Remove
+                </button>
               )}
             </div>
             <ImageDropzone files={item.files} onChange={(files) => updateItem(item.id, files)}
@@ -281,14 +324,20 @@ export default function LabelOnlyCheck() {
         ))}
 
         <div className="flex flex-wrap items-center gap-4">
-          <button type="button"
-            className="rounded-lg border-2 border-[#15396a] px-5 py-3 text-base font-semibold text-[#15396a] hover:bg-blue-50"
-            onClick={() => setItems((prev) => [...prev, newItem()])}>
+          <button
+            type="button"
+            disabled={loading}
+            className="rounded-lg border-2 border-[#15396a] px-5 py-3 text-base font-semibold text-[#15396a] hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => setItems((prev) => [...prev, newItem()])}
+          >
             + Add Another Label
           </button>
-          <button type="submit" disabled={!canSubmit}
-            className="rounded-lg bg-[#15396a] px-6 py-3 text-lg font-bold text-white hover:bg-[#1a4a8a] disabled:opacity-50 disabled:cursor-not-allowed">
-            {loading ? "Processingâ¦" : `Check ${items.length} Label${items.length !== 1 ? "s" : ""}`}
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="rounded-lg bg-[#15396a] px-6 py-3 text-lg font-bold text-white hover:bg-[#1a4a8a] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? "Processing…" : `Check ${items.length} Label${items.length !== 1 ? "s" : ""}`}
           </button>
         </div>
 
@@ -299,12 +348,7 @@ export default function LabelOnlyCheck() {
 
       {showBar && (loading || isDone) && (
         <div ref={statusBarRef} className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm p-4">
-          {wakeMessage && (
-            <p className="mt-2 text-sm text-amber-700 font-medium animate-pulse text-center">
-              {wakeMessage}
-            </p>
-          )}
-          <ProcessingStatusBar step={statusStep} done={isDone} />
+          <ProcessingStatusBar step={statusStep} done={isDone} statusMessage={loading ? statusMessage : null} />
         </div>
       )}
 
@@ -313,6 +357,7 @@ export default function LabelOnlyCheck() {
         <BeverageTypeDialog
           guessedType={results[pendingConfirmIdx]?.beverage_type}
           labelFiles={items[pendingConfirmIdx]?.files ?? []}
+          loading={loading}
           onConfirm={(type) => confirmBeverageType(pendingConfirmIdx, type)}
           onDismiss={() => setPendingConfirmIdx(null)}
         />
@@ -322,9 +367,14 @@ export default function LabelOnlyCheck() {
         <div ref={resultsRef} className="mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h2 className="text-2xl font-bold text-slate-900">Results</h2>
-            <button type="button"
-              className="rounded-lg border-2 border-[#15396a] px-4 py-2 text-sm font-semibold text-[#15396a] hover:bg-blue-50"
-              onClick={exportCsv}>Export CSV</button>
+            <button
+              type="button"
+              disabled={loading}
+              className="rounded-lg border-2 border-[#15396a] px-4 py-2 text-sm font-semibold text-[#15396a] hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={exportCsv}
+            >
+              Export CSV
+            </button>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="hidden sm:grid sm:grid-cols-[2fr_1fr_auto_2fr_auto] border-b border-slate-200 bg-slate-50 text-sm font-semibold text-slate-700">
@@ -354,19 +404,29 @@ export default function LabelOnlyCheck() {
                       <div className="flex items-center gap-3 flex-wrap">
                         <StatusBadge status={result.overall_status} size="sm" />
                         <span className="text-xs text-slate-500">{beverageLabel}</span>
+                        {typeof result.processing_time_ms === "number" && result.processing_time_ms > 0 && (
+                          <span className="text-xs text-slate-400">
+                            Processed in {(result.processing_time_ms / 1000).toFixed(1)}s
+                          </span>
+                        )}
                         {needsConfirm && (
-                          <button type="button"
-                            className="text-xs font-semibold text-amber-700 underline"
-                            onClick={() => setPendingConfirmIdx(index)}>
+                          <button
+                            type="button"
+                            disabled={loading}
+                            className="text-xs font-semibold text-amber-700 underline disabled:opacity-50"
+                            onClick={() => setPendingConfirmIdx(index)}
+                          >
                             Confirm type
                           </button>
                         )}
                       </div>
                       <p className="text-sm text-slate-600">{issueText}</p>
                       {!result.error && (
-                        <button type="button"
+                        <button
+                          type="button"
                           className="w-full mt-1 rounded-lg border-2 border-blue-700 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-                          onClick={() => setExpanded(expanded === index ? null : index)}>
+                          onClick={() => setExpanded(expanded === index ? null : index)}
+                        >
                           {expanded === index ? "Hide details" : "View details"}
                         </button>
                       )}
@@ -378,20 +438,32 @@ export default function LabelOnlyCheck() {
                       <div className="px-4 py-3 text-sm text-slate-600">
                         {beverageLabel}
                         {needsConfirm && (
-                          <button type="button"
-                            className="block mt-1 text-xs font-semibold text-amber-700 underline"
-                            onClick={() => setPendingConfirmIdx(index)}>
+                          <button
+                            type="button"
+                            disabled={loading}
+                            className="block mt-1 text-xs font-semibold text-amber-700 underline disabled:opacity-50"
+                            onClick={() => setPendingConfirmIdx(index)}
+                          >
                             Confirm type
                           </button>
                         )}
                       </div>
                       <div className="px-4 py-3"><StatusBadge status={result.overall_status} size="sm" /></div>
-                      <div className="px-4 py-3 text-sm text-slate-600">{issueText}</div>
+                      <div className="px-4 py-3 text-sm text-slate-600">
+                        <div>{issueText}</div>
+                        {typeof result.processing_time_ms === "number" && result.processing_time_ms > 0 && (
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            Processed in {(result.processing_time_ms / 1000).toFixed(1)}s
+                          </div>
+                        )}
+                      </div>
                       <div className="px-4 py-3">
                         {!result.error && (
-                          <button type="button"
+                          <button
+                            type="button"
                             className="text-sm font-semibold text-blue-700 underline hover:text-blue-900"
-                            onClick={() => setExpanded(expanded === index ? null : index)}>
+                            onClick={() => setExpanded(expanded === index ? null : index)}
+                          >
                             {expanded === index ? "Hide details" : "View details"}
                           </button>
                         )}

@@ -414,28 +414,27 @@ def _check_text_field(
 ) -> FieldResult:
     """Compare an application value to the corresponding label value.
 
-    - Missing on label -> fail.
-    - Missing on application -> fail.
+    - Missing/empty on label or application -> fail.
     - Equal after normalisation -> pass.
     - >=85% similar after normalisation -> warning (cosmetic difference).
     - Otherwise -> fail.
     """
-    if not label_value or not str(label_value).strip():
+    norm_app = normalizer(application_value)
+    norm_label = normalizer(label_value)
+
+    if not label_value or not str(label_value).strip() or not norm_label:
         return FieldResult(
             field=field, label_name=label_name, status="fail",
             application_value=application_value, label_value=label_value,
             message=f"{label_name} not found on label.",
         )
 
-    if not application_value or not str(application_value).strip():
+    if not application_value or not str(application_value).strip() or not norm_app:
         return FieldResult(
             field=field, label_name=label_name, status="fail",
             application_value=application_value, label_value=label_value,
             message=f"{label_name} missing from application data.",
         )
-
-    norm_app = normalizer(application_value)
-    norm_label = normalizer(label_value)
 
     if norm_app == norm_label:
         return FieldResult(
@@ -566,10 +565,28 @@ def _check_government_warning(extracted) -> FieldResult:
     is_small = _is_small_container(extracted.net_contents)
 
     issues = []
-    if header != CANONICAL_WARNING_HEADER:
+    cosmetic_only = True  # becomes False as soon as a substantive issue is found
+
+    # Header matching is CASE-INSENSITIVE for substance: a warning that reads
+    # "Government Warning:" or "government warning:" is still the required
+    # statement.  27 CFR 16.21 asks for capital letters, so a non-capital
+    # header is surfaced as an advisory (warning) rather than a hard fail.
+    # This keeps single-label review, batch review and the label-only check
+    # perfectly consistent -- they all run this one helper.
+    header_norm = re.sub(r"[^a-z]", "", header.lower())  # drop punctuation/space
+    canonical_norm = re.sub(r"[^a-z]", "", CANONICAL_WARNING_HEADER.lower())
+    if header_norm != canonical_norm:
         issues.append(
-            "header must read exactly 'GOVERNMENT WARNING:' in capital letters "
+            "header text must read 'GOVERNMENT WARNING:' "
             + f"(found '{header}')"
+        )
+        cosmetic_only = False
+    elif header.strip() != CANONICAL_WARNING_HEADER:
+        # Correct words, wrong presentation (e.g. not all-capitals or missing
+        # colon) -> cosmetic advisory only.
+        issues.append(
+            "header should appear in capital letters as 'GOVERNMENT WARNING:' "
+            + f"(found '{header.strip()}')"
         )
 
     body_lower = body.lower()
@@ -582,8 +599,10 @@ def _check_government_warning(extracted) -> FieldResult:
             issues.append("warning text has minor wording differences from the required text")
         elif is_small:
             issues.append("warning text does not match either the standard or the permitted short-form text (27 CFR 16.21(c))")
+            cosmetic_only = False
         else:
             issues.append("warning text does not match the required statement")
+            cosmetic_only = False
 
     if not issues:
         note = ""
@@ -596,8 +615,14 @@ def _check_government_warning(extracted) -> FieldResult:
             message="Government Warning statement matches the required text exactly." + note,
         )
 
+    # Cosmetic-only issues (e.g. header not in capitals, minor punctuation)
+    # are surfaced as a non-blocking WARNING so the agent can review them,
+    # while substantive problems (wrong/missing wording) remain a hard FAIL.
+    # All three modes share this helper, so the outcome is identical for
+    # single-label review, batch review and the label-only check.
+    status = "warning" if cosmetic_only else "fail"
     return FieldResult(
-        field=field, label_name=label_name, status="fail",
+        field=field, label_name=label_name, status=status,
         application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
         label_value=(header + " " + body).strip(),
         message="Government Warning issue(s): " + "; ".join(issues) + "."
@@ -667,7 +692,7 @@ def _presence_check(
     found_message=None,
 ) -> FieldResult:
     """Generic 'is this required field present?' check."""
-    if label_value and label_value.strip():
+    if label_value and str(label_value).strip() and _normalize(label_value):
         return FieldResult(
             field=field, label_name=label_name, status="pass",
             application_value=requirement, label_value=label_value,
@@ -1202,8 +1227,11 @@ def merge_extracted_label_data(extractions, photo_roles=None):
 
     When separate front and back label photos are submitted, extract each
     independently and call this to merge into one ExtractedLabelData.
-    Strategy: for each field, pick the value from the extraction with the
-    highest per_field_confidence (or extraction_confidence as fallback).
+    Strategy: for each field, pick non-empty values over empty/whitespace values,
+    breaking ties using the highest per_field_confidence (or extraction_confidence
+    as fallback). This ensures statements present on any panel (such as sulfite
+    declarations or government warnings on a back label) win even when another
+    panel has higher overall image confidence but empty text for that field.
 
     Special handling:
     - government_warning_present: True if ANY extraction found the warning.
@@ -1239,12 +1267,23 @@ def merge_extracted_label_data(extractions, photo_roles=None):
     for field in _TEXT_FIELDS:
         best_value = None
         best_score = -1.0
+        best_is_nonempty = False
         for ext, role in zip(extractions, roles):
             val = getattr(ext, field, None)
             if val is None:
                 continue
+            is_nonempty = bool(str(val).strip())
             score = ext.per_field_confidence.get(field, ext.extraction_confidence or 0.0)
-            if best_value is None or score > best_score:
+            if best_value is None:
+                best_value = val
+                best_score = score
+                best_is_nonempty = is_nonempty
+            elif is_nonempty and not best_is_nonempty:
+                best_value = val
+                best_score = score
+                best_is_nonempty = True
+                _log.debug("merge: field='%s' (non-empty win) score=%.2f from photo='%s'", field, score, role)
+            elif (is_nonempty == best_is_nonempty) and score > best_score:
                 best_value = val
                 best_score = score
                 _log.debug("merge: field='%s' score=%.2f from photo='%s'", field, score, role)
