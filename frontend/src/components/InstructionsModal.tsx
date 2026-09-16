@@ -199,7 +199,7 @@ export default function InstructionsModal({ isOpen, onClose }: InstructionsModal
               <span>⚠️</span> Known Gaps &amp; Current Scope
             </h3>
             <p className="text-xs sm:text-sm text-slate-700 bg-slate-100 p-3 rounded-lg border border-slate-300">
-              <strong>Known gaps:</strong> Type-size verification under 27 CFR 16.22 (physical millimeter measurement) and modernized standards of fill under T.D. TTB-200 are not fully automated.
+              <strong>Known gaps &amp; Scope:</strong> Modernized standards of fill under T.D. TTB-200 (effective Jan 2025) are fully automated for wine (§4.72) and spirits (§5.203). Exact type-size verification under 27 CFR 16.22 (physical millimeter measurement) is not measured from uncalibrated photos and still requires a physical gauge or scale.
             </p>
           </section>
         </div>

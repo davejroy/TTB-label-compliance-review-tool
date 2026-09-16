@@ -33,6 +33,9 @@ class ApplicationData(BaseModel):
 class FieldLocation(BaseModel):
     """Approximate bounding box for a field on the label image."""
 
+    field: Optional[str] = None
+    image_index: Optional[int] = 0
+    confidence: Optional[Confidence] = None
     x: float
     y: float
     width: float
