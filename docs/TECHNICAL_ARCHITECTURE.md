@@ -132,6 +132,8 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 - No end-user authentication/authorization.
 - No persistence, metrics, tracing, or alerting.
 - Not integrated with COLA (application data is entered manually).
+- **Standards of Fill (T.D. TTB-200)**: Net contents checks validate against the modernized authorized standards of fill under 27 CFR 4.72 (wine) and 27 CFR 5.203 (distilled spirits) effective January 10, 2025 per Treasury Decision TTB-200 (89 FR 96570), with malt beverages (Part 7) unrestricted.
+- **Compliance Boundary (Type Size / 27 CFR 16.22)**: Legibility is assessed via vision OCR extraction confidence and per-field confidence scoring with explicit advisory disclosure on verified labels; exact physical type-size measurement (e.g. 2 mm / 3 mm / 1 mm minimum height per 27 CFR 16.22) is not physically calculated from pixel coordinates without container dimension calibration and requires a physical gauge.
 - Government Warning wording is hardcoded to the standard statutory text (plus the <= 100 mL short form).
 - Outbound calls to the Anthropic API may conflict with production egress-firewall restrictions.
 
@@ -140,5 +142,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | Date | Change | Author |
 |---|---|---|
 | 2026-07-07 | Initial architecture document created under documentation-governance skill; promoted to production | davejroy |
+| 2026-07-08 | Added Related Documentation cross-links; added CONFIGURATION.md and DEPLOYMENT.md references | davejroy |
 | 2026-09-09 | Add RequestTiming middleware observability notes and concurrent multi-photo merge architecture | davejroy |
 | 2026-09-16 | W10 brand hallucination fix: schema & prompt rules, empty-brand fail enforcement, low-confidence retake gating | davejroy |
+| 2026-09-16 | Implemented deterministic brand containment guard, strict GW uppercase casing, structured missing GW failure, TTB-200 standards of fill modernization, and 27 CFR 16.22 honesty advisory | Kilroy_Lives |

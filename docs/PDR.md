@@ -309,8 +309,20 @@ implemented in the current codebase.
 - **Zero-pass on missing brand**: Enforces failure status when brand is absent or empty in compliance checks.
 - **Low-confidence retake gating**: Ensures unreadable or low-confidence brand name inputs trigger explicit retake notices (`LowConfidenceError`).
 
+### Phase 5 User Guidance & Onboarding
+
+- **In-App Instructions / Help Guide (`InstructionsModal`)**: added a header-accessible guide modal explaining tool workflows (COLA match vs Label-Only), photo capture best practices (front+back multi-photo merge), photo quality tips (lighting, flatness, glare prevention), review results meaning (Pass / Needs Review / Fail), low-confidence retake prompts vs hard regulatory fails, strict Government Warning casing (`GOVERNMENT WARNING:`), formula-dependent statement verification caveats (sulfites/allergens), and known gaps (27 CFR 16.22 type-size and T.D. TTB-200 fill standards). Fully accessible and zero-login.
+- **Accuracy, Fill & Honesty Modernization (September 2026)**:
+  - **Issue #9 P1 — Brand Name Containment Guard**: Deterministic check preventing brand names extracted or hallucinated from the producer/bottler address line from clean-passing without distinct brand heading evidence.
+  - **Issue #5 W02 — Missing Government Warning Structured Failure**: Structured `FieldResult(status="fail")` emitted on absent Government Warning without raising `LowConfidenceError` retake prompts.
+  - **Issue #6 W03 — Strict Government Warning Casing**: Statutory hard-fail for non-uppercase Government Warning headers under 27 CFR 16.21/16.22.
+  - **Issue D — Treasury Decision TTB-200 Standards of Fill**: Automated allow-lists updated for 27 CFR 4.72 and 5.203 authorized container sizes effective 2025-01-10.
+  - **Issue E — 27 CFR 16.22 Honesty Advisory**: Explicit advisory on verified labels acknowledging that physical millimeter type-size measurement is not verified from uncalibrated photos.
+
 ## 10. Remaining next steps
 
+- **Documented Compliance Boundaries**:
+  - Calibrated physical type-size measurement for **27 CFR 16.22** (currently evaluated via vision OCR confidence and text matching with explicit honest advisory disclosure; physical millimeter measurement requires container dimension calibration or physical gauge).
 - Integrate with COLA to pull application data automatically.
 - Add state-level ABV and label requirement checks.
 
