@@ -88,7 +88,11 @@ EXTRACTION_TOOL = {
         "properties": {
             "brand_name": {
                 "type": "string",
-                "description": "The brand name as printed on the label, exactly as shown (preserve capitalization).",
+                "description": (
+                    "The brand name as printed on the label, exactly as shown (preserve capitalization). "
+                    "If no brand name is clearly visible or printed on the label, return an empty string (''). "
+                    "NEVER invent, hallucinate, or guess a brand name from class/type designation, producer names, or background imagery."
+                ),
             },
             "class_type": {
                 "type": "string",
@@ -292,6 +296,10 @@ SYSTEM_PROMPT = (
     "punctuation. Do not correct, paraphrase, or 'clean up' the text. You may be "
     "given multiple images (e.g. front and back panels of the same bottle) - treat "
     "them as views of a single label and combine information from all of them. "
+    "For brand_name: Transcribe the brand name exactly as printed on the label. "
+    "NEVER invent, hallucinate, or guess a brand name from class/type designations, "
+    "producer/bottler names, or artwork if no distinct brand name appears on the label. "
+    "If no brand name is clearly visible or printed, return an empty string ('') for brand_name. "
     "If a field is not visible, return an empty string. If image quality is poor, "
     "do your best and note the issue in 'notes'. For each field found, record an "
     "entry in 'field_locations' with an approximate bounding box (fractions 0-1 of "
@@ -309,6 +317,7 @@ SYSTEM_PROMPT = (
     "FOURTH: For per_field_confidence, set a JSON object mapping each extracted field name "
     "to a score 0.0-1.0 for how clearly that specific field was readable. High (0.85+) = "
     "sharp, legible text. Medium (0.35-0.60) = somewhat blurry or curved but human-readable. Low (<0.35) = very difficult to read. "
+    "If a brand name is missing, unreadable, or not printed on the label, assign brand_name 0.0 in per_field_confidence (or a low score <0.35 if unreadable) so a retake will be requested. "
     "Government Warning body text on a curved bottle legitimately scores 0.50-0.65 on a "
     "good photo. Include scores for: brand_name, class_type, alcohol_content, net_contents, "
     "name_and_address, government_warning_header, government_warning_body. For country_of_origin: use 0.0 ONLY if the field is absent (domestic product) - this is normal and expected, not a photo quality issue."

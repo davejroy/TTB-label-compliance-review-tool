@@ -101,6 +101,13 @@ The items below were listed as known gaps and have now been implemented:
 - **Frontend types.ts updated**: `LabelCheckResult` now includes `needs_beverage_confirmation?`, `beverage_type_confirmed?`, `photo_sources?`.
 - **`checkLabelsBatch` in `api.ts` updated**: accepts and passes `confirmedBeverageType` and `photoRoles` to the backend.
 
+### W10 Missing-Brand & Anti-Hallucination Fix
+
+- **Claude Client Prompt & Tool Schema Rules**: Explicit instruction in extraction tool schema and system prompt forbidding hallucinating, guessing, or substituting brand names from class/type designation, producer names, or artwork. If brand is missing or unreadable, return empty string `""` and assign `brand_name` score `0.0` (or `<0.35`) in `per_field_confidence`.
+- **Compliance Empty-Brand Fail Enforcement**: `_check_text_field()` enforces that empty/missing brand names on label or application always result in a `fail` status (never `pass`).
+- **Low-Confidence Retake Gate**: Low confidence scores for `brand_name` trigger `LowConfidenceError` with a retake recommendation rather than silently passing.
+- **Regression Test Suite**: Added W10 regression tests in `backend/tests/test_compliance.py` verifying empty brand fail, empty app/label fail, whitespace fail, and low-confidence retake gate.
+
 ## Remaining next steps
 
 - Integrate with COLA to pull application data automatically.

@@ -301,6 +301,12 @@ implemented in the current codebase.
 - **Frontend types synced**: `LabelCheckResult` in `types.ts` now includes `needs_beverage_confirmation`, `beverage_type_confirmed`, `photo_sources` optional fields to match the backend Pydantic model.
 - **`checkLabelsBatch` API function updated**: accepts `confirmedBeverageType` and `photoRoles` parameters and passes them via `FormData` to the backend batch endpoint.
 
+### W10 Anti-Hallucination & Brand Validation Fix
+
+- **Vision prompt and tool schema rules**: Prohibits guessing or inferring brand name from designations or producer text; requires empty string and 0.0 readability if missing.
+- **Zero-pass on missing brand**: Enforces failure status when brand is absent or empty in compliance checks.
+- **Low-confidence retake gating**: Ensures unreadable or low-confidence brand name inputs trigger explicit retake notices (`LowConfidenceError`).
+
 ## 10. Remaining next steps
 
 - Integrate with COLA to pull application data automatically.

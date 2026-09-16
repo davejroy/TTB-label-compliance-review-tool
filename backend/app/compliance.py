@@ -340,7 +340,7 @@ def assert_extraction_confidence(extracted, beverage_type=None):
        FIELD_CONFIDENCE_THRESHOLDS.  If any key field has a score below its
        threshold, a LowConfidenceError is raised naming the specific field.
     """
-    if extracted.extraction_confidence is None:
+    if extracted.extraction_confidence is None and not extracted.per_field_confidence:
         _log.debug("assert_extraction_confidence: no score emitted, skipping gate.")
         return
 
@@ -349,7 +349,7 @@ def assert_extraction_confidence(extracted, beverage_type=None):
     threshold = config.get("min_confidence", _DEFAULT_MIN_CONFIDENCE)
     conf = extracted.extraction_confidence
 
-    if conf < threshold:
+    if conf is not None and conf < threshold:
         _log.info("Low overall extraction confidence %.2f < %.2f (%s)", conf, threshold, cls)
         raise LowConfidenceError(
             user_message=(
@@ -415,19 +415,27 @@ def _check_text_field(
     """Compare an application value to the corresponding label value.
 
     - Missing on label -> fail.
+    - Missing on application -> fail.
     - Equal after normalisation -> pass.
     - >=85% similar after normalisation -> warning (cosmetic difference).
     - Otherwise -> fail.
     """
-    norm_app = normalizer(application_value)
-    norm_label = normalizer(label_value)
-
-    if not label_value:
+    if not label_value or not str(label_value).strip():
         return FieldResult(
             field=field, label_name=label_name, status="fail",
             application_value=application_value, label_value=label_value,
             message=f"{label_name} not found on label.",
         )
+
+    if not application_value or not str(application_value).strip():
+        return FieldResult(
+            field=field, label_name=label_name, status="fail",
+            application_value=application_value, label_value=label_value,
+            message=f"{label_name} missing from application data.",
+        )
+
+    norm_app = normalizer(application_value)
+    norm_label = normalizer(label_value)
 
     if norm_app == norm_label:
         return FieldResult(
