@@ -35,6 +35,15 @@ This document lists all user-facing error messages returned by the API, their ca
 
 ---
 
+## Compliance & Extraction Quality Errors (HTTP 422)
+
+| Error Message | Cause | Remediation |
+|---------------|-------|-------------|
+| The label image quality is too low to reliably read the required fields (confidence X%, minimum Y% for ...). Please retake the photo... | Overall image extraction confidence fell below minimum threshold for the beverage class. | Retake photo: hold camera flat-on, well-lit, in sharp focus. |
+| The following label field(s) could not be read clearly enough to produce a reliable compliance result: "brand name"... Please retake the photo... | Per-field confidence score for a critical field (e.g. `brand_name` < 35%) fell below the field confidence threshold. | Retake photo focusing on the affected label region (e.g. brand name area). |
+
+---
+
 ## HTTP Status Codes
 
 | Code | Meaning |
