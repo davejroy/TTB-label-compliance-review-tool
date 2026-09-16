@@ -59,6 +59,8 @@ commit history (Dave, Jenny, Sarah, Marcus).
 | NFR-2 | No persistence - uploaded images and extracted/compliance data are not stored server-side. |
 | NFR-3 | UI must be usable by non-technical agents: large text, big buttons, drag-and-drop upload, color-coded status badges. |
 | NFR-4 | Backend test suite must run without requiring an Anthropic API key (matching/requirements logic is pure and independently testable). |
+| NFR-5 | Sacred Fail-Open / Zero-Login: Public API access is unobstructed; no 401/403 gates block anonymous evaluators. |
+| NFR-6 | Defense-in-Depth Header Hardening: HTTP security headers applied by default to all responses. |
 
 ## 6. Architecture
 
