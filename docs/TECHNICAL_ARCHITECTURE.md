@@ -62,7 +62,9 @@ No application data or images are stored server-side; each request is stateless.
 
 ## Authentication and Authorization
 
-This prototype does **not** currently implement end-user authentication or authorization. Any access control is assumed to be provided by the deployment environment (e.g. network restrictions). This is a known gap for any TTB-facing production use and should be addressed before handling real application data. See [REGULATORY_REFERENCES.md](./REGULATORY_REFERENCES.md).
+The application operates under an intentional **Fail-Open / Zero-Login** product requirement. TTB evaluators and compliance agents must always have unobstructed access to review labels and examine the tool without login gates or 401/403 errors on public API routes.
+
+Demonstration tokens (`DEMO_ACCESS_TOKEN`) fail open when unconfigured. No hardcoded or environment-enforced API authentication token gates are used that would reject anonymous evaluators.
 
 ## Configuration
 
@@ -73,7 +75,9 @@ Key environment variables (see [HANDOFF.md](./HANDOFF.md) for the authoritative 
 | `ANTHROPIC_API_KEY` | Auth for the Anthropic API (backend only) | Yes | Yes |
 | `CLAUDE_MODEL` | Vision-capable Claude model override | No | No |
 | `VITE_API_HOST` | Backend host the frontend calls (build-time) | Yes (frontend) | No |
-| `CORS_ORIGINS` | Allowed origins for the backend API | Recommended | No |
+| `CORS_ORIGINS` | Allowed origins for the backend API (defaults to `*` fail-open) | No | No |
+| `DEMO_ACCESS_TOKEN` | Optional demo gate token (defaults to fail-open) | No | Yes |
+| `DEMO_USERNAME` | Non-secret demo username displayed in UI | No | No |
 
 `ANTHROPIC_API_KEY` is marked `sync: false` in `render.yaml` and must be set manually in the Render dashboard.
 
@@ -81,8 +85,8 @@ Key environment variables (see [HANDOFF.md](./HANDOFF.md) for the authoritative 
 
 Deployed on Render via the `render.yaml` blueprint, which defines two services:
 
-- `ttb-label-backend(-dev)` — a Python web service running the FastAPI app.
-- `ttb-label-frontend(-dev)` — a static site serving the built React app, wired to the backend via `VITE_API_HOST`.
+- `ttb-label-backend` — a Python web service running the FastAPI app.
+- `ttb-label-frontend` — a static site serving the built React app, wired to the backend via `VITE_API_HOST`.
 
 On Render's free tier, services spin down after inactivity; the first request after idling can take 30-60 seconds. The frontend calls `wakeServerIfNeeded()` to warm the backend before submitting.
 
@@ -92,18 +96,20 @@ None. The system is stateless with no database, object storage, or persistent qu
 
 ## Error Handling
 
-Structured errors and their user-facing messages, causes, and remediation are documented in [ERROR_CODES.md](./ERROR_CODES.md). Notable failure modes include low-confidence extraction (retake-photo prompt), unsupported image formats (e.g. HEIC), and transient upstream errors (HTTP 429/503/529) which the client retries via `safeFetch`.
+Structured errors and their user-facing messages, causes, and remediation are documented in [ERROR_CODES.md](./ERROR_CODES.md). Notable failure modes include low-confidence extraction (retake-photo prompt), batch parameter validation errors (HTTP 422), and transient upstream errors (HTTP 429/503/529) which the client retries via `safeFetch`. Client responses never echo internal exception traces.
 
 ## Observability
 
-Logging is via the backend application logs (e.g. a warning when `CORS_ORIGINS` is unset). The application includes `RequestTimingMiddleware` which logs latency per request (`RequestTiming: <method> <path> completed in <ms> (status <code>)`) and emits an `X-Process-Time` HTTP response header for performance tracking. **TBD:** external metrics, distributed tracing, or dashboards would be needed for larger scale production operations.
+Logging is via the backend application logs (e.g. a warning when `CORS_ORIGINS` is unset). The application logs latency per request (`RequestTiming`) and emits standard security headers on all responses.
 
 ## Security Architecture
 
-- Secrets (Anthropic API key) are confined to the backend environment and excluded from the repo.
-- Uploaded images are sent to a third-party API (Anthropic); this should be disclosed to users and reviewed against any outbound-egress policy.
-- No authentication/authorization layer exists yet (see above).
-- Input validation should not trust client-provided MIME types.
+- **HTTP Security Headers Middleware**: Centralized defense-in-depth response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy`, API CSP `default-src 'none'`, and HSTS on HTTPS).
+- **Safer Error Surfaces**: Internal runtime exceptions and stack traces are suppressed in client responses and logged safely on the server.
+- **Strict Input Validation**: Request payloads (e.g., `image_counts`, `photo_roles`, `confirmed_beverage_type`) are strictly validated and return HTTP 422 Unprocessable Entity on schema violations.
+- **Fail-Open Policy**: Evaluator access is guaranteed without blocking gates.
+- Secrets (`ANTHROPIC_API_KEY`) are confined to the backend environment and excluded from source control.
+- Uploaded images are sent to a third-party API (Anthropic); this is disclosed to users. Magic byte verification is used to reject spoofed files.
 
 See [../SECURITY.md](../SECURITY.md) for the vulnerability reporting process.
 
