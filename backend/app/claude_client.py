@@ -54,18 +54,58 @@ class ImageQualityError(ValueError):
 _MIN_PIXEL_AREA = 100 * 100  # 10 000 px - roughly a 100x100 thumbnail
 from .models import ExtractedLabelData
 
-# Default to the faster/cheaper Haiku model for ~3-5x speed improvement.
-# Override with CLAUDE_MODEL env var (e.g. "claude-sonnet-4-6") if higher
-# accuracy is needed on complex labels.
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5")
+# ---------------------------------------------------------------------------
+# Model selection and fast-extraction feature flag
+# ---------------------------------------------------------------------------
+# Default production model is Sonnet (claude-sonnet-4-5) for high accuracy on
+# complex beverage labels and regulatory text.
+#
+# Operators can configure extraction models via environment variables:
+#   - CLAUDE_MODEL: Direct model override (e.g. "claude-sonnet-4-6").
+#   - USE_FAST_EXTRACTION: Boolean feature flag ("true" / "1" / "yes", default "false").
+#     Enables a faster/cheaper model for -dev or rapid testing workflows.
+#   - EXTRACTION_FAST_MODEL: Model to use when USE_FAST_EXTRACTION is enabled
+#     (defaults to "claude-3-5-haiku-latest").
+#
+# Guard: Default configuration preserves the production Sonnet model.
+# No unflagged model downgrade occurs.
+
+DEFAULT_PRODUCTION_MODEL = "claude-sonnet-4-5"
+DEFAULT_FAST_MODEL = "claude-3-5-haiku-latest"
+
+
+def get_current_model() -> str:
+    """Return the active Claude model for label extraction.
+
+    Resolution order:
+    1. If USE_FAST_EXTRACTION is enabled ('true', '1', 'yes'), return
+       EXTRACTION_FAST_MODEL (defaulting to DEFAULT_FAST_MODEL).
+    2. Otherwise, return CLAUDE_MODEL if set, or DEFAULT_PRODUCTION_MODEL.
+
+    Default keeps production model behavior (USE_FAST_EXTRACTION is OFF).
+    """
+    raw_flag = os.environ.get("USE_FAST_EXTRACTION", "false").strip().lower()
+    use_fast = raw_flag in ("true", "1", "yes")
+    if use_fast:
+        model = os.environ.get("EXTRACTION_FAST_MODEL", DEFAULT_FAST_MODEL)
+        _log.debug("Using fast extraction model: %s (USE_FAST_EXTRACTION=true)", model)
+        return model
+
+    model = os.environ.get("CLAUDE_MODEL", DEFAULT_PRODUCTION_MODEL)
+    _log.debug("Using standard extraction model: %s", model)
+    return model
+
+
+# Module-level alias for backward compatibility with existing imports
+MODEL = get_current_model()
 
 # Module-level Anthropic client - reuses the underlying httpx connection pool
 # across all requests instead of creating a new client per call.
 _CLIENT = Anthropic()
 
-# Maximum pixel dimension for images sent to Claude. 800px gives Claude
-# enough detail to read label text while meaningfully cutting upload size
-# and Claude processing time vs. the previous 1024px limit.
+# Maximum pixel dimension for images sent to Claude. 1600px gives Claude
+# enough detail to read fine label print while downscaling 12-48MP phone
+# camera photos to cut upload payload and Claude vision latency.
 MAX_IMAGE_DIMENSION = 1600
 
 # JPEG encode quality for processed images. 82 produces ~25% smaller files
@@ -91,7 +131,9 @@ EXTRACTION_TOOL = {
                 "description": (
                     "The brand name as printed on the label, exactly as shown (preserve capitalization). "
                     "If no brand name is clearly visible or printed on the label, return an empty string (''). "
-                    "NEVER invent, hallucinate, or guess a brand name from class/type designation, producer names, or background imagery."
+                    "CRITICAL: If there is NO separate brand name printed on the label, return an empty string. "
+                    "Do NOT invent, hallucinate, infer, or copy a brand name from class/type designation, the name_and_address block, "
+                    "bottler/distiller statement, producer line, or background imagery (e.g. do not treat 'Bottled by Old Tom Distillery' as brand_name if no standalone brand name appears)."
                 ),
             },
             "class_type": {
@@ -297,9 +339,9 @@ SYSTEM_PROMPT = (
     "given multiple images (e.g. front and back panels of the same bottle) - treat "
     "them as views of a single label and combine information from all of them. "
     "For brand_name: Transcribe the brand name exactly as printed on the label. "
-    "NEVER invent, hallucinate, or guess a brand name from class/type designations, "
-    "producer/bottler names, or artwork if no distinct brand name appears on the label. "
-    "If no brand name is clearly visible or printed, return an empty string ('') for brand_name. "
+    "CRITICAL BRAND NAME RULE: NEVER invent, hallucinate, infer, or guess a brand name from class/type designations, "
+    "the name_and_address block, producer statement, bottler statement, importer statement, or artwork if no distinct brand name appears on the label. "
+    "If no brand name is clearly visible or printed on the label, return an empty string ('') for brand_name. "
     "If a field is not visible, return an empty string. If image quality is poor, "
     "do your best and note the issue in 'notes'. For each field found, record an "
     "entry in 'field_locations' with an approximate bounding box (fractions 0-1 of "
@@ -340,19 +382,65 @@ def _media_type_for(filename: str) -> str:
     }.get(ext, "image/jpeg")
 
 
-def _enhance_for_ocr(img: Image.Image) -> Image.Image:
-    """Apply memory-efficient enhancements to improve text legibility for Claude.
+def _laplacian_variance(img: Image.Image) -> float:
+    """Estimate image sharpness as the variance of a Laplacian convolution.
 
-    Uses Pillow's built-in C-level operations throughout - no Python pixel
-    loops - so memory overhead is minimal even on constrained instances.
+    A sharp image has many strong edges (high Laplacian response variance);
+    a blurry image has weak, diffuse edges (low variance).  This is the
+    standard 'blur score' from Pech-Pacheco et al. (2000) and is used here
+    as a proxy for out-of-focus or motion-blurred label photos.
+
+    Implementation:
+        1. Convert to greyscale (L channel) for a single-plane operation.
+        2. Apply Pillow's FIND_EDGES kernel — a discrete Laplacian approximation.
+        3. Return the pixel-intensity variance from ImageStat (pure C, no loops).
+
+    Typical reference values (empirical, on 800-1600px label images):
+        > 500 : sharp (in-focus phone camera, good lighting)
+        100-500 : soft but usable (mild blur, compressed JPEG)
+        < 100 : blurry — adaptive sharpening activated
+        < 20  : severely blurry / heavily compressed
+    """
+    grey = img.convert("L")
+    edges = grey.filter(ImageFilter.FIND_EDGES)
+    return ImageStat.Stat(edges).var[0]
+
+
+def _enhance_for_ocr(img: Image.Image) -> Image.Image:
+    """Apply adaptive, memory-efficient enhancements to improve text legibility.
+
+    Blur detection (Laplacian variance) determines sharpening intensity:
+      - Sharp images (variance >= 500): mild unsharp mask (radius=1, 120%)
+      - Soft images (100-499): moderate unsharp mask (radius=2, 150%)
+      - Blurry images (<100): strong unsharp mask (radius=2, 200%) + extra pass
+
+    All operations use Pillow's C-level code — no Python pixel loops.
+    Memory overhead is minimal even on constrained Render instances.
     """
     if img.mode != "RGB":
         img = img.convert("RGB")
+
     # Auto-contrast: stretch histogram to full 0-255 range, clipping 1%
     # of outlier pixels so a single glare spot does not dominate.
     img = ImageOps.autocontrast(img, cutoff=1)
-    # Gentle unsharp mask to crisphen slightly blurry phone-camera shots.
-    img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=120, threshold=3))
+
+    # Measure sharpness AFTER auto-contrast (which can slightly improve edges).
+    blur_score = _laplacian_variance(img)
+    _log.debug("Blur score (Laplacian variance): %.1f", blur_score)
+
+    if blur_score >= 500:
+        # Sharp image — mild sharpening to crisp up compression artefacts.
+        img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=120, threshold=3))
+    elif blur_score >= 100:
+        # Soft image — moderate sharpening typical for slightly out-of-focus shots.
+        img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=2))
+    else:
+        # Blurry image — aggressive two-pass sharpening.  A single very strong
+        # pass tends to amplify noise; two moderate passes produce cleaner text.
+        img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=200, threshold=1))
+        img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=130, threshold=2))
+        _log.info("Blurry image detected (score=%.1f) — applied strong two-pass sharpening.", blur_score)
+
     # Brightness nudge: measure mean luminance via C-level histogram stats
     # (no Python pixel iteration), then apply a small correction if needed.
     stat = ImageStat.Stat(img)
@@ -362,8 +450,6 @@ def _enhance_for_ocr(img: Image.Image) -> Image.Image:
     elif mean_luminance > 200:
         img = ImageEnhance.Brightness(img).enhance(0.85)
     return img
-
-
 def prepare_image(image_bytes: bytes, filename: str) -> tuple[bytes, str]:
     """Validate, enhance, downscale, and JPEG-encode one uploaded image.
 
@@ -387,6 +473,23 @@ def prepare_image(image_bytes: bytes, filename: str) -> tuple[bytes, str]:
     Raises:
         ValueError: If the bytes cannot be decoded as a valid image.
     """
+    # HEIC/HEIF detection — Apple's default camera format (iOS 11+).
+    # Pillow does not decode HEIC without the pillow-heif plugin (not in our
+    # requirements). Detect the magic bytes early and return a clear, actionable
+    # error so users know exactly what to do, instead of getting a cryptic
+    # "cannot identify image file" message.
+    #
+    # HEIC magic: bytes 4-7 are b'ftyp', followed by b'heic', b'heis', b'hevx',
+    # or a variant. A simple check on the 'ftyp' marker covers all variants.
+    # Reference: ISO Base Media File Format (ISO 14496-12).
+    if len(image_bytes) >= 12 and image_bytes[4:8] == b"ftyp":
+        _log.info("HEIC/HEIF image submitted ('%s') — rejecting with actionable message.", filename)
+        raise ImageQualityError(
+            "This photo is in HEIC format (Apple's iPhone default). "
+            "Please re-save it as JPEG or PNG before uploading: "
+            "on iPhone tap Share > Save Image, or on Mac right-click > Quick Actions > Convert Image."
+        )
+
     try:
         img = Image.open(io.BytesIO(image_bytes))
         img.verify()
@@ -486,7 +589,7 @@ def extract_label_fields(
     )
 
     response = _CLIENT.messages.create(
-        model=MODEL,
+        model=get_current_model(),
         max_tokens=1500,
         system=SYSTEM_PROMPT,
         tools=[EXTRACTION_TOOL],
@@ -514,3 +617,97 @@ def extract_label_fields(
             return data
 
     raise RuntimeError("Claude did not return structured label data")
+
+
+# ---------------------------------------------------------------------------
+# Per-cause image-quality diagnostics
+# ---------------------------------------------------------------------------
+# When a photo is not readable enough, the agent should be told *why* and how
+# to fix it, rather than a generic "retake" prompt.  These thresholds were
+# derived empirically from the committed fixture corpus
+# (tests/fixtures/labels/quality) -- see that folder's README for the raw
+# measurements.  An administrator can relax or tighten any of them here.
+
+FOCUS_RETAKE_FLOOR = 35.0     # Laplacian variance below this -> out of focus (mild blur ~55 is enhanced, severe ~20 is retaken)
+DARK_FLOOR = 90.0             # mean luma below this -> too dark
+BRIGHT_CEILING = 235.0        # mean luma above this -> overexposed
+GLARE_CLIP_FRACTION = 0.06    # >6% near-white pixels -> glare/reflection
+COVERAGE_MIN_STDDEV = 25.0    # very low contrast -> label too small / blank
+
+
+def _highlight_clip_fraction(gray: "Image.Image") -> float:
+    """Fraction of pixels at/near pure white (a proxy for glare/reflections)."""
+    hist = gray.histogram()
+    total = sum(hist) or 1
+    clipped = sum(hist[250:256])
+    return clipped / total
+
+
+def diagnose_image_quality(img: "Image.Image") -> dict:
+    """Return a per-cause quality diagnosis for a label photo.
+
+    Result: {"ok": bool, "cause": str|None, "message": str, "metrics": {...}}.
+    ``cause`` is one of: "focus", "lighting_dark", "lighting_bright",
+    "glare", "coverage" or None.  Only signals measurable without a network
+    round-trip are used, so this is fast and deterministic.  The vision model
+    still performs the authoritative content read; this gate just decides
+    whether a photo is worth sending or should be retaken, and tells the user
+    exactly what to improve.
+    """
+    rgb = img.convert("RGB")
+    gray = rgb.convert("L")
+    stat = ImageStat.Stat(gray)
+    brightness = stat.mean[0]
+    contrast = stat.stddev[0]
+    focus = _laplacian_variance(rgb)
+    glare = _highlight_clip_fraction(gray)
+    metrics = {
+        "focus": round(focus, 1),
+        "brightness": round(brightness, 1),
+        "contrast": round(contrast, 1),
+        "glare_fraction": round(glare, 3),
+    }
+
+    # Evaluate causes in priority order (most actionable first).
+    if focus < FOCUS_RETAKE_FLOOR:
+        return {
+            "ok": False, "cause": "focus", "metrics": metrics,
+            "message": (
+                "Photo is out of focus. Hold the camera steady, tap to focus "
+                "on the label text, and retake the photo."
+            ),
+        }
+    if brightness < DARK_FLOOR:
+        return {
+            "ok": False, "cause": "lighting_dark", "metrics": metrics,
+            "message": (
+                "Lighting is too dark. Move the bottle into better light or "
+                "turn on your flash, then retake the photo."
+            ),
+        }
+    if glare > GLARE_CLIP_FRACTION and brightness > BRIGHT_CEILING - 40:
+        return {
+            "ok": False, "cause": "glare", "metrics": metrics,
+            "message": (
+                "There is glare or a reflection on the label. Tilt the bottle "
+                "slightly, turn off your flash, and retake the photo."
+            ),
+        }
+    if brightness > BRIGHT_CEILING:
+        return {
+            "ok": False, "cause": "lighting_bright", "metrics": metrics,
+            "message": (
+                "Photo is overexposed. Reduce direct light or move away from "
+                "the light source, then retake the photo."
+            ),
+        }
+    if contrast < COVERAGE_MIN_STDDEV:
+        return {
+            "ok": False, "cause": "coverage", "metrics": metrics,
+            "message": (
+                "The label is too small or not clearly visible. Fill the frame "
+                "with the label surface and retake the photo."
+            ),
+        }
+    return {"ok": True, "cause": None, "metrics": metrics,
+            "message": "Image quality is sufficient for review."}

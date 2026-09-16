@@ -1,4 +1,9 @@
-# Handoff Document - TTB Label Compliance Review Tool
+# Handoff Document - TTB Label Compliance Review Tool (PRODUCTION)
+
+> **Production repo**: [TTB-label-compliance-review-tool](https://github.com/davejroy/TTB-label-compliance-review-tool)
+> **Development repo**: [TTB-label-compliance-review-tool-dev](https://github.com/davejroy/TTB-label-compliance-review-tool-dev)
+
+---
 
 This document summarizes the current state of the project for whoever picks
 up work next: what the tool does, what's been built, what's in progress, and
@@ -8,8 +13,8 @@ where to find more detail.
 
 This is a working prototype, deployed and functional. Both review modes
 (COLA Application Match and Label-Only Check) are implemented end-to-end,
-including batch review, image highlighting, confidence badges, and CSV
-export.
+including batch review, streaming batch review, image highlighting, confidence badges, CSV
+export, and comprehensive help documentation.
 
 ## What's implemented
 
@@ -17,13 +22,15 @@ export.
   data (brand name, class/type, ABV, net contents); Claude vision extracts
   the label fields and the backend compares them against the application
   data, returning Pass / Needs Review / Fail with explanations.
-- **Batch Review** - queue multiple label/application pairs, review them in
-  one submission, see a summary table, and export results as CSV.
+- **Batch Review & Streaming** - queue multiple label/application pairs, review them with progressive NDJSON streaming, see a summary table, and export results as CSV.
 - **Label-Only Check** - validate a label against TTB mandatory requirements
   (27 CFR Parts 4, 5, 7, 16) without any application data: brand name,
   class/type, ABV statement (with correct requirement/exemption logic per
   beverage type), net contents, bottler/producer/importer name & address,
   country of origin (imports only), and the Government Warning statement.
+- **Multi-Photo Merging & Sulfite Declaration Fix** - front and back label photos are extracted independently and merged by prioritizing non-empty field values over empty ones and arbitrating by highest-confidence score. Fixes sulfite declaration and government warning omissions when one panel has higher overall image quality but lacks the field.
+- **In-App Instructions & Help Guide Modal** - header-accessible guide modal explaining tool workflows (COLA match vs Label-Only), photo capture best practices (front+back multi-photo merge), photo quality tips (lighting, flatness, glare prevention), review results meaning (Pass / Needs Review / Fail), low-confidence retake prompts vs hard regulatory fails, strict Government Warning casing (`GOVERNMENT WARNING:`), formula-dependent statement verification caveats (sulfites/allergens), and known gaps (27 CFR 16.22 type-size and T.D. TTB-200 fill standards). Fully accessible and zero-login.
+- **Frontend Polish & Performance** - submit guards across all forms to prevent duplicate requests on rapid clicks, dynamic status copy during cold start or long processing, processing time display (`processing_time_ms`), and client-side image downscaling to ≤1600px with quality 0.92 before upload.
 - **Image viewer** - zoomable label image viewer with per-field region
   highlighting and High/Medium/Low confidence badges based on Claude's
   transcription confidence.
@@ -32,26 +39,12 @@ export.
 - **Branding** - frontend uses TTB.gov-style branding, including the
   official TTB logo in the header and favicon.
 - **Camera capture** - "Take Photo" option for capturing label images
-  directly from a camera, shown only on touch-capable devices (not on
-  touchscreen desktops).
+  directly from a camera, shown only on touch-capable devices.
 
-## Recent changes (most recent first)
+## Feature Flags & Production Defaults
 
-- Fixed `checkLabelsBatch` in `api.ts`: the fetch URL was missing the `/api`
-  prefix (`/label-check/batch` instead of `/api/label-check/batch`), causing
-  every Label-Only Check submission to return HTTP 404 Not Found. Also switched
-  from raw `fetch()` to `safeFetch()` so transient 429/503/529 errors are
-  retried automatically.
-- Added step-by-step labels to the Single Label review form.
-- Stopped flagging missing country-of-origin on domestic labels (only
-  flagged when `origin_guess` indicates an imported product).
-- Fixed "Take Photo" incorrectly showing on touchscreen desktops.
-- Applied TTB.gov-style branding (logo, favicon, color scheme) to the
-  frontend.
-- Corrected ABV tolerances and CFR citations against current 27 CFR text.
-- Added field confidence/highlighting, zoomable image viewer, and CSV
-  export for Batch Review.
-- Added Label-Only Check mode.
+- **`USE_FAST_EXTRACTION`**: **DEFAULT OFF** (`false`). In production, extraction always uses the standard Sonnet model (`claude-sonnet-4-6` or `claude-sonnet-4-5`). Fast extraction (`claude-3-5-haiku-latest`) is an optional feature flag for dev environments only and is never enabled by default in production or `render.yaml`.
+- **Fail-Open / Zero-Login**: The app runs with open access by default when `DEMO_ACCESS_TOKEN` is unset, ensuring evaluators and agents are never locked out.
 
 ## Architecture quick reference
 
@@ -59,8 +52,7 @@ export.
   per review for label transcription, then rule-based compliance matching
   (no persistence of images or extracted data).
 - **Frontend:** React + TypeScript + Vite + Tailwind CSS (`frontend/`).
-- **Tests:** pytest covers the compliance matching logic
-  (`cd backend && pytest`), no API key required.
+- **Tests:** pytest covers backend compliance and model logic (`cd backend && pytest`), Vitest covers frontend (`cd frontend && npm test`).
 - **Deploy:** see `render.yaml` for the Render.com deployment config.
 
 ## Recently implemented (previously "Known gaps")
