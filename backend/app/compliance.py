@@ -183,25 +183,29 @@ def _wine_abv_tolerance(app_pct: float, label_pct: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Standards of fill (27 CFR 4.72 / 5.203 / 7.70)
+# Standards of fill (27 CFR 4.72 / 5.203 / 7.70, incorporating T.D. TTB-200)
 # ---------------------------------------------------------------------------
-# All values are in millilitres. FL OZ values are US customary equivalents
-# printed on domestic labels; both are accepted.
+# All values in _WINE_FILL_ML and _SPIRITS_FILL_ML are in millilitres.
+# Effective 2025-01-10 per Treasury Decision TTB-200 (89 FR 96570) and current eCFR.
 
-# 27 CFR 4.72 - Wine
+# 27 CFR 4.72 - Wine (including T.D. TTB-200 authorized sizes)
 _WINE_FILL_ML = frozenset({
-    100, 187, 250, 375, 500, 750, 1000, 1500, 3000, 4500,
+    50, 100, 180, 187, 200, 250, 300, 330, 355, 360, 375, 473, 500, 550, 568,
+    600, 620, 700, 720, 750, 1000, 1500, 1800, 2250, 3000,
 })
 _WINE_FILL_FLOZ = frozenset({
-    3.4, 6.3, 8.5, 12.7, 16.9, 25.4, 33.8, 50.7, 101.4, 152.2,
+    1.7, 3.4, 6.1, 6.3, 6.8, 8.5, 10.1, 11.2, 12.0, 12.2, 12.7, 16.0, 16.9,
+    18.6, 19.2, 20.3, 21.0, 23.7, 24.3, 25.4, 33.8, 50.7, 60.9, 76.1, 101.4,
 })
 
-# 27 CFR 5.203 - Distilled spirits
+# 27 CFR 5.203 - Distilled spirits (all containers, including T.D. TTB-200 authorized sizes)
 _SPIRITS_FILL_ML = frozenset({
-    50, 100, 200, 375, 500, 750, 1000, 1750,
+    50, 100, 187, 200, 250, 331, 350, 355, 375, 475, 500, 570, 700, 710, 720,
+    750, 900, 945, 1000, 1500, 1750, 1800, 2000, 3000, 3750,
 })
 _SPIRITS_FILL_FLOZ = frozenset({
-    1.7, 3.4, 6.8, 12.7, 16.9, 25.4, 33.8, 59.2,
+    1.7, 3.4, 6.3, 6.8, 8.5, 11.2, 11.8, 12.0, 12.7, 16.0, 16.1, 16.9, 19.3,
+    23.7, 24.0, 24.3, 25.4, 30.4, 32.0, 33.8, 50.7, 59.2, 60.9, 67.6, 101.4, 126.8,
 })
 
 # 27 CFR 7.70 - Malt beverages (beer)
@@ -260,6 +264,11 @@ def _is_authorised_fill(qty: float, unit, beverage_type) -> bool:
     Returns None if the check is not applicable or cannot be determined
     (e.g. beer, or unknown unit).
 
+    Citations:
+    - Wine: 27 CFR 4.72 and T.D. TTB-200 (effective 2025-01-10)
+    - Distilled spirits: 27 CFR 5.203 and T.D. TTB-200 (effective 2025-01-10)
+    - Malt beverages (beer): 27 CFR 7.70 (unrestricted fill sizes)
+
     Args:
         qty:           Numeric quantity extracted from the label.
         unit:          'ml', 'floz', or None.
@@ -270,11 +279,33 @@ def _is_authorised_fill(qty: float, unit, beverage_type) -> bool:
     if beverage_type == "beer":
         return None  # No restricted list for malt beverages (27 CFR 7.70)
     if unit == "ml":
-        authorised = _WINE_FILL_ML if beverage_type == "wine" else _SPIRITS_FILL_ML
-        return any(abs(qty - a) <= _FILL_ML_TOLERANCE for a in authorised)
+        if beverage_type == "wine":
+            if any(abs(qty - a) <= _FILL_ML_TOLERANCE for a in _WINE_FILL_ML):
+                return True
+            # Wine > 4 L: must be in even whole liters per 27 CFR 4.72
+            if qty >= 3999.0:
+                nearest_whole_l = round(qty / 1000.0) * 1000.0
+                if nearest_whole_l >= 4000.0 and abs(qty - nearest_whole_l) <= _FILL_ML_TOLERANCE:
+                    return True
+            return False
+        if beverage_type == "distilled_spirits":
+            return any(abs(qty - a) <= _FILL_ML_TOLERANCE for a in _SPIRITS_FILL_ML)
     if unit == "floz":
-        authorised = _WINE_FILL_FLOZ if beverage_type == "wine" else _SPIRITS_FILL_FLOZ
-        return any(abs(qty - a) <= _FILL_FLOZ_TOLERANCE for a in authorised)
+        qty_ml = qty * 29.573535
+        if beverage_type == "wine":
+            if any(abs(qty - a) <= _FILL_FLOZ_TOLERANCE for a in _WINE_FILL_FLOZ):
+                return True
+            if any(abs(qty_ml - a) <= _FILL_ML_TOLERANCE for a in _WINE_FILL_ML):
+                return True
+            if qty_ml >= 3999.0:
+                nearest_whole_l = round(qty_ml / 1000.0) * 1000.0
+                if nearest_whole_l >= 4000.0 and abs(qty_ml - nearest_whole_l) <= _FILL_ML_TOLERANCE:
+                    return True
+            return False
+        if beverage_type == "distilled_spirits":
+            if any(abs(qty - a) <= _FILL_FLOZ_TOLERANCE for a in _SPIRITS_FILL_FLOZ):
+                return True
+            return any(abs(qty_ml - a) <= _FILL_ML_TOLERANCE for a in _SPIRITS_FILL_ML)
     return None
 
 
@@ -340,7 +371,7 @@ def assert_extraction_confidence(extracted, beverage_type=None):
        FIELD_CONFIDENCE_THRESHOLDS.  If any key field has a score below its
        threshold, a LowConfidenceError is raised naming the specific field.
     """
-    if extracted.extraction_confidence is None and not extracted.per_field_confidence:
+    if extracted.extraction_confidence is None:
         _log.debug("assert_extraction_confidence: no score emitted, skipping gate.")
         return
 
@@ -349,7 +380,7 @@ def assert_extraction_confidence(extracted, beverage_type=None):
     threshold = config.get("min_confidence", _DEFAULT_MIN_CONFIDENCE)
     conf = extracted.extraction_confidence
 
-    if conf is not None and conf < threshold:
+    if conf < threshold:
         _log.info("Low overall extraction confidence %.2f < %.2f (%s)", conf, threshold, cls)
         raise LowConfidenceError(
             user_message=(
@@ -369,6 +400,16 @@ def assert_extraction_confidence(extracted, beverage_type=None):
     for field_name, field_score in extracted.per_field_confidence.items():
         if field_name == "country_of_origin" and field_score == 0.0:
             continue  # Absent on domestic labels - not a photo quality issue
+        # Issue #5 W02: Absent government warning is evaluated as a statutory compliance failure,
+        # not an image quality retake error.
+        if (
+            field_name in ("government_warning_header", "government_warning_body")
+            and (
+                not extracted.government_warning_present
+                or (not (extracted.government_warning_header or "").strip() and not (extracted.government_warning_body or "").strip())
+            )
+        ):
+            continue
         field_threshold = FIELD_CONFIDENCE_THRESHOLDS.get(field_name, _DEFAULT_FIELD_CONFIDENCE)
         if field_score < field_threshold:
             _log.info("Low per-field confidence for '%s': %.2f < %.2f", field_name, field_score, field_threshold)
@@ -404,6 +445,136 @@ def assert_extraction_confidence(extracted, beverage_type=None):
             confidence=min(fs for _, fs, _ in field_issues),
             threshold=min(ft for _, _, ft in field_issues),
         )
+
+# ---------------------------------------------------------------------------
+# Brand Name vs. Producer Address Containment Guard (Issue #9 P1)
+# ---------------------------------------------------------------------------
+
+_PRODUCER_PREFIXES: tuple[str, ...] = (
+    "distilled and bottled by",
+    "distilled & bottled by",
+    "distilled and packaged by",
+    "distilled & packaged by",
+    "distilled and canned by",
+    "distilled & canned by",
+    "distilled by",
+    "produced and bottled by",
+    "produced & bottled by",
+    "produced and packaged by",
+    "produced & packaged by",
+    "produced and cellared by",
+    "produced & cellared by",
+    "produced by",
+    "bottled by",
+    "brewed and bottled by",
+    "brewed & bottled by",
+    "brewed and canned by",
+    "brewed & canned by",
+    "brewed and packaged by",
+    "brewed & packaged by",
+    "brewed by",
+    "vinted and bottled by",
+    "vinted & bottled by",
+    "vinted and cellared by",
+    "vinted & cellared by",
+    "vinted and packaged by",
+    "vinted & packaged by",
+    "vinted by",
+    "cellared and bottled by",
+    "cellared & bottled by",
+    "cellared by",
+    "imported and bottled by",
+    "imported & bottled by",
+    "imported by",
+    "packed by",
+    "packed for",
+    "blended and bottled by",
+    "blended & bottled by",
+    "blended by",
+    "made by",
+    "crafted by",
+    "canned by",
+)
+
+
+def _is_brand_in_address(brand_name: str | None, name_and_address: str | None) -> bool:
+    """Return True if brand_name is equal, near-equal, or a substring of name_and_address.
+
+    Issue #9 P1: Prevents brand names extracted or hallucinated from the bottler /
+    producer address line from clean-passing without distinct brand heading evidence.
+    """
+    if not brand_name or not name_and_address:
+        return False
+
+    norm_brand = _normalize(brand_name)
+    norm_addr = _normalize(name_and_address)
+
+    if not norm_brand or not norm_addr:
+        return False
+
+    # Direct substring containment
+    if norm_brand in norm_addr:
+        return True
+
+    # Strip standard bottler/producer prefixes from address
+    stripped_addr = norm_addr
+    for prefix in _PRODUCER_PREFIXES:
+        norm_prefix = _normalize(prefix)
+        if stripped_addr.startswith(norm_prefix):
+            stripped_addr = stripped_addr[len(norm_prefix):].strip()
+            break
+
+    if norm_brand in stripped_addr:
+        return True
+
+    # Reverse containment: if stripped producer entity is in norm_brand
+    if stripped_addr and stripped_addr in norm_brand:
+        return True
+
+    # Similarity check against stripped producer entity or whole address
+    if _similarity(norm_brand, stripped_addr) >= 0.75 or _similarity(norm_brand, norm_addr) >= 0.75:
+        return True
+
+    # Significant word containment (words of len >= 3 excluding stop words)
+    stop_words = {"the", "and", "co", "llc", "inc", "ltd", "corp", "corporation", "by", "cellars", "distillery", "distilling", "winery", "brewing", "brewery", "company"}
+    brand_words = [w for w in norm_brand.split() if len(w) >= 3 and w not in stop_words]
+    if brand_words and all(w in norm_addr for w in brand_words):
+        return True
+
+    return False
+
+
+def _has_distinct_brand_evidence(extracted: ExtractedLabelData) -> bool:
+    """Check if there is distinct brand heading evidence on the label image.
+
+    Evidence includes:
+    1. Spatially separated field_locations for brand_name vs name_and_address (e.g.
+       different panel/image, vertical separation > 15%, or horizontal separation > 20%).
+    2. Explicit mention of distinct brand heading in extraction notes.
+    """
+    if extracted.notes and "distinct brand" in extracted.notes.lower():
+        return True
+
+    if not extracted.field_locations:
+        return False
+
+    brand_locs = [loc for loc in extracted.field_locations if getattr(loc, "field", None) == "brand_name"]
+    addr_locs = [loc for loc in extracted.field_locations if getattr(loc, "field", None) == "name_and_address"]
+
+    if not brand_locs or not addr_locs:
+        return False
+
+    for b_loc in brand_locs:
+        for a_loc in addr_locs:
+            if getattr(b_loc, "image_index", 0) != getattr(a_loc, "image_index", 0):
+                return True
+            if abs(b_loc.y - a_loc.y) > 0.15:
+                return True
+            if abs(b_loc.x - a_loc.x) > 0.20:
+                return True
+
+    return False
+
 
 def _check_text_field(
     field: str,
@@ -458,6 +629,83 @@ def _check_text_field(
         field=field, label_name=label_name, status="fail",
         application_value=application_value, label_value=label_value,
         message=f"{label_name} on label does not match application.",
+    )
+
+
+def _check_brand_name_match(
+    application: ApplicationData, extracted: ExtractedLabelData
+) -> FieldResult:
+    """Compare application brand name to label brand name with deterministic guard.
+
+    Issue #9 P1: If extracted brand_name is contained in, equal to, or near-equal to
+    the name_and_address block (or producer line) and lacks distinct brand heading evidence,
+    never clean-pass brand — surface as warning (needs_review) or fail.
+    """
+    base_result = _check_text_field(
+        "brand_name", "Brand Name", application.brand_name, extracted.brand_name
+    )
+    if base_result.status != "pass":
+        return base_result
+
+    # If base_result is pass, verify that brand_name is not merely hallucinated/extracted from address
+    is_in_label_addr = _is_brand_in_address(extracted.brand_name, extracted.name_and_address)
+    is_in_app_addr = _is_brand_in_address(extracted.brand_name, application.name_and_address)
+
+    if (is_in_label_addr or is_in_app_addr) and not _has_distinct_brand_evidence(extracted):
+        return FieldResult(
+            field="brand_name",
+            label_name="Brand Name",
+            status="warning",
+            application_value=application.brand_name,
+            label_value=extracted.brand_name,
+            message=(
+                f"Brand name '{extracted.brand_name}' appears to be contained within or derived from "
+                "the bottler/producer name and address block without distinct brand heading evidence on the label. "
+                "Requires human review to confirm whether a distinct brand name appears on the label (27 CFR 4.32 / 5.64 / 7.64)."
+            ),
+        )
+
+    return base_result
+
+
+def _check_label_brand_name(extracted: ExtractedLabelData) -> FieldResult:
+    """Validate mandatory brand name requirement on label (Label-Only Check).
+
+    Issue #9 P1: If extracted brand_name is contained in or derived from name_and_address
+    without distinct brand heading evidence, never clean-pass brand — return warning.
+    """
+    req = "A brand name is required on every label (27 CFR 4.32 / 5.63(a)(1), 5.64 / 7.63(a)(1), 7.64)."
+    if not extracted.brand_name or not str(extracted.brand_name).strip() or not _normalize(extracted.brand_name):
+        return FieldResult(
+            field="brand_name",
+            label_name="Brand Name",
+            status="fail",
+            application_value=req,
+            label_value=extracted.brand_name,
+            message=f"Brand Name was not found on the label. {req}",
+        )
+
+    if _is_brand_in_address(extracted.brand_name, extracted.name_and_address) and not _has_distinct_brand_evidence(extracted):
+        return FieldResult(
+            field="brand_name",
+            label_name="Brand Name",
+            status="warning",
+            application_value=req,
+            label_value=extracted.brand_name,
+            message=(
+                f"Brand name '{extracted.brand_name}' appears to be contained within or derived from "
+                "the bottler/producer name and address line without distinct brand heading evidence. "
+                "Requires human review to confirm whether a distinct brand name is present (27 CFR 4.32 / 5.64 / 7.64)."
+            ),
+        )
+
+    return FieldResult(
+        field="brand_name",
+        label_name="Brand Name",
+        status="pass",
+        application_value=req,
+        label_value=extracted.brand_name,
+        message="Brand Name is present on the label.",
     )
 
 
@@ -524,14 +772,26 @@ def _check_alcohol_content(
 
 
 def _check_government_warning(extracted) -> FieldResult:
-    """Validate the Government Warning statement (27 CFR 16.21).
+    """Validate the Government Warning statement (27 CFR 16.21 / 16.22).
 
     Supports the abbreviated short-form body for containers <= 100 mL
     per 27 CFR 16.21(c): omits clause numbers (1)/(2). Both forms pass.
-    Also applies per-field confidence gate (government_warning_body threshold
-    = 0.45 per FIELD_CONFIDENCE_THRESHOLDS).
+    Also applies per-field confidence gate when the warning is present.
     """
     field, label_name = "government_warning", "Government Warning"
+
+    # Issue #5 W02: If government warning is absent (present=False or empty), emit status=fail directly
+    # without triggering low-confidence photo retake or error.
+    if not extracted.government_warning_present or (
+        not (extracted.government_warning_header or "").strip()
+        and not (extracted.government_warning_body or "").strip()
+    ):
+        return FieldResult(
+            field=field, label_name=label_name, status="fail",
+            application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
+            label_value=None,
+            message="Government Warning statement not found on label. Required on all alcohol beverage labels (27 CFR Part 16).",
+        )
 
     body_conf = extracted.per_field_confidence.get("government_warning_body")
     if body_conf is not None:
@@ -550,14 +810,6 @@ def _check_government_warning(extracted) -> FieldResult:
                 ),
             )
 
-    if not extracted.government_warning_present:
-        return FieldResult(
-            field=field, label_name=label_name, status="fail",
-            application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
-            label_value=None,
-            message="Government Warning statement not found on label. Required on all alcohol beverage labels.",
-        )
-
     header = (extracted.government_warning_header or "").strip()
     body = _normalize_whitespace(extracted.government_warning_body)
     canonical_body = _normalize_whitespace(CANONICAL_WARNING_BODY)
@@ -567,27 +819,15 @@ def _check_government_warning(extracted) -> FieldResult:
     issues = []
     cosmetic_only = True  # becomes False as soon as a substantive issue is found
 
-    # Header matching is CASE-INSENSITIVE for substance: a warning that reads
-    # "Government Warning:" or "government warning:" is still the required
-    # statement.  27 CFR 16.21 asks for capital letters, so a non-capital
-    # header is surfaced as an advisory (warning) rather than a hard fail.
-    # This keeps single-label review, batch review and the label-only check
-    # perfectly consistent -- they all run this one helper.
-    header_norm = re.sub(r"[^a-z]", "", header.lower())  # drop punctuation/space
-    canonical_norm = re.sub(r"[^a-z]", "", CANONICAL_WARNING_HEADER.lower())
-    if header_norm != canonical_norm:
+    # Issue #6 W03: 27 CFR 16.21 / 16.22 strictly requires the heading to appear in capital
+    # letters exactly as 'GOVERNMENT WARNING:'. Any other casing (e.g. 'Government Warning:')
+    # or missing punctuation is a statutory non-compliance and MUST hard fail.
+    if header != CANONICAL_WARNING_HEADER:
         issues.append(
-            "header text must read 'GOVERNMENT WARNING:' "
-            + f"(found '{header}')"
+            f"header must appear in capital letters exactly as '{CANONICAL_WARNING_HEADER}' "
+            f"(found '{header}') (27 CFR 16.21/16.22)"
         )
         cosmetic_only = False
-    elif header.strip() != CANONICAL_WARNING_HEADER:
-        # Correct words, wrong presentation (e.g. not all-capitals or missing
-        # colon) -> cosmetic advisory only.
-        issues.append(
-            "header should appear in capital letters as 'GOVERNMENT WARNING:' "
-            + f"(found '{header.strip()}')"
-        )
 
     body_lower = body.lower()
     if body_lower != canonical_body.lower():
@@ -612,20 +852,15 @@ def _check_government_warning(extracted) -> FieldResult:
             field=field, label_name=label_name, status="pass",
             application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
             label_value=header + " " + body,
-            message="Government Warning statement matches the required text exactly." + note,
+            message="Government Warning statement matches the required text exactly." + note + " (Note: Physical type size in mm per 27 CFR 16.22 is not verified from photos and requires physical gauge measurement.)",
         )
 
-    # Cosmetic-only issues (e.g. header not in capitals, minor punctuation)
-    # are surfaced as a non-blocking WARNING so the agent can review them,
-    # while substantive problems (wrong/missing wording) remain a hard FAIL.
-    # All three modes share this helper, so the outcome is identical for
-    # single-label review, batch review and the label-only check.
     status = "warning" if cosmetic_only else "fail"
     return FieldResult(
         field=field, label_name=label_name, status=status,
         application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
         label_value=(header + " " + body).strip(),
-        message="Government Warning issue(s): " + "; ".join(issues) + "."
+        message="Government Warning issue(s): " + "; ".join(issues) + ".",
     )
 
 def run_compliance_checks(
@@ -640,9 +875,7 @@ def run_compliance_checks(
     assert_extraction_confidence(extracted, bev_type)
 
     results = [
-        _check_text_field(
-            "brand_name", "Brand Name", application.brand_name, extracted.brand_name
-        ),
+        _check_brand_name_match(application, extracted),
         _check_text_field(
             "class_type", "Class/Type", application.class_type, extracted.class_type
         ),
@@ -781,13 +1014,13 @@ def _check_label_alcohol_content(
 
 def _check_label_net_contents(extracted: ExtractedLabelData, beverage_type=None) -> FieldResult:
     """Check that the label states a net contents quantity conforming to
-    the authorised standards of fill (27 CFR 4.72 / 5.203 / 7.70).
+    the authorised standards of fill (27 CFR 4.72 / 5.203 / 7.70 and T.D. TTB-200).
 
     Unlike the previous version which only confirmed a number was present,
     this function now:
     1. Parses the quantity and unit from the label text.
     2. For wine and distilled spirits, validates the size against the
-       closed list of authorised fill sizes in 27 CFR 4.72 / 5.203.
+       closed list of authorised fill sizes in 27 CFR 4.72 / 5.203 / T.D. TTB-200.
     3. For beer (27 CFR 7.70) confirms a numeric quantity is present
        (no restricted size list applies).
 
@@ -797,7 +1030,7 @@ def _check_label_net_contents(extracted: ExtractedLabelData, beverage_type=None)
     field, label_name = "net_contents", "Net Contents"
     requirement = (
         "Net contents must be stated in conformance with standards of fill "
-        "(27 CFR 4.37 / 5.70 / 7.70)."
+        "(27 CFR 4.37 / 5.70 / 7.70 and T.D. TTB-200)."
     )
     label_value = extracted.net_contents
 
@@ -836,7 +1069,7 @@ def _check_label_net_contents(extracted: ExtractedLabelData, beverage_type=None)
                 message=(
                     f"Net contents quantity {qty} was found but the unit could not be "
                     "parsed. Confirm the fill size is an authorised standard of fill "
-                    "(27 CFR 4.72 / 5.203)."
+                    "(27 CFR 4.72 / 5.203 / T.D. TTB-200)."
                 ),
             )
         return FieldResult(
@@ -851,12 +1084,12 @@ def _check_label_net_contents(extracted: ExtractedLabelData, beverage_type=None)
             application_value=requirement, label_value=label_value,
             message=(
                 f"Net contents ({label_value}) is stated and matches an authorised "
-                "standard of fill (27 CFR 4.72 / 5.203)."
+                "standard of fill (27 CFR 4.72 / 5.203 / T.D. TTB-200)."
             ),
         )
 
     # Not in the authorised list.
-    cfg_ref = "27 CFR 4.72" if beverage_type == "wine" else "27 CFR 5.203"
+    cfg_ref = "27 CFR 4.72 / T.D. TTB-200" if beverage_type == "wine" else "27 CFR 5.203 / T.D. TTB-200"
     return FieldResult(
         field=field, label_name=label_name, status="fail",
         application_value=requirement, label_value=label_value,
@@ -1174,12 +1407,7 @@ def check_label_requirements(
     assert_extraction_confidence(extracted, resolved_type)
 
     return [
-        _presence_check(
-            "brand_name",
-            "Brand Name",
-            extracted.brand_name,
-            "A brand name is required on every label (27 CFR 4.32 / 5.63(a)(1), 5.64 / 7.63(a)(1), 7.64).",
-        ),
+        _check_label_brand_name(extracted),
         _presence_check(
             "class_type",
             "Class/Type Designation",

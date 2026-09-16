@@ -15,6 +15,14 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **Accuracy, Fill Standards & Honesty Gaps Modernization (September 2026)**:
+  - **Issue #9 P1 — Brand Name Containment Guard**: Implemented deterministic check (`_check_brand_name_match`, `_check_label_brand_name`, `_is_brand_in_address`, and `_has_distinct_brand_evidence` in `backend/app/compliance.py`) so brand names extracted or hallucinated from the producer/bottler address line cannot clean-pass without distinct brand heading evidence (such as spatial bounding box separation or extraction notes), returning "warning" (needs review).
+  - **Issue #5 W02 — Missing Government Warning Structured Failure**: When the Government Warning is absent (`present=False` or empty), `_check_government_warning` and `assert_extraction_confidence` emit a structured `FieldResult(status="fail")` immediately instead of raising a `LowConfidenceError` photo retake prompt.
+  - **Issue #6 W03 — Strict Government Warning Casing**: Any deviation from the canonical uppercase header `GOVERNMENT WARNING:` (such as `Government Warning:` or `government warning:`) hard-fails with `status="fail"` under 27 CFR 16.21/16.22 across all modes (COLA match, batch review, label-only check).
+  - **Issue D — Treasury Decision TTB-200 Standards of Fill**: Updated `_WINE_FILL_ML`, `_WINE_FILL_FLOZ`, `_SPIRITS_FILL_ML`, and `_SPIRITS_FILL_FLOZ` in `backend/app/compliance.py` to incorporate all current authorized packaging sizes under 27 CFR 4.72 and 27 CFR 5.203 effective January 10, 2025 per T.D. TTB-200 (89 FR 96570). Malt beverages (Part 7) remain unrestricted.
+  - **Issue E — 27 CFR 16.22 Honesty Advisory**: Added explicit advisory note to passing Government Warning verification results stating that physical millimeter type-size is not verified from uncalibrated photos and requires a physical gauge. Updated `InstructionsModal` Known Gaps & Scope copy to reflect that TTB-200 fill standards are automated while 16.22 physical type size requires physical measurement.
+  - **Regression Testing**: Added full regression test coverage in `backend/tests/test_compliance.py` and `backend/tests/test_mode_parity_and_case.py`.
+
 - **Safe Security Hardening (Zero-Login / Fail-Open)**:
   - Added centralized security response headers middleware (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy`, API `Content-Security-Policy: default-src 'none'`, and HSTS on HTTPS).
   - Sanitized error surfaces across Claude API and extraction runtime to prevent leaking internal exception details to clients.
@@ -78,8 +86,8 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## Known Issues
 
-- Standards of fill check checks against statutory list; custom authorized sizes require manual formula verification.
-- Type-size requirements (27 CFR 16.22) require physical measurement calibration.
+- Standards of fill check validates against modernized T.D. TTB-200 authorized size lists (§4.72 / §5.203); custom authorized sizes require manual formula verification.
+- Exact physical type-size verification (27 CFR 16.22) is evaluated via OCR text match and confidence with honest advisory disclosure; physical millimeter measurement requires a physical gauge.
 
 ## Operational Notes
 
@@ -103,7 +111,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## Handoff Checklist
 - [x] Code builds
-- [x] Tests pass (all 92 backend tests + 65 frontend tests pass)
+- [x] Tests pass (all backend tests + 65 frontend tests pass)
 - [x] Required docs updated (/docs/ERROR_CODES.md, HANDOFF.md, PDR.md, REGULATORY_REFRENCES.md, SBOM.md, TECHNICAL_ARCHITECTURE.md)
 - [x] Secrets removed / verified no secrets committed
 - [x] Dependencies reviewed
