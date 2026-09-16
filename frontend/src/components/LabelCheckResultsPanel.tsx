@@ -49,13 +49,15 @@ export default function LabelCheckResultsPanel({
 
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
-          <div>
-            <h3 className="text-xl font-bold text-slate-900">{result.filenames.join(", ")}</h3>
-            <p className="text-sm text-slate-500">
-              Detected as {beverageLabel} &middot; {originLabel} &middot; Processed in{" "}
-              {(result.processing_time_ms / 1000).toFixed(1)}s
-            </p>
-          </div>
+        <div>
+          <h3 className="text-xl font-bold text-slate-900">{result.filenames.join(", ")}</h3>
+          <p className="text-sm text-slate-500">
+            Detected as {beverageLabel} &middot; {originLabel}
+            {typeof result.processing_time_ms === "number" && result.processing_time_ms > 0
+              ? ` \u00B7 Processed in ${(result.processing_time_ms / 1000).toFixed(1)}s`
+              : ""}
+          </p>
+        </div>
           <StatusBadge status={result.overall_status} size="lg" />
         </div>
 
