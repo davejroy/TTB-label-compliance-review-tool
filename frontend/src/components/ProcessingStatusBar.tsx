@@ -3,6 +3,8 @@ interface Props {
   step: number;
   /** True once processing has fully completed (result arrived or error). */
   done: boolean;
+  /** Optional user-facing status copy (e.g. cold start wake notification, long request status). */
+  statusMessage?: string | null;
 }
 
 const STAGES = [
@@ -52,7 +54,7 @@ function StageIcon({ name, active, done }: { name: string; active: boolean; done
   );
 }
 
-export default function ProcessingStatusBar({ step, done }: Props) {
+export default function ProcessingStatusBar({ step, done, statusMessage }: Props) {
   const totalStages = STAGES.length; // 4
 
   return (
@@ -61,7 +63,7 @@ export default function ProcessingStatusBar({ step, done }: Props) {
         {STAGES.map((stage, i) => {
           const isComplete = done ? true : i < step;
           const isActive   = !done && i === step;
-          
+
           return (
             <div key={stage.label} className="flex items-center" style={{ flex: i < totalStages - 1 ? "1" : "0" }}>
               {/* Circle + label */}
@@ -95,6 +97,17 @@ export default function ProcessingStatusBar({ step, done }: Props) {
           );
         })}
       </div>
+
+      {/* Dynamic status copy (cold-start / long request notification) */}
+      {statusMessage && !done && (
+        <div className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-blue-50/80 px-3 py-2 text-center text-sm font-medium text-slate-700 border border-blue-100 animate-pulse">
+          <svg className="h-4 w-4 animate-spin text-[#15396a] shrink-0" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+          </svg>
+          <span>{statusMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

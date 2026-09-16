@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_IMAGES_PER_LABEL } from "../types";
+import { ensureImagesResized } from "../imageUtils";
 
 interface Props {
   files: File[];
@@ -11,19 +12,15 @@ interface Props {
  * Upload control for a label image(s). Supports three input methods:
  * drag-and-drop, a "Choose File" picker, and a "Take Photo" button.
  *
- * The "Take Photo" button uses <input capture="environment"> which opens
- * the rear camera on phones/tablets. On desktop browsers the capture
- * attribute is ignored and it falls back to a normal file picker, so
- * showing the button unconditionally is safe and avoids unreliable
- * device-detection heuristics.
- *
- * Object URLs for thumbnails are created via useMemo and explicitly revoked
- * when the file list changes, preventing memory leaks on long review sessions.
+ * Images are automatically downscaled client-side (max 1600 px on the long edge,
+ * matching backend intent) before being added to state. This cuts upload time
+ * dramatically without any visible quality loss in OCR results.
  */
 export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [resizing, setResizing] = useState(false);
 
   // Create object URLs once per files array change; revoke old ones to avoid
   // memory leaks from long review sessions with many image swaps.
@@ -37,10 +34,16 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
     };
   }, [objectUrls]);
 
-  function addFiles(newFiles: FileList | null) {
+  async function addFiles(newFiles: FileList | null) {
     if (!newFiles || newFiles.length === 0) return;
-    const combined = [...files, ...Array.from(newFiles)].slice(0, MAX_IMAGES_PER_LABEL);
-    onChange(combined);
+    setResizing(true);
+    try {
+      const resized = await ensureImagesResized(Array.from(newFiles));
+      const combined = [...files, ...resized].slice(0, MAX_IMAGES_PER_LABEL);
+      onChange(combined);
+    } finally {
+      setResizing(false);
+    }
   }
 
   function removeFile(index: number) {
@@ -94,7 +97,18 @@ export default function ImageDropzone({ files, onChange, idPrefix }: Props) {
           </div>
         )}
 
-        {!atLimit && (
+        {/* Resizing spinner — shown while canvas downscale is in progress */}
+        {resizing && (
+          <div className="flex items-center gap-2 py-2 text-sm text-slate-500">
+            <svg className="animate-spin h-4 w-4 text-[#15396a]" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+            </svg>
+            Optimising image…
+          </div>
+        )}
+
+        {!atLimit && !resizing && (
           <div className="flex flex-col items-center gap-2 py-4">
             <span className="text-4xl" aria-hidden="true">
               📷
