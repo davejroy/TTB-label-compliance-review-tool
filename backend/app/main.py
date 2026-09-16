@@ -39,8 +39,8 @@ from anthropic import (
     AuthenticationError,
     RateLimitError,
 )
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -90,25 +90,55 @@ def _log_request_timing(
 
 app = FastAPI(title="TTB Label Compliance Review Tool")
 
-# CORS - in production lock this down to the frontend's Render hostname via
-# the CORS_ORIGINS environment variable (comma-separated). Defaults to "*"
-# so local dev works without extra config.
+# CORS - configure allowed origins via CORS_ORIGINS (comma-separated).
+# Defaults to "*" (fail-open) so local dev and live frontend deployments
+# work without mandatory configuration.
 _cors_origins_env = os.environ.get("CORS_ORIGINS", "")
 if not _cors_origins_env:
-      _log.warning(
-                "CORS_ORIGINS env var is not set — defaulting to '*' (allow all). "
-                "Set CORS_ORIGINS to the frontend hostname before any deployment."
-      )
-_cors_origins = _cors_origins_env.split(",") if _cors_origins_env else ["*"]
+    _log.warning(
+        "CORS_ORIGINS env var is not set — defaulting to '*' (allow all). "
+        "Set CORS_ORIGINS to the frontend hostname before any deployment."
+    )
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] if _cors_origins_env else ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
+
+def _apply_security_headers(response: Response, request: Request) -> Response:
+    """Apply baseline HTTP security headers via setdefault (fail-open / non-breaking)."""
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+    )
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        )
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).lower()
+    if scheme == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
+@app.middleware("http")
+async def _security_headers_middleware(request: Request, call_next):
+    """Ensure all responses include standard security headers without altering body or status."""
+    response = await call_next(request)
+    return _apply_security_headers(response, request)
+
+
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB per image
 MAX_IMAGES_PER_LABEL = 4
+_ALLOWED_BEVERAGE_TYPES = {"distilled_spirits", "wine", "beer"}
 
 # Retry config for transient Claude API errors.
 # One retry after a short delay handles most rate-limit / 529 overloaded blips.
@@ -274,7 +304,8 @@ async def _extract_fields_with_retry(
                 return None, "Anthropic rate limit reached. Please try again shortly."
             if isinstance(exc, APITimeoutError):
                 return None, "The request to Claude timed out. Please try again."
-            return None, f"Network error contacting Claude API: {exc}"
+            _log.warning("Claude connection error after retry: %s", exc)
+            return None, "Network error contacting Claude API. Please try again shortly."
         except APIStatusError as exc:
             if metrics is not None:
                 metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
@@ -292,11 +323,13 @@ async def _extract_fields_with_retry(
         except RuntimeError as exc:
             if metrics is not None:
                 metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-            return None, f"Could not read label image(s): {exc}"
+            _log.warning("Runtime extraction error: %s", exc)
+            return None, "Could not process label image(s). Please submit clearer photos."
         except Exception as exc:  # noqa: BLE001
             if metrics is not None:
                 metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-            return None, f"Unexpected error during label extraction: {exc}"
+            _log.exception("Unexpected extraction error")
+            return None, "Unexpected error during label extraction. Please try again."
     return None, "Unexpected retry loop exit."
 
 
@@ -413,7 +446,8 @@ async def review_label(
     try:
         application_data = ApplicationData(**json.loads(application))
     except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid application data: {exc}") from exc
+        _log.warning("Invalid application data: %s", exc)
+        raise HTTPException(status_code=422, detail="Invalid application data.") from exc
     return await _review_single(files, application_data)
 
 
@@ -431,11 +465,23 @@ async def review_labels_batch(
             ApplicationData(**a) for a in json.loads(applications)
         ]
     except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid batch parameters: {exc}") from exc
+        _log.warning("Invalid batch parameters: %s", exc)
+        raise HTTPException(status_code=422, detail="Invalid batch parameters.") from exc
+
+    if not counts or any(not isinstance(c, int) or c < 1 for c in counts):
+        raise HTTPException(
+            status_code=422,
+            detail="image_counts must be a JSON array of positive integers.",
+        )
+    if any(c > MAX_IMAGES_PER_LABEL for c in counts):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Each image count must be <= {MAX_IMAGES_PER_LABEL}.",
+        )
 
     if len(counts) != len(application_list):
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail=(
                 f"image_counts length ({len(counts)}) must match "
                 f"applications length ({len(application_list)})."
@@ -443,7 +489,7 @@ async def review_labels_batch(
         )
     if sum(counts) != len(files):
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail="Sum of image_counts must match the number of uploaded files.",
         )
 
@@ -496,11 +542,23 @@ async def review_labels_batch_stream(
             ApplicationData(**a) for a in json.loads(applications)
         ]
     except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid batch parameters: {exc}") from exc
+        _log.warning("Invalid batch parameters in stream: %s", exc)
+        raise HTTPException(status_code=422, detail="Invalid batch parameters.") from exc
+
+    if not counts or any(not isinstance(c, int) or c < 1 for c in counts):
+        raise HTTPException(
+            status_code=422,
+            detail="image_counts must be a JSON array of positive integers.",
+        )
+    if any(c > MAX_IMAGES_PER_LABEL for c in counts):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Each image count must be <= {MAX_IMAGES_PER_LABEL}.",
+        )
 
     if len(counts) != len(application_list):
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail=(
                 f"image_counts length ({len(counts)}) must match "
                 f"applications length ({len(application_list)})."
@@ -508,7 +566,7 @@ async def review_labels_batch_stream(
         )
     if sum(counts) != len(files):
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail="Sum of image_counts must match the number of uploaded files.",
         )
 
@@ -745,18 +803,46 @@ async def label_check_batch(
     try:
         counts: list[int] = json.loads(image_counts)
     except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid image_counts: {exc}") from exc
+        _log.warning("Invalid image_counts: %s", exc)
+        raise HTTPException(status_code=422, detail="Invalid image_counts.") from exc
+
+    if not counts or any(not isinstance(c, int) or c < 1 for c in counts):
+        raise HTTPException(
+            status_code=422,
+            detail="image_counts must be a JSON array of positive integers.",
+        )
+    if any(c > MAX_IMAGES_PER_LABEL for c in counts):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Each image count must be <= {MAX_IMAGES_PER_LABEL}.",
+        )
+    if (
+        confirmed_beverage_type
+        and confirmed_beverage_type not in _ALLOWED_BEVERAGE_TYPES
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="confirmed_beverage_type must be one of: distilled_spirits, wine, beer.",
+        )
 
     roles_list: list[str] = []
     if photo_roles.strip():
         try:
             roles_list = json.loads(photo_roles)
-        except (json.JSONDecodeError, ValueError):
-            roles_list = []
+        except (json.JSONDecodeError, ValueError) as exc:
+            _log.warning("Invalid photo_roles: %s", exc)
+            raise HTTPException(status_code=422, detail="Invalid photo_roles.") from exc
+        if not isinstance(roles_list, list) or any(
+            not isinstance(role, str) for role in roles_list
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="photo_roles must be a JSON array of strings.",
+            )
 
     if sum(counts) != len(files):
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail="Sum of image_counts must match the number of uploaded files.",
         )
 
