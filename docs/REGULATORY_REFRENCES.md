@@ -40,7 +40,8 @@ All citations refer to the Electronic Code of Federal Regulations (eCFR) at http
 ### 2. Mandatory Statements & Standards of Fill
 - **27 CFR 4.32, 5.63, 7.63**: Mandatory label statements (Brand Name, Class/Type, ABV, Net Contents, Name & Address, Country of Origin for imports).
 - **27 CFR 4.36, 5.65, 7.65**: ABV tolerance bands (+/- 0.3 pp for spirits/beer; +/- 1.0 or 1.5 pp for wine).
-- **27 CFR 4.72, 5.203, 7.70**: Standards of fill authorized sizes.
+- **27 CFR 4.72, 5.203, 7.70**: Standards of fill authorized sizes (incorporating Treasury Decision TTB-200 authorized packaging sizes for wine and distilled spirits; malt beverages unrestricted).
+- **T.D. TTB-200**: Treasury Decision TTB-200 (89 FR 96570, effective 2025-01-10) modernized standards of fill for wine (§4.72) and distilled spirits (§5.203) packaging sizes (fully automated).
 
 ---
 
@@ -48,9 +49,11 @@ All citations refer to the Electronic Code of Federal Regulations (eCFR) at http
 
 | Requirement / Control | Project Area | Current Support | Gap | Evidence |
 |---|---|---|---|---|
-| Statutory Warning Header & Body | `backend/app/compliance.py` | Full validation with small-container support | None | `backend/tests/test_compliance.py` |
+| Statutory Warning Header & Body | `backend/app/compliance.py` | Full validation with strict uppercase casing & small-container support | None | `backend/tests/test_compliance.py`, `backend/tests/test_mode_parity_and_case.py` |
+| 27 CFR 16.22 Honesty Advisory | `backend/app/compliance.py` | Explicit advisory on verified labels noting physical mm measurement scope | None | `backend/tests/test_compliance.py` |
+| T.D. TTB-200 Standards of Fill | `backend/app/compliance.py` | Automated allow-lists for wine (§4.72) and spirits (§5.203) | None | `backend/tests/test_compliance.py` |
 | ABV Tolerance Verification | `backend/app/compliance.py` | Distilled spirits, wine, and beer tolerances | None | `backend/tests/test_compliance.py` |
-| Mandatory Brand Name Gating | `backend/app/compliance.py` | Strict fail on missing brand; anti-hallucination prompt | None | `backend/tests/test_compliance.py` |
+| Mandatory Brand Name Gating | `backend/app/compliance.py` | Strict fail on missing brand; brand-in-address containment guard | None | `backend/tests/test_compliance.py` |
 | HTTP Security Headers | `backend/app/main.py` | Centralized middleware | None | `backend/tests/test_safe_hardening.py` |
 | Client-Fixable Input Validation | `backend/app/main.py` | HTTP 422 for malformed batch inputs | None | `backend/tests/test_safe_hardening.py` |
 | Fail-Open Zero-Login Access | `backend/app/main.py` | Sacred constraint: no 401/403 gates on public review routes | None | `backend/tests/test_safe_hardening.py` |
@@ -74,3 +77,4 @@ Review upon any change to Title 27 regulations or quarterly by the project maint
 | Date | Change | Author |
 |---|---|---|
 | 2026-09-16 | Updated with safe hardening controls, zero-login policy, and SSDF alignment | Kilroy_Lives |
+| 2026-09-16 | Added TTB-200 standards of fill modernization and 27 CFR 16.22 honesty advisory | Kilroy_Lives |
