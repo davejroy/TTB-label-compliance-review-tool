@@ -9,12 +9,108 @@ This document summarizes the current state of the project for whoever picks
 up work next: what the tool does, what's been built, what's in progress, and
 where to find more detail.
 
-## Project status
+## Current Status
 
-This is a working prototype, deployed and functional. Both review modes
-(COLA Application Match and Label-Only Check) are implemented end-to-end,
-including batch review, streaming batch review, image highlighting, confidence badges, CSV
-export, and comprehensive help documentation.
+This is a functional prototype operating in production. Both review modes (COLA Application Match and Label-Only Check) are implemented end-to-end with high compliance accuracy, streaming batch review, image highlight visualizer, and strict fail-open / zero-login access for evaluators.
+
+## What Changed Recently
+
+- **Safe Security Hardening (Zero-Login / Fail-Open)**:
+  - Added centralized security response headers middleware (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy`, API `Content-Security-Policy: default-src 'none'`, and HSTS on HTTPS).
+  - Sanitized error surfaces across Claude API and extraction runtime to prevent leaking internal exception details to clients.
+  - Tightened batch input validation (`image_counts` positive integers cap ≤4, `photo_roles` array of strings, `confirmed_beverage_type` enum) returning HTTP 422 Unprocessable Entity.
+  - Maintained fail-open CORS defaults (`*` when unset) allowing immediate evaluator and production frontend access.
+  - Added comprehensive automated test suite `test_safe_hardening.py` covering anonymous access, security headers, safer error surfaces, and 422 batch validation.
+
+## How to Run Locally
+
+```bash
+# Backend
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Set ANTHROPIC_API_KEY
+uvicorn app.main:app --reload --port 8000
+
+# Frontend
+cd frontend
+npm install
+npm run dev
+```
+
+## How to Test
+
+```bash
+# Backend tests
+cd backend && pytest
+
+# Frontend tests
+cd frontend && npm test -- --run
+```
+
+## How to Build
+
+```bash
+cd frontend && npm run build
+```
+
+## How to Deploy
+
+Deployed on Render.com via `render.yaml` Blueprint:
+- `ttb-label-backend`: Python FastAPI service.
+- `ttb-label-frontend`: Static site serving React dist.
+
+## Required Environment Variables
+
+| Variable | Purpose | Required | Example | Secret? |
+|---|---|---|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude vision extraction | Yes | `sk-ant-...` | Yes |
+| `CLAUDE_MODEL` | Claude model override | No | `claude-sonnet-4-6` | No |
+| `CORS_ORIGINS` | Allowed CORS origins (defaults to `*` fail-open) | No | `https://ttb-label-frontend.onrender.com` | No |
+| `DEMO_ACCESS_TOKEN` | Optional demo access gate token (defaults to open) | No | `secret-token` | Yes |
+| `DEMO_USERNAME` | Display username in demo modal | No | `ttb-demo` | No |
+
+## External Dependencies
+
+- Anthropic Claude API (`anthropic` Python SDK) for label extraction and vision analysis.
+
+## Known Issues
+
+- Standards of fill check checks against statutory list; custom authorized sizes require manual formula verification.
+- Type-size requirements (27 CFR 16.22) require physical measurement calibration.
+
+## Operational Notes
+
+- Stateless request lifecycle; no persistent database or image storage (NFR-2).
+- Structured latency logs emitted under `RequestTiming`.
+
+## Security Notes
+
+- **Fail-Open / Zero-Login Sacred Constraint**: Anonymous access is guaranteed; no 401/403 gates block evaluators on public API routes.
+- Security response headers set on all requests via `setdefault`.
+- Client-facing error messages are sanitized; stack traces logged only on backend.
+
+## Next Recommended Actions
+
+1. Integrate with COLA to pull application data directly.
+2. Implement state-level requirement extensions.
+
+## Open Questions
+
+- None blocking for current release.
+
+## Handoff Checklist
+- [x] Code builds
+- [x] Tests pass (all 92 backend tests + 65 frontend tests pass)
+- [x] Required docs updated (/docs/ERROR_CODES.md, HANDOFF.md, PDR.md, REGULATORY_REFRENCES.md, SBOM.md, TECHNICAL_ARCHITECTURE.md)
+- [x] Secrets removed / verified no secrets committed
+- [x] Dependencies reviewed
+- [x] SBOM updated
+- [x] Error codes updated
+- [x] Architecture updated
+- [x] Regulatory references updated
 
 ## What's implemented
 

@@ -129,8 +129,9 @@ npm run build   # outputs to frontend/dist
 
 Serve `frontend/dist` with any static file host, and run the FastAPI app
 behind a process manager (e.g. `uvicorn app.main:app` with a reverse proxy).
-Set `ANTHROPIC_API_KEY` (and optionally `CLAUDE_MODEL`) as environment
-variables for the backend process.
+Set `ANTHROPIC_API_KEY` (and optionally `CLAUDE_MODEL` and `CORS_ORIGINS`) as environment
+variables for the backend process. Note that authentication is intentionally NOT enabled
+(fail-open / zero-login product requirement) so all evaluators have immediate access.
 
 ## Deploying to Render
 

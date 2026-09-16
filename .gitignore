@@ -6,6 +6,10 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.env.*
+*.env
+.secrets
+*.secrets
 
 # Node
 node_modules/
