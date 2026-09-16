@@ -135,3 +135,4 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 |---|---|---|
 | 2026-07-07 | Initial architecture document created under documentation-governance skill; promoted to production | davejroy |
 | 2026-09-09 | Add RequestTiming middleware observability notes and concurrent multi-photo merge architecture | davejroy |
+| 2026-09-16 | W10 brand hallucination fix: schema & prompt rules, empty-brand fail enforcement, low-confidence retake gating | davejroy |

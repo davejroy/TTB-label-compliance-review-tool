@@ -31,6 +31,7 @@ Containers with capacity 100 mL or less may display an abbreviated Government Wa
 |------------------|--------|----------------------|
 | **27 CFR 16.22** | Advisory / Gap | Legibility, type size (minimum font height in mm/inches), characters-per-inch, and background contrast rules cannot be conclusively certified via vision model OCR alone due to photographic resolution and bottle curvature. Advisory warnings are provided; manual measurement is required for definitive determination. |
 | **T.D. TTB-200** | Implemented / Partial Gap | Standards of fill updates from Treasury Decision TTB-200 are incorporated into authorized size checks. Formula-dependent statements (sulfites, allergens, age statements) flag advisory notices noting that laboratory/formula records supersede label-only review. |
+| **27 CFR 4.32, 5.63, 7.63** | Implemented (W10 Brand Check) | Brand name is a mandatory field on all alcohol beverage labels. If no brand name is printed or legible on the label, the tool enforces a strict fail status and does not permit guessing or hallucinating brand names from class/type designations or producer text. Low-readability brand names prompt a retake request. |
 
 ---
 
