@@ -60,11 +60,17 @@ No application data or images are stored server-side; each request is stateless.
 - **Backend -> Anthropic API:** label images leave the trust boundary and are processed by a third party. Relevant to privacy and to any outbound-egress firewall constraints noted for production.
 - **Secret boundary:** the Anthropic API key lives only in the backend service environment; it is never exposed to the browser.
 
-## Authentication and Authorization
+## Authentication, Rate Limiting, and Guardrails
 
-The application operates under an intentional **Fail-Open / Zero-Login** product requirement. TTB evaluators and compliance agents must always have unobstructed access to review labels and examine the tool without login gates or 401/403 errors on public API routes.
+The prototype implements a **fail-open security and abuse prevention architecture**:
 
-Demonstration tokens (`DEMO_ACCESS_TOKEN`) fail open when unconfigured. No hardcoded or environment-enforced API authentication token gates are used that would reject anonymous evaluators.
+1. **Fail-open demo gate**: When `DEMO_ACCESS_TOKEN` is unset in the environment, all requests proceed normally (dev/eval never locked out). When set, review endpoints require `Authorization: Bearer <token>`. `/api/health` and `/api/demo-info` remain strictly open. No mandatory `API_AUTH_TOKEN` is introduced.
+2. **Soft rate limiting**: Inbound IP rate limiting is enforced via `slowapi` on expensive review endpoints (`RATE_LIMIT_REVIEW`, default 20/min). Exceeding limits returns HTTP **429 Too Many Requests** (never 401/403) with `Retry-After` header. `/api/health` and `/api/demo-info` are exempt and unlimited.
+3. **Concurrency cap for Claude calls**: A process-wide `asyncio.Semaphore` (`MAX_CONCURRENT_CLAUDE_CALLS`, default 5) wraps all Anthropic API extraction calls with timeout `CLAUDE_CONCURRENCY_TIMEOUT` (default 30.0s), preventing batch floods from overwhelming API limits.
+4. **Soft spend / abuse tracking**: `DailySpendGuard` (`MAX_REVIEW_REQUESTS_PER_DAY`) monitors process request volume on Render and emits loud warnings upon exceeding thresholds without blocking evaluator access. Multi-instance setups will use Redis in future iterations.
+5. **Image decompression protection**: Pillow `Image.MAX_IMAGE_PIXELS` is explicitly set to 64,000,000 to prevent image bomb DoS attacks.
+
+This is **not** real per-user authentication or authorization: it is designed to keep public demos accessible and safe from abuse. See [REGULATORY_REFERENCES.md](./REGULATORY_REFERENCES.md).
 
 ## Configuration
 

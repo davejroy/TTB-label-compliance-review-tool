@@ -43,6 +43,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Respon
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
 
 from .claude_client import extract_label_fields, prepare_image, _media_type_for, ImageQualityError
 from .compliance import (
@@ -55,9 +56,38 @@ from .compliance import (
 )
 from .models import ApplicationData, ExtractedLabelData, LabelCheckResult, ReviewResult
 from .auth import require_demo_access, demo_username, auth_enabled
+from .limiter import (
+    limiter,
+    rate_limit_exceeded_handler,
+    get_review_rate_limit,
+    daily_spend_guard,
+)
 
 # Module-level logger. In production configure JSON handler for log aggregators.
 _log = logging.getLogger(__name__)
+
+# Concurrency cap for Claude extraction calls:
+# Process-wide semaphore prevents unbounded-parallel batch requests from overwhelming the Anthropic API.
+# Configurable via MAX_CONCURRENT_CLAUDE_CALLS (default 5).
+_CLAUDE_SEMAPHORE_LIMIT = int(os.environ.get("MAX_CONCURRENT_CLAUDE_CALLS", "5"))
+_claude_semaphore = asyncio.Semaphore(_CLAUDE_SEMAPHORE_LIMIT)
+
+# Concurrency acquisition timeout (seconds). If the semaphore cannot be acquired within this window,
+# return a friendly 503/429 busy message instead of timing out silently or raising an auth error.
+_CLAUDE_SEMAPHORE_TIMEOUT_S = float(os.environ.get("CLAUDE_CONCURRENCY_TIMEOUT", "30.0"))
+
+
+def get_claude_semaphore() -> asyncio.Semaphore:
+    """Return the active process-wide Claude extraction concurrency semaphore."""
+    return _claude_semaphore
+
+
+def set_claude_semaphore_limit(limit: int) -> None:
+    """Helper for runtime configuration or test fixtures to adjust semaphore capacity."""
+    global _claude_semaphore, _CLAUDE_SEMAPHORE_LIMIT
+    _CLAUDE_SEMAPHORE_LIMIT = limit
+    _claude_semaphore = asyncio.Semaphore(limit)
+
 
 
 def _log_request_timing(
@@ -89,6 +119,8 @@ def _log_request_timing(
 
 
 app = FastAPI(title="TTB Label Compliance Review Tool")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # CORS - configure allowed origins via CORS_ORIGINS (comma-separated).
 # Defaults to "*" (fail-open) so local dev and live frontend deployments
@@ -269,7 +301,7 @@ async def _extract_fields_with_retry(
     images: list[tuple[bytes, str]],
     metrics: ExtractionMetrics | None = None,
 ) -> tuple[ExtractedLabelData | None, str | None]:
-    """Call extract_label_fields with one automatic retry on transient errors.
+    """Call extract_label_fields with concurrency gating and one automatic retry on transient errors.
 
     Images are passed as pre-processed JPEG bytes (preprocessed=True) so
     Claude client skips the Pillow pipeline entirely.
@@ -277,60 +309,78 @@ async def _extract_fields_with_retry(
     Returns ``(extracted, None)`` on success or ``(None, error_msg)`` on
     failure after exhausting retries.
     """
-    for attempt in range(2):
-        call_start = time.monotonic()
-        try:
-            if metrics is not None:
-                metrics.claude_calls += 1
-            extracted = await run_in_threadpool(
-                extract_label_fields, images, True
-            )
-            if metrics is not None:
-                metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-            return extracted, None
-        except AuthenticationError:
-            if metrics is not None:
-                metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-            return None, "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
-        except _RETRYABLE as exc:
-            if metrics is not None:
-                metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-            if attempt == 0:
-                # First attempt failed on a transient error - wait then retry.
-                await asyncio.sleep(_RETRY_DELAY_S)
-                continue
-            # Second attempt also failed.
-            if isinstance(exc, RateLimitError):
-                return None, "Anthropic rate limit reached. Please try again shortly."
-            if isinstance(exc, APITimeoutError):
-                return None, "The request to Claude timed out. Please try again."
-            _log.warning("Claude connection error after retry: %s", exc)
-            return None, "Network error contacting Claude API. Please try again shortly."
-        except APIStatusError as exc:
-            if metrics is not None:
-                metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-            # 529 = overloaded; retry once.
-            if attempt == 0 and exc.status_code == 529:
-                await asyncio.sleep(_RETRY_DELAY_S)
-                continue
-            return None, f"Claude API error ({exc.status_code}): {exc.message}"
-        except ValueError as exc:
-            if metrics is not None:
-                metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-            # Non-alcohol label guard (raised by extract_label_fields when
-            # is_alcohol_beverage_label is False). Surface directly to user.
-            return None, str(exc)
-        except RuntimeError as exc:
-            if metrics is not None:
-                metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-            _log.warning("Runtime extraction error: %s", exc)
-            return None, "Could not process label image(s). Please submit clearer photos."
-        except Exception as exc:  # noqa: BLE001
-            if metrics is not None:
-                metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-            _log.exception("Unexpected extraction error")
-            return None, "Unexpected error during label extraction. Please try again."
-    return None, "Unexpected retry loop exit."
+    try:
+        await asyncio.wait_for(_claude_semaphore.acquire(), timeout=_CLAUDE_SEMAPHORE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        _log.warning(
+            "Claude concurrency limit reached (capacity=%d, timeout=%.1fs). Rejecting with busy message.",
+            _CLAUDE_SEMAPHORE_LIMIT,
+            _CLAUDE_SEMAPHORE_TIMEOUT_S,
+        )
+        return (
+            None,
+            "The review service is currently processing a high volume of label requests. "
+            "Please wait a moment and resubmit.",
+        )
+
+    try:
+        for attempt in range(2):
+            call_start = time.monotonic()
+            try:
+                if metrics is not None:
+                    metrics.claude_calls += 1
+                extracted = await run_in_threadpool(
+                    extract_label_fields, images, True
+                )
+                if metrics is not None:
+                    metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                return extracted, None
+            except AuthenticationError:
+                if metrics is not None:
+                    metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                return None, "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
+            except _RETRYABLE as exc:
+                if metrics is not None:
+                    metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                if attempt == 0:
+                    # First attempt failed on a transient error - wait then retry.
+                    await asyncio.sleep(_RETRY_DELAY_S)
+                    continue
+                # Second attempt also failed.
+                if isinstance(exc, RateLimitError):
+                    return None, "Anthropic rate limit reached. Please try again shortly."
+                if isinstance(exc, APITimeoutError):
+                    return None, "The request to Claude timed out. Please try again."
+                _log.warning("Claude connection error after retry: %s", exc)
+                return None, "Network error contacting Claude API. Please try again shortly."
+            except APIStatusError as exc:
+                if metrics is not None:
+                    metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                # 529 = overloaded; retry once.
+                if attempt == 0 and exc.status_code == 529:
+                    await asyncio.sleep(_RETRY_DELAY_S)
+                    continue
+                return None, f"Claude API error ({exc.status_code}): {exc.message}"
+            except ValueError as exc:
+                if metrics is not None:
+                    metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                # Non-alcohol label guard (raised by extract_label_fields when
+                # is_alcohol_beverage_label is False). Surface directly to user.
+                return None, str(exc)
+            except RuntimeError as exc:
+                if metrics is not None:
+                    metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                _log.warning("Runtime extraction error: %s", exc)
+                return None, "Could not process label image(s). Please submit clearer photos."
+            except Exception as exc:  # noqa: BLE001
+                if metrics is not None:
+                    metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                _log.exception("Unexpected extraction error")
+                return None, "Unexpected error during label extraction. Please try again."
+        return None, "Unexpected retry loop exit."
+    finally:
+        _claude_semaphore.release()
+
 
 
 
@@ -437,12 +487,15 @@ async def _review_single(files: list[UploadFile], application: ApplicationData) 
 
 
 @app.post("/api/review", response_model=ReviewResult, dependencies=[Depends(require_demo_access)])
+@limiter.limit(get_review_rate_limit)
 async def review_label(
+    request: Request,
     files: list[UploadFile] = File(...),
     application: str = Form(...),
 ) -> ReviewResult:
     """Single-label review: 1-4 label images plus one JSON-encoded
     ApplicationData form field."""
+    daily_spend_guard.record_request(1)
     try:
         application_data = ApplicationData(**json.loads(application))
     except (json.JSONDecodeError, ValueError) as exc:
@@ -452,7 +505,9 @@ async def review_label(
 
 
 @app.post("/api/review/batch", response_model=list[ReviewResult], dependencies=[Depends(require_demo_access)])
+@limiter.limit(get_review_rate_limit)
 async def review_labels_batch(
+    request: Request,
     files: list[UploadFile] = File(...),
     image_counts: str = Form(...),
     applications: str = Form(...),
@@ -493,6 +548,8 @@ async def review_labels_batch(
             detail="Sum of image_counts must match the number of uploaded files.",
         )
 
+    daily_spend_guard.record_request(len(application_list))
+
     label_file_groups: list[list[UploadFile]] = []
     offset = 0
     for count in counts:
@@ -517,7 +574,9 @@ async def review_labels_batch(
 
 
 @app.post("/api/review/batch/stream", dependencies=[Depends(require_demo_access)])
+@limiter.limit(get_review_rate_limit)
 async def review_labels_batch_stream(
+    request: Request,
     files: list[UploadFile] = File(...),
     image_counts: str = Form(...),
     applications: str = Form(...),
@@ -570,6 +629,8 @@ async def review_labels_batch_stream(
             detail="Sum of image_counts must match the number of uploaded files.",
         )
 
+    daily_spend_guard.record_request(len(application_list))
+
     label_file_groups: list[list[UploadFile]] = []
     offset = 0
     for count in counts:
@@ -607,11 +668,24 @@ async def review_labels_batch_stream(
                         raise ValueError(exc.user_message) from exc
 
                 claude_call_start = time.monotonic()
-                extracted = await run_in_threadpool(
-                    extract_label_fields,
-                    processed_images,
-                    True,  # preprocessed=True
-                )
+                try:
+                    await asyncio.wait_for(_claude_semaphore.acquire(), timeout=_CLAUDE_SEMAPHORE_TIMEOUT_S)
+                except asyncio.TimeoutError:
+                    _log.warning(
+                        "Streaming batch index %d: Claude concurrency limit reached (capacity=%d).",
+                        idx,
+                        _CLAUDE_SEMAPHORE_LIMIT,
+                    )
+                    raise RuntimeError("The review service is currently busy. Please wait a moment and try again.")
+                try:
+                    extracted = await run_in_threadpool(
+                        extract_label_fields,
+                        processed_images,
+                        True,  # preprocessed=True
+                    )
+                finally:
+                    _claude_semaphore.release()
+
                 claude_call_duration_ms = int((time.monotonic() - claude_call_start) * 1000)
                 total_claude_time_ms += claude_call_duration_ms
                 fields = run_compliance_checks(app_data, extracted)
@@ -647,6 +721,23 @@ async def review_labels_batch_stream(
                     status="error",
                     extra={"batch_index": idx, "error": str(exc)},
                 )
+                # Hygiene: Do not echo raw unhandled exception strings to clients;
+                # surface user-actionable error messages or a safe generic failure message.
+                if isinstance(exc, ImageQualityError):
+                    safe_error = exc.user_message
+                elif isinstance(exc, ValueError):
+                    safe_error = str(exc)
+                elif isinstance(exc, AuthenticationError):
+                    safe_error = "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
+                elif isinstance(exc, RateLimitError):
+                    safe_error = "Anthropic rate limit reached. Please try again shortly."
+                elif isinstance(exc, APITimeoutError):
+                    safe_error = "The request to Claude timed out. Please try again."
+                elif isinstance(exc, RuntimeError) and "busy" in str(exc).lower():
+                    safe_error = str(exc)
+                else:
+                    safe_error = "An error occurred while reviewing this label. Please submit a new photo or try again."
+
                 line = json.dumps({
                     "index": idx,
                     "result": {
@@ -655,7 +746,7 @@ async def review_labels_batch_stream(
                         "fields": [],
                         "extracted": {"government_warning_present": False, "field_locations": []},
                         "processing_time_ms": wall_ms,
-                        "error": str(exc),
+                        "error": safe_error,
                     },
                 })
             yield line + "\n"
@@ -677,6 +768,7 @@ async def review_labels_batch_stream(
         media_type="application/x-ndjson",
         headers={"X-Accel-Buffering": "no"},  # disable Nginx buffering for real-time delivery
     )
+
 
 
 async def _label_check_single(
@@ -790,7 +882,9 @@ async def _label_check_single(
 
 
 @app.post("/api/label-check/batch", response_model=list[LabelCheckResult], dependencies=[Depends(require_demo_access)])
+@limiter.limit(get_review_rate_limit)
 async def label_check_batch(
+    request: Request,
     files: list[UploadFile] = File(...),
     image_counts: str = Form(...),
     confirmed_beverage_type: str = Form(default=""),
@@ -846,6 +940,8 @@ async def label_check_batch(
             detail="Sum of image_counts must match the number of uploaded files.",
         )
 
+    daily_spend_guard.record_request(len(counts))
+
     label_file_groups: list[list[UploadFile]] = []
     label_role_groups: list[list[str] | None] = []
     offset = 0
@@ -856,6 +952,7 @@ async def label_check_batch(
         else:
             label_role_groups.append(None)
         offset += count
+
 
     results: list[LabelCheckResult] = await asyncio.gather(
         *[
