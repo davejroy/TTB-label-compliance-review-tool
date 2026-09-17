@@ -11,9 +11,21 @@ This document provides a durable reference for error identifiers, failure modes,
 |-------------|-----------|---------------|-------|
 | 200 | Success | JSON / Streaming NDJSON | Operational success |
 | 422 | Unprocessable Entity / Validation Error | `{"detail": "..."}` | Client-fixable input or parameter error (per RFC 9110 §15.5.21) |
+| 429 | Too Many Requests | `{"detail": "...", "error": "too_many_requests", "retry_after": N}` | Soft inbound IP rate limit exceeded on review routes; includes Retry-After header (never 401/403) |
 | 500 | Internal Server Error | `{"detail": "Internal server error"}` | Unexpected backend failure |
+| 503 | Service Unavailable / Busy | `{"detail": "..."}` | Concurrency cap acquisition timeout or upstream overload; client retries safely |
 
 *Note on Auth: HTTP 401 / 403 are intentionally NOT used for standard API endpoints as the application operates under a strict Fail-Open / Zero-Login product policy.*
+
+---
+
+## Rate Limiting & Concurrency Error Messages
+
+| Code | Severity | Component | User Message | Internal Meaning | Common Cause | Recommended Action | Retryable | Owner |
+|---|---|---|---|---|---|---|---|---|
+| RAT-LIM-001 | Warning | Rate Limiter | Rate limit exceeded: {detail}. Please wait a moment before submitting additional label reviews. | Inbound IP request rate exceeded `RATE_LIMIT_REVIEW` (default 20/min) | Rapid successive submissions from same IP | Wait for `Retry-After` window. Health & demo-info remain open. | Yes | User |
+| RAT-CONC-001 | Warning | Concurrency Guard | The review service is currently processing a high volume of label requests. Please wait a moment and resubmit. | Process-wide `asyncio.Semaphore` limit reached and timeout expired | High concurrent batch review load | Retry after short delay. `safeFetch` retries automatically. | Yes | User |
+
 
 ---
 

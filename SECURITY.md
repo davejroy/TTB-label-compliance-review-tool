@@ -35,9 +35,13 @@ This tool processes uploaded beverage label images and calls the Anthropic Claud
 ## Security Practices
 
 - Images are processed entirely in memory and are never written to disk (per NFR-2 in `docs/PDR.md`).
-- The Anthropic API key is read from the environment and is never echoed in API responses.
-- User-facing error messages do not include internal exception details.
-- CORS origins are configurable via the `CORS_ORIGINS` environment variable and default to `*` for local development only.
+- Pillow `Image.MAX_IMAGE_PIXELS` is explicitly capped at 64,000,000 to defend against image decompression bomb exploits.
+- Inbound rate limiting is applied via `slowapi` on expensive review endpoints, returning HTTP 429 Too Many Requests (never 401/403) with Retry-After guidance while keeping `/api/health` and `/api/demo-info` unrestricted.
+- Process-wide concurrency limits (`asyncio.Semaphore`, configurable via `MAX_CONCURRENT_CLAUDE_CALLS`) wrap Claude API vision extractions to prevent API resource exhaustion.
+- The Anthropic API key is read from the environment and is never echoed in API responses or logs.
+- User-facing error messages do not include internal exception details or stack traces (masked in streaming batch outputs).
+- Fail-open authentication design ensures public evaluators are never locked out: `DEMO_ACCESS_TOKEN` is unset by default and no mandatory `API_AUTH_TOKEN` is required.
+- CORS origins are configurable via the `CORS_ORIGINS` environment variable and default fail-open to `*` for local development and public evaluators.
 
 ## Disclosure Policy
 

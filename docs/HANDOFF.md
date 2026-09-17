@@ -15,6 +15,13 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **Fail-Open Security Remediation & Abuse Guardrails (September 2026)**:
+  - **Soft Rate Limiting (High)**: Integrated `slowapi` inbound rate limiting on expensive review endpoints (`/api/review`, `/api/review/batch`, `/api/review/batch/stream`, `/api/label-check/batch`) keyed by client IP (`X-Forwarded-For` first hop or `request.client.host`). Returns HTTP **429** Too Many Requests with retry advice, NOT 401. Endpoints `/api/health` and `/api/demo-info` remain strictly unlimited.
+  - **Concurrency Cap for Claude Calls**: Process-wide `asyncio.Semaphore` (configurable via `MAX_CONCURRENT_CLAUDE_CALLS`, default 5; timeout `CLAUDE_CONCURRENCY_TIMEOUT`, default 30.0s) wrapping Claude vision extractions across single, batch, and streaming endpoints to prevent unbounded-parallel burn of Anthropic API credits. Returns a friendly 503/429 busy message upon timeout — never an auth error.
+  - **Spend / Abuse Soft Guardrail**: Implemented `DailySpendGuard` (`MAX_REVIEW_REQUESTS_PER_DAY`) tracking process-wide review volume and logging a loud warning when threshold is exceeded without blocking evaluator access. Documented that multi-instance deployments will require Redis in future iterations.
+  - **Hygiene & Hardening**: Explicitly capped Pillow `Image.MAX_IMAGE_PIXELS = 64_000_000` to prevent decompression bombs. Masked raw exception strings in streaming batch responses (`/api/review/batch/stream`) with server-side logs and user-safe failure messages. Clarified CORS fail-open `*` default in docs and verified `DEMO_ACCESS_TOKEN` is left unset for public evaluator demos.
+  - **Test Coverage**: Added test suite `backend/tests/test_rate_limit_and_concurrency.py` (8 new tests, 116 total pytest tests passing; 65 frontend vitest tests passing).
+
 - **Accuracy, Fill Standards & Honesty Gaps Modernization (September 2026)**:
   - **Issue #9 P1 — Brand Name Containment Guard**: Implemented deterministic check (`_check_brand_name_match`, `_check_label_brand_name`, `_is_brand_in_address`, and `_has_distinct_brand_evidence` in `backend/app/compliance.py`) so brand names extracted or hallucinated from the producer/bottler address line cannot clean-pass without distinct brand heading evidence (such as spatial bounding box separation or extraction notes), returning "warning" (needs review).
   - **Issue #5 W02 — Missing Government Warning Structured Failure**: When the Government Warning is absent (`present=False` or empty), `_check_government_warning` and `assert_extraction_confidence` emit a structured `FieldResult(status="fail")` immediately instead of raising a `LowConfidenceError` photo retake prompt.

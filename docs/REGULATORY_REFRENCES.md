@@ -57,6 +57,9 @@ All citations refer to the Electronic Code of Federal Regulations (eCFR) at http
 | HTTP Security Headers | `backend/app/main.py` | Centralized middleware | None | `backend/tests/test_safe_hardening.py` |
 | Client-Fixable Input Validation | `backend/app/main.py` | HTTP 422 for malformed batch inputs | None | `backend/tests/test_safe_hardening.py` |
 | Fail-Open Zero-Login Access | `backend/app/main.py` | Sacred constraint: no 401/403 gates on public review routes | None | `backend/tests/test_safe_hardening.py` |
+| Fail-Open Rate Limiting & Concurrency Guard | `backend/app/main.py`, `backend/app/limiter.py` | HTTP 429 Too Many Requests per client IP with Retry-After; health/demo-info open; Claude Semaphore cap | None | `backend/tests/test_rate_limit_and_concurrency.py` |
+| Image Decompression Bomb Protection | `backend/app/claude_client.py` | Pillow `Image.MAX_IMAGE_PIXELS = 64_000_000` | None | `backend/tests/test_rate_limit_and_concurrency.py` |
+
 
 ---
 
