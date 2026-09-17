@@ -26,6 +26,11 @@ from anthropic import (
 from pydantic import ValidationError
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 
+# Hygiene: explicitly cap Pillow maximum image pixels to prevent decompression bomb vulnerabilities.
+# 64,000,000 pixels corresponds to an 8000x8000 image, well above normal phone camera resolutions (12-48MP)
+# while defending against crafted multi-gigapixel denial-of-service payloads.
+Image.MAX_IMAGE_PIXELS = 64_000_000
+
 
 # Module-level logger - handlers/level configured by the application host
 # (uvicorn, gunicorn, etc.).  __name__ scopes records to this module.

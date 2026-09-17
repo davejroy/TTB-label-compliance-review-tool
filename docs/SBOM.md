@@ -36,7 +36,9 @@ This document provides an inventory of software components, dependency versions,
 | anthropic | 0.45.2 | PyPI | Anthropic SDK (Claude vision label extraction) | MIT | PyPI |
 | pydantic | 2.10.5 | PyPI | Data validation / API schema models | MIT | PyPI |
 | python-dotenv | 1.0.1 | PyPI | Loads `.env` for local development | BSD-3-Clause | PyPI |
-| pillow | >=10.0.0 | PyPI | Image preprocessing and validation | HPND | PyPI |
+| Pillow | 11.1.0 | PyPI | Image decoding and OCR preprocessing | HPND | PyPI |
+| slowapi | 0.1.9 | PyPI | Soft rate limiting and abuse guardrails | MIT | PyPI |
+| annotated-types | 0.7.0 | Transitive | Pydantic dependency | MIT | PyPI |
 
 ### Frontend (Node, `frontend/package.json`)
 

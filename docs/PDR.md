@@ -61,6 +61,8 @@ commit history (Dave, Jenny, Sarah, Marcus).
 | NFR-4 | Backend test suite must run without requiring an Anthropic API key (matching/requirements logic is pure and independently testable). |
 | NFR-5 | Sacred Fail-Open / Zero-Login: Public API access is unobstructed; no 401/403 gates block anonymous evaluators. |
 | NFR-6 | Defense-in-Depth Header Hardening: HTTP security headers applied by default to all responses. |
+| NFR-7 | Abuse Prevention & Fail-Open Rate Limiting: Inbound rate limiting (slowapi) returns HTTP 429 (never 401/403) with Retry-After; health/demo-info endpoints remain unlimited; Claude concurrency capped with asyncio.Semaphore. |
+
 
 ## 6. Architecture
 
