@@ -1,6 +1,25 @@
 export type BeverageType = "distilled_spirits" | "wine" | "beer";
 export type Status = "pass" | "warning" | "fail";
 
+export type CalibrationMethod =
+  | "scale_marker_aruco"
+  | "scale_marker_card_id1"
+  | "scale_marker_ruler"
+  | "container_geometry"
+  | "uncalibrated_estimate"
+  | "none";
+
+export interface TypeSizeMeasurement {
+  method: CalibrationMethod;
+  pixels_per_mm?: number;
+  measured_capital_height_mm?: number;
+  required_min_height_mm: number;
+  uncertainty_mm?: number;
+  skew_angle_deg?: number;
+  state: "pass" | "fail" | "warning" | "cannot_measure";
+  verification_note: string;
+}
+
 export interface ApplicationData {
   beverage_type: BeverageType;
   brand_name: string;
@@ -51,6 +70,7 @@ export interface FieldResult {
   application_value?: string;
   label_value?: string;
   message: string;
+  type_size_details?: TypeSizeMeasurement;
 }
 
 export const MAX_IMAGES_PER_LABEL = 4;
@@ -96,3 +116,10 @@ export const EMPTY_APPLICATION: ApplicationData = {
   name_and_address: "",
   country_of_origin: "",
 };
+
+export interface ColaPreset {
+  id: string;
+  name: string;
+  description: string;
+  application: ApplicationData;
+}

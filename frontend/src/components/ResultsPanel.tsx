@@ -3,6 +3,7 @@ import type { ReviewResult } from "../types";
 import ConfidenceBadge from "./ConfidenceBadge";
 import LabelImageViewer from "./LabelImageViewer";
 import StatusBadge from "./StatusBadge";
+import TypeSizeDetailsView from "./TypeSizeDetailsView";
 
 /**
  * How many low-confidence fields trigger the "retake photo" banner.
@@ -173,6 +174,9 @@ export default function ResultsPanel({ result, files }: { result: ReviewResult; 
                     </p>
                   </div>
                 </div>
+                {field.type_size_details && (
+                  <TypeSizeDetailsView details={field.type_size_details} />
+                )}
               </div>
             );
           })}
