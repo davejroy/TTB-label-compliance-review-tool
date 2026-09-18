@@ -6,6 +6,7 @@ import {
   type ReviewResult,
 } from "../types";
 import ApplicationForm from "./ApplicationForm";
+import ColaImportModal from "./ColaImportModal";
 import ImageDropzone from "./ImageDropzone";
 import ProcessingStatusBar from "./ProcessingStatusBar";
 import ResultsPanel from "./ResultsPanel";
@@ -61,6 +62,8 @@ export default function SingleReview() {
   const [prefilling, setPrefilling] = useState(false);
   const [prefillError, setPrefillError] = useState<string | null>(null);
   const [prefillDone, setPrefillDone] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
 
   // Submit guard refs to prevent double-invocations on rapid clicks
   const submittingRef = useRef(false);
@@ -126,10 +129,17 @@ export default function SingleReview() {
     setShowBar(false);
     setPrefillDone(false);
     setPrefillError(null);
+    setImportNotice(null);
     setStatusMessage(null);
     setTimeout(() => {
       formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
+  }
+
+  function handleApplicationImport(imported: ApplicationData) {
+    setApplication(imported);
+    setImportNotice(`Loaded application for "${imported.brand_name}"`);
+    setTimeout(() => setImportNotice(null), 5000);
   }
 
   const canSubmit =
@@ -208,11 +218,37 @@ export default function SingleReview() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
       <form ref={formTopRef} onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-        <h2 className="text-2xl font-bold text-slate-900">Step 1: Enter COLA Application Details</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h2 className="text-2xl font-bold text-slate-900">Step 1: Enter COLA Application Details</h2>
+          <button
+            type="button"
+            disabled={loading || prefilling}
+            onClick={() => setShowImportModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border-2 border-[#15396a] bg-blue-50/50 hover:bg-blue-100/70 text-[#15396a] px-3.5 py-1.5 text-sm font-bold shadow-2xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#ffbe2e] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span aria-hidden="true">📄</span> Import COLA Template / Presets
+          </button>
+        </div>
         <p className="text-base text-slate-500 mb-4">
-          Type in the details exactly as they appear on the approved COLA application, or upload a
+          Type in the details manually, import a CSV/JSON template or preset above, or upload a
           label photo first and use <strong>Pre-fill from label</strong> to auto-populate the fields.
         </p>
+
+        {importNotice && (
+          <div className="mb-4 p-3 rounded-lg bg-green-50 border border-green-200 text-sm font-semibold text-green-900 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <span>✅</span> {importNotice}
+            </span>
+            <button
+              type="button"
+              onClick={() => setImportNotice(null)}
+              className="text-xs text-green-700 hover:text-green-900 font-bold"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         <ApplicationForm value={application} onChange={setApplication} idPrefix="single" />
 
         <div className="mt-6">
@@ -305,6 +341,12 @@ export default function SingleReview() {
           </div>
         )}
       </div>
+
+      <ColaImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onSelectApplication={handleApplicationImport}
+      />
     </div>
   );
 }

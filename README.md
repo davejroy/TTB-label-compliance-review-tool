@@ -13,18 +13,6 @@
 
 ---
 
-- **Per-field confidence thresholds.** `FIELD_CONFIDENCE_THRESHOLDS` in
-  `compliance.py` gives each field its own readability floor. Government Warning
-  body text is allowed a lower confidence score (0.45) than brand name (0.60)
-  because it is long text on a curved bottle surface. A field whose score falls
-  below its threshold fails with a targeted retake request naming the specific
-  field and explaining how to improve the photo.
-- **Multi-photo extraction and merging.** The `/api/label-check/batch` endpoint
-  now accepts an optional `photo_roles` form field (JSON array of strings, one
-  per file, e.g. `["front","back"]`). When roles differ, each photo is extracted
-  independently and merged via `merge_extracted_label_data`. ABV from the front
-  label and the Government Warning from the back label each receive dedicated
-  Claude attention rather than competing in a single multi-image prompt.
 # TTB Label Compliance Review Tool
 
 A prototype tool that helps TTB compliance agents quickly check whether the
@@ -291,6 +279,8 @@ size.
 
 - **Alternate Government Warning text for small containers (<= 100 mL).** Per 27 CFR 16.21(c), containers with capacity <= 100 mL may use an abbreviated body text that omits clause numbers (1) and (2). Both the full-form and short-form body text are accepted as a pass for small containers. `_is_small_container()` in `compliance.py` detects the container size using `_parse_net_contents`; the threshold is configurable via `SMALL_CONTAINER_THRESHOLD_ML` and `SMALL_CONTAINER_THRESHOLD_FLOZ`.
 - **Beverage-type confirmation dialog (frontend).** When the backend returns `needs_beverage_confirmation=True`, the Label-Only Check tab now automatically shows a `BeverageTypeDialog` modal with radio buttons for the three beverage types. The agent selects the correct type and clicks **Confirm & Re-check**; the label is re-submitted with `confirmed_beverage_type` set and the result row is updated in place. A **Confirm type** inline link also appears in the results table for any label still waiting for confirmation.
+- **Calibrated 27 CFR 16.22 Type-Size Verification MVP (Option A Scale Marker).** Automated OpenCV/Pillow calibration using physical scale markers (ISO/IEC 7810 ID-1 standard cards and ArUco fiducials) to detect uppercase letter height in millimeters and enforce statutory volume tiers (1.0 mm / 2.0 mm / 3.0 mm) with explicit uncertainty margins. Uncalibrated photos retain an honest physical gauge advisory with zero invented mm.
+- **COLA Application Pre-fill & Template Import.** Support importing application records from CSV or JSON template files, downloading sample templates, and selecting built-in demo presets (Bourbon, Cabernet, IPA, Scotch) for zero-login, fail-open testing across single and batch review.
 
 ## Bug fixes
 

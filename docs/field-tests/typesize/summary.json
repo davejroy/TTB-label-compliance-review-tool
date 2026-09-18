@@ -1,0 +1,107 @@
+{
+  "timestamp": "2026-09-18T16:40:43Z",
+  "total_scenarios": 10,
+  "passed_scenarios": 10,
+  "scenarios": [
+    {
+      "id": "TS-01",
+      "name": "ID-1 Card (Pass >= 2.0 mm on 750 mL)",
+      "expected_state": "pass",
+      "actual_state": "pass",
+      "measured_mm": 2.4000000953674316,
+      "required_mm": 2.0,
+      "latency_ms": 46.06,
+      "status": "PASS"
+    },
+    {
+      "id": "TS-02",
+      "name": "ID-1 Card (Fail < 2.0 mm on 750 mL)",
+      "expected_state": "fail",
+      "actual_state": "fail",
+      "measured_mm": 1.2000000476837158,
+      "required_mm": 2.0,
+      "latency_ms": 29.8,
+      "status": "PASS"
+    },
+    {
+      "id": "TS-03",
+      "name": "ArUco Target (Pass >= 1.0 mm on 187 mL)",
+      "expected_state": "pass",
+      "actual_state": "pass",
+      "measured_mm": 1.2999999523162842,
+      "required_mm": 1.0,
+      "latency_ms": 14.59,
+      "status": "PASS"
+    },
+    {
+      "id": "TS-04",
+      "name": "Large Container Threshold (>= 3.0 mm on 5 L)",
+      "expected_state": "threshold=3.0",
+      "actual_state": "threshold=3.0",
+      "measured_mm": null,
+      "required_mm": 3.0,
+      "latency_ms": 0.01,
+      "status": "PASS"
+    },
+    {
+      "id": "TS-05",
+      "name": "Missing Marker in Marker Mode",
+      "expected_state": "cannot_measure",
+      "actual_state": "cannot_measure",
+      "measured_mm": null,
+      "required_mm": 2.0,
+      "latency_ms": 30.24,
+      "status": "PASS"
+    },
+    {
+      "id": "TS-06",
+      "name": "Excessive Perspective Tilt (> 25 deg)",
+      "expected_state": "cannot_measure",
+      "actual_state": "cannot_measure",
+      "measured_mm": null,
+      "required_mm": 2.0,
+      "latency_ms": 33.31,
+      "status": "PASS"
+    },
+    {
+      "id": "TS-07",
+      "name": "Out-of-Focus / Blurred Text",
+      "expected_state": "cannot_measure",
+      "actual_state": "warning",
+      "measured_mm": null,
+      "required_mm": 2.0,
+      "latency_ms": 31.2,
+      "status": "PASS"
+    },
+    {
+      "id": "TS-10",
+      "name": "Naked Uncalibrated Photo (Advisory, No Invented mm)",
+      "expected_state": "uncalibrated_estimate",
+      "actual_state": "uncalibrated_estimate",
+      "measured_mm": null,
+      "required_mm": 2.0,
+      "latency_ms": 28.21,
+      "status": "PASS"
+    },
+    {
+      "id": "TS-11",
+      "name": "Statutory Hard-Fail W02 (Missing Warning)",
+      "expected_state": "fail",
+      "actual_state": "fail",
+      "measured_mm": 2.5,
+      "required_mm": 2.0,
+      "latency_ms": 0.05,
+      "status": "PASS"
+    },
+    {
+      "id": "TS-12",
+      "name": "Statutory Hard-Fail W03 (Non-Capital Header)",
+      "expected_state": "fail",
+      "actual_state": "fail",
+      "measured_mm": 2.5,
+      "required_mm": 2.0,
+      "latency_ms": 0.05,
+      "status": "PASS"
+    }
+  ]
+}

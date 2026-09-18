@@ -3,6 +3,7 @@ import { reviewLabelsBatchStream } from "../api";
 import { downloadCsv } from "../csv";
 import { EMPTY_APPLICATION, type ApplicationData, type ReviewResult } from "../types";
 import ApplicationForm from "./ApplicationForm";
+import ColaImportModal from "./ColaImportModal";
 import ImageDropzone from "./ImageDropzone";
 import ResultsPanel from "./ResultsPanel";
 import StatusBadge from "./StatusBadge";
@@ -31,6 +32,8 @@ interface LabelState {
 
 export default function BatchReview() {
   const [items, setItems] = useState<BatchItem[]>([newItem(), newItem()]);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
 
   // labelStates tracks streaming progress per label — null means batch not started
   const [labelStates, setLabelStates] = useState<LabelState[] | null>(null);
@@ -69,6 +72,29 @@ export default function BatchReview() {
         setStatusMessage("Still working… processing batch labels…");
       }, 25000)
     );
+  }
+
+  function handleBatchImport(single: ApplicationData, multiple?: ApplicationData[]) {
+    if (multiple && multiple.length > 0) {
+      const newItems: BatchItem[] = multiple.map((app) => ({
+        id: crypto.randomUUID(),
+        application: app,
+        files: [],
+      }));
+      setItems(newItems);
+      setImportNotice(`Imported ${multiple.length} COLA applications from template. Please attach label photos for each.`);
+    } else {
+      setItems((prev) => {
+        if (prev.length === 0) {
+          return [{ id: crypto.randomUUID(), application: single, files: [] }];
+        }
+        const updated = [...prev];
+        updated[0] = { ...updated[0], application: single };
+        return updated;
+      });
+      setImportNotice(`Loaded application for "${single.brand_name}" into Label 1.`);
+    }
+    setTimeout(() => setImportNotice(null), 6000);
   }
 
   function updateItem(id: string, patch: Partial<BatchItem>) {
@@ -174,6 +200,38 @@ export default function BatchReview() {
 
   return (
     <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">Batch COLA Review</h2>
+          <p className="text-sm text-slate-500">
+            Review multiple beverage labels against their application records in one pass.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => setShowImportModal(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border-2 border-[#15396a] bg-blue-50/50 hover:bg-blue-100/70 text-[#15396a] px-3.5 py-2 text-sm font-bold shadow-2xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#ffbe2e] disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <span aria-hidden="true">📄</span> Import COLA Applications (CSV/JSON / Presets)
+        </button>
+      </div>
+
+      {importNotice && (
+        <div className="mb-6 p-3 rounded-lg bg-green-50 border border-green-200 text-sm font-semibold text-green-900 flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <span>✅</span> {importNotice}
+          </span>
+          <button
+            type="button"
+            onClick={() => setImportNotice(null)}
+            className="text-xs text-green-700 hover:text-green-900 font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-6">
         {items.map((item, index) => (
           <div key={item.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
@@ -371,6 +429,13 @@ export default function BatchReview() {
           </div>
         </div>
       )}
+
+      <ColaImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onSelectApplication={handleBatchImport}
+        isBatchMode={true}
+      />
     </div>
   );
 }
