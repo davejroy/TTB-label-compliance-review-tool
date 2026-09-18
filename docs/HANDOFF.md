@@ -15,6 +15,12 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **Promotion of Features from `-dev` (September 2026)**:
+  - **27 CFR 16.22 Option A (Scale-Marker) Type-Size Verification MVP**: Integrated deterministic Computer Vision (OpenCV/Pillow) calibration supporting ISO/IEC 7810 ID-1 cards and printable ArUco fiducials. Measures capital letter heights in mm against statutory volume tiers (1.0 mm / 2.0 mm / 3.0 mm) with confidence margins. Uncalibrated photos retain an honest statutory advisory with zero invented mm.
+  - **COLA Application Pre-fill & Template Import (#24)**: Added CSV/JSON template parsing, sample template downloads, and built-in demo presets (Bourbon, Cabernet, IPA, Scotch) with zero-login, fail-open access across Single and Batch Review modes.
+  - **Dependency Security Audit & Remediation (#25)**: Bumped `python-multipart` from `0.0.20` to `0.0.32` in `requirements.txt` (remediating PYSEC-2026-1852, PYSEC-2026-3036..3040), applied `npm audit fix` for safe transitive dependency bumps, and documented CVE review rationale.
+  - **Comprehensive Governance Documentation**: Added `docs/ALWAYS_ON_HOSTING.md`, `docs/TYPE_SIZE_16_22_DESIGN.md`, `docs/field-tests/typesize/ACCEPTANCE_CHECKLIST.md`, `docs/field-tests/typesize/TYPESIZE_MVP_FIELD_TEST_REPORT.md`, `docs/field-tests/typesize/run_typesize_suite.py`, updated `docs/SBOM.md`, `docs/ERROR_CODES.md`, `docs/PDR.md`, `docs/TECHNICAL_ARCHITECTURE.md`, and added `docs/REGULATORY_REFRENCES.md`.
+
 - **Fail-Open Security Remediation & Abuse Guardrails (September 2026)**:
   - **Soft Rate Limiting (High)**: Integrated `slowapi` inbound rate limiting on expensive review endpoints (`/api/review`, `/api/review/batch`, `/api/review/batch/stream`, `/api/label-check/batch`) keyed by client IP (`X-Forwarded-For` first hop or `request.client.host`). Returns HTTP **429** Too Many Requests with retry advice, NOT 401. Endpoints `/api/health` and `/api/demo-info` remain strictly unlimited.
   - **Concurrency Cap for Claude Calls**: Process-wide `asyncio.Semaphore` (configurable via `MAX_CONCURRENT_CLAUDE_CALLS`, default 5; timeout `CLAUDE_CONCURRENCY_TIMEOUT`, default 30.0s) wrapping Claude vision extractions across single, batch, and streaming endpoints to prevent unbounded-parallel burn of Anthropic API credits. Returns a friendly 503/429 busy message upon timeout — never an auth error.
@@ -94,7 +100,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 ## Known Issues
 
 - Standards of fill check validates against modernized T.D. TTB-200 authorized size lists (§4.72 / §5.203); custom authorized sizes require manual formula verification.
-- Exact physical type-size verification (27 CFR 16.22) is evaluated via OCR text match and confidence with honest advisory disclosure; physical millimeter measurement requires a physical gauge.
+- Exact physical type-size verification (27 CFR 16.22) is automated via Option A (scale marker) when an ID-1 card or ArUco target is co-planar; uncalibrated photos retain the honest statutory physical gauge advisory with zero invented mm.
 
 ## Operational Notes
 
@@ -118,7 +124,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## Handoff Checklist
 - [x] Code builds
-- [x] Tests pass (all backend tests + 65 frontend tests pass)
+- [x] Tests pass (all 154 backend pytest tests + 77 frontend vitest tests pass)
 - [x] Required docs updated (/docs/ERROR_CODES.md, HANDOFF.md, PDR.md, REGULATORY_REFRENCES.md, SBOM.md, TECHNICAL_ARCHITECTURE.md)
 - [x] Secrets removed / verified no secrets committed
 - [x] Dependencies reviewed
@@ -129,6 +135,8 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## What's implemented
 
+- **Calibrated 27 CFR 16.22 Type-Size Verification MVP (Option A Scale Marker)** - automated OpenCV/Pillow calibration using physical scale markers (ISO/IEC 7810 ID-1 standard cards and ArUco targets) to detect capital-letter height in millimeters and enforce statutory volume tiers (1.0 mm / 2.0 mm / 3.0 mm) with explicit confidence intervals. Uncalibrated photos retain an honest statutory advisory with zero invented mm.
+- **COLA Application Pre-fill & Template Import** - import application data from CSV or JSON template files, download sample templates, and select built-in demo presets (Bourbon, Cabernet, IPA, Scotch) for zero-login, fail-open testing across single and batch review.
 - **Single Label review** - upload 1-4 label images plus COLA application
   data (brand name, class/type, ABV, net contents); Claude vision extracts
   the label fields and the backend compares them against the application

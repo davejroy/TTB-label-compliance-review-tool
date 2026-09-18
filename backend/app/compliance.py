@@ -45,7 +45,7 @@ from typing import Optional
 
 # Module-level logger for compliance checks.
 _log = logging.getLogger(__name__)
-from .models import ApplicationData, ExtractedLabelData, FieldResult
+from .models import ApplicationData, ExtractedLabelData, FieldResult, TypeSizeMeasurement
 
 
 # ---------------------------------------------------------------------------
@@ -771,12 +771,16 @@ def _check_alcohol_content(
     )
 
 
-def _check_government_warning(extracted) -> FieldResult:
+def _check_government_warning(
+    extracted: ExtractedLabelData,
+    type_size_details: Optional[TypeSizeMeasurement] = None,
+) -> FieldResult:
     """Validate the Government Warning statement (27 CFR 16.21 / 16.22).
 
     Supports the abbreviated short-form body for containers <= 100 mL
     per 27 CFR 16.21(c): omits clause numbers (1)/(2). Both forms pass.
-    Also applies per-field confidence gate when the warning is present.
+    Also applies per-field confidence gate when the warning is present,
+    and incorporates calibrated 27 CFR 16.22 physical type-size results.
     """
     field, label_name = "government_warning", "Government Warning"
 
@@ -791,6 +795,7 @@ def _check_government_warning(extracted) -> FieldResult:
             application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
             label_value=None,
             message="Government Warning statement not found on label. Required on all alcohol beverage labels (27 CFR Part 16).",
+            type_size_details=type_size_details,
         )
 
     body_conf = extracted.per_field_confidence.get("government_warning_body")
@@ -808,6 +813,7 @@ def _check_government_warning(extracted) -> FieldResult:
                     "label surface (not at an angle), ensure the warning text is fully "
                     "visible and sharply in focus, and avoid reflections or shadows."
                 ),
+                type_size_details=type_size_details,
             )
 
     header = (extracted.government_warning_header or "").strip()
@@ -848,12 +854,48 @@ def _check_government_warning(extracted) -> FieldResult:
         note = ""
         if is_small and body_lower == canonical_short.lower():
             note = " (short-form variant accepted for containers <= 100 mL per 27 CFR 16.21(c))"
-        return FieldResult(
-            field=field, label_name=label_name, status="pass",
-            application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
-            label_value=header + " " + body,
-            message="Government Warning statement matches the required text exactly." + note + " (Note: Physical type size in mm per 27 CFR 16.22 is not verified from photos and requires physical gauge measurement.)",
-        )
+
+        if type_size_details is None:
+            return FieldResult(
+                field=field, label_name=label_name, status="pass",
+                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
+                label_value=header + " " + body,
+                message="Government Warning statement matches the required text exactly." + note + " (Note: Physical type size in mm per 27 CFR 16.22 is not verified from photos and requires physical gauge measurement.)",
+                type_size_details=None,
+            )
+
+        if type_size_details.state == "fail":
+            return FieldResult(
+                field=field, label_name=label_name, status="fail",
+                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
+                label_value=header + " " + body,
+                message="Government Warning statement text is valid, but type size is deficient: " + type_size_details.verification_note,
+                type_size_details=type_size_details,
+            )
+        elif type_size_details.state == "cannot_measure":
+            return FieldResult(
+                field=field, label_name=label_name, status="warning",
+                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
+                label_value=header + " " + body,
+                message="Government Warning text matches required wording. Calibrated measurement could not be completed: " + type_size_details.verification_note,
+                type_size_details=type_size_details,
+            )
+        elif type_size_details.state == "pass":
+            return FieldResult(
+                field=field, label_name=label_name, status="pass",
+                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
+                label_value=header + " " + body,
+                message="Government Warning statement matches the required text exactly and meets statutory type-size requirements." + note + " (" + type_size_details.verification_note + ")",
+                type_size_details=type_size_details,
+            )
+        else:  # "warning" (e.g. uncalibrated estimate or borderline near threshold)
+            return FieldResult(
+                field=field, label_name=label_name, status="pass",
+                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
+                label_value=header + " " + body,
+                message="Government Warning statement matches the required text exactly." + note + " (" + type_size_details.verification_note + ")",
+                type_size_details=type_size_details,
+            )
 
     status = "warning" if cosmetic_only else "fail"
     return FieldResult(
@@ -861,11 +903,14 @@ def _check_government_warning(extracted) -> FieldResult:
         application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
         label_value=(header + " " + body).strip(),
         message="Government Warning issue(s): " + "; ".join(issues) + ".",
+        type_size_details=type_size_details,
     )
 
 def run_compliance_checks(
-    application: ApplicationData, extracted: ExtractedLabelData
-) -> list:
+    application: ApplicationData,
+    extracted: ExtractedLabelData,
+    type_size_details: Optional[TypeSizeMeasurement] = None,
+) -> list[FieldResult]:
     """Compare a label's extracted fields against the COLA application data.
 
     Calls assert_extraction_confidence first; raises LowConfidenceError if
@@ -887,7 +932,7 @@ def run_compliance_checks(
             extracted.net_contents,
             normalizer=_normalize_net_contents,
         ),
-        _check_government_warning(extracted),
+        _check_government_warning(extracted, type_size_details=type_size_details),
     ]
 
     if application.name_and_address:
@@ -1362,7 +1407,8 @@ def check_label_requirements(
     extracted: ExtractedLabelData,
     beverage_type=None,
     confirmed_beverage_type=None,
-) -> list:
+    type_size_details: Optional[TypeSizeMeasurement] = None,
+) -> list[FieldResult]:
     """Validate a label against TTB mandatory label requirements, independent
     of any COLA application data (Label-Only Check).
 
@@ -1422,7 +1468,7 @@ def check_label_requirements(
             extracted.name_and_address,
             "The name and address of the bottler, producer, packer, or importer is required (27 CFR 4.35 / 5.66-5.68 / 7.66-7.68).",
         ),
-        _check_government_warning(extracted),
+        _check_government_warning(extracted, type_size_details=type_size_details),
         _check_label_country_of_origin(extracted),
         _check_sulfite_declaration(extracted),
         _check_allergen_statements(extracted),
@@ -1436,13 +1482,14 @@ def check_label_requirements(
 # ---------------------------------------------------------------------------
 
 def overall_status(results: list) -> str:
-    """Roll up a list of FieldResults into a single overall status.
+    """Roll up a list of FieldResults (or status strings) into a single overall status.
 
     fail if any field failed, warning if any field needs review, else pass.
     """
-    if any(r.status == "fail" for r in results):
+    statuses = [r.status if hasattr(r, "status") else r for r in results]
+    if any(s == "fail" for s in statuses):
         return "fail"
-    if any(r.status == "warning" for r in results):
+    if any(s == "warning" for s in statuses):
         return "warning"
     return "pass"
 

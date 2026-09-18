@@ -4,7 +4,7 @@ This document describes every runtime configuration input for the TTB Label
 Compliance Review backend: environment variables (deployment-time) and the
 admin-tunable code constants that govern image quality and compliance scoring.
 
-Related documents: [TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md),
+Related documents: [ALWAYS_ON_HOSTING.md](./ALWAYS_ON_HOSTING.md), [TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md),
 [DEPLOYMENT.md](./DEPLOYMENT.md), [ERROR_CODES.md](./ERROR_CODES.md),
 [SECURITY_REVIEW_2026-09-16.md](./SECURITY_REVIEW_2026-09-16.md),
 [SECURITY_REVIEW_OWASP_LLM.md](./SECURITY_REVIEW_OWASP_LLM.md).
@@ -56,6 +56,17 @@ possible and only request a retake when quality falls below the floor.
 | BRIGHT_CEILING | 235.0 | Mean luma above this = overexposed. |
 | GLARE_CLIP_FRACTION | 0.06 | More than 6% near-white pixels = glare/reflection. |
 | COVERAGE_MIN_STDDEV | 25.0 | Very low contrast = label too small or blank in frame. |
+
+## 27 CFR 16.22 Type-Size Constants (backend/app/cv_typesize.py)
+
+These constants govern the computer vision scale-marker detection and millimeter height calculations.
+
+| Constant | Value | Meaning |
+|---|---|---|
+| ID1_WIDTH_MM | 85.60 mm | Standard ISO/IEC 7810 ID-1 card long edge dimension used as scale reference. |
+| ID1_HEIGHT_MM | 53.98 mm | Standard ISO/IEC 7810 ID-1 card short edge dimension. |
+| ID1_ASPECT_RATIO | ~1.5858 | Target aspect ratio for ID-1 card contour detection. |
+| MAX_SKEW_ANGLE_DEG | 25.0° | Maximum allowable perspective tilt angle before triggering `cannot_measure` retake prompt. |
 
 ## Compliance Scoring Constants (backend/app/compliance.py)
 

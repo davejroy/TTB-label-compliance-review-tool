@@ -9,6 +9,7 @@ Changes in this version
 * LabelCheckResult.photo_sources - list of photo roles used for merged extraction.
 """
 
+from enum import Enum
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -16,6 +17,32 @@ from pydantic import BaseModel, Field
 BeverageType = Literal["distilled_spirits", "wine", "beer"]
 Status = Literal["pass", "warning", "fail"]
 Confidence = Literal["high", "medium", "low"]
+
+class CalibrationMethod(str, Enum):
+    SCALE_MARKER_ARUCO = "scale_marker_aruco"
+    SCALE_MARKER_CARD_ID1 = "scale_marker_card_id1"
+    SCALE_MARKER_RULER = "scale_marker_ruler"
+    CONTAINER_GEOMETRY = "container_geometry"
+    UNCALIBRATED_ESTIMATE = "uncalibrated_estimate"
+    NONE = "none"
+
+class TypeSizeMeasurement(BaseModel):
+    """Calibrated physical type-size measurement result under 27 CFR 16.22."""
+
+    method: CalibrationMethod = Field(
+        default=CalibrationMethod.NONE,
+        description="Calibration technique used: scale_marker_aruco, scale_marker_card_id1, scale_marker_ruler, container_geometry, uncalibrated_estimate, none.",
+    )
+    pixels_per_mm: Optional[float] = Field(None, description="Calibrated spatial resolution in px/mm")
+    measured_capital_height_mm: Optional[float] = Field(None, description="Extracted capital letter height in mm (None if uncalibrated)")
+    required_min_height_mm: float = Field(..., description="Statutory 16.22 threshold based on container capacity (>= 1.0 mm for <= 237 mL, >= 2.0 mm for 237 mL-3 L, >= 3.0 mm for > 3 L)")
+    uncertainty_mm: Optional[float] = Field(None, description="95% confidence interval half-width (+/- mm)")
+    skew_angle_deg: Optional[float] = Field(None, description="Planar tilt angle of target in degrees")
+    state: Literal["pass", "fail", "warning", "cannot_measure"] = Field(
+        ...,
+        description="Type-size compliance state: pass | fail | warning | cannot_measure",
+    )
+    verification_note: str = Field(..., description="Plain-language audit explanation or advisory note")
 
 class ApplicationData(BaseModel):
     """Data entered by the agent from the COLA application form."""
@@ -90,6 +117,10 @@ class FieldResult(BaseModel):
     application_value: Optional[str] = None
     label_value: Optional[str] = None
     message: str
+    type_size_details: Optional[TypeSizeMeasurement] = Field(
+        default=None,
+        description="27 CFR 16.22 physical type-size measurement details (Option A scale marker or uncalibrated advisory).",
+    )
 
 class ReviewResult(BaseModel):
     """Response body for /api/review and /api/review/batch."""
@@ -124,4 +155,3 @@ class LabelCheckResult(BaseModel):
             "['front', 'back']. Empty list when photo roles were not supplied."
         ),
     )
-
