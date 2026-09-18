@@ -82,7 +82,31 @@ export default function InstructionsModal({ isOpen, onClose }: InstructionsModal
             </div>
           </section>
 
-          {/* Section 2: Photo Capture & Uploads */}
+          {/* Section 2: COLA Pre-fill & Template Import */}
+          <section className="space-y-2">
+            <h3 className="text-lg font-bold text-[#083c6f] flex items-center gap-2 border-b border-slate-200 pb-1">
+              <span>📄</span> COLA Application Pre-fill &amp; Template Import
+            </h3>
+            <p className="text-slate-700">
+              To speed up Match mode and eliminate manual data entry typos without scraping or login walls:
+            </p>
+            <ul className="list-disc list-inside space-y-1.5 text-slate-700 ml-2">
+              <li>
+                <strong>CSV &amp; JSON Import:</strong> Click <em>&ldquo;Import COLA Template / Presets&rdquo;</em> in Single or Batch mode to upload a CSV or JSON file containing COLA records. You can download a sample CSV template directly from the modal.
+              </li>
+              <li>
+                <strong>One-Click Demo Presets:</strong> Choose from built-in sample COLA applications (Kentucky Straight Bourbon, Napa Cabernet, Craft IPA, Single Malt Scotch) for instant demo evaluation.
+              </li>
+              <li>
+                <strong>Pre-fill from Label Photo:</strong> Upload a label photo and click <em>&ldquo;Pre-fill from label&rdquo;</em> to extract visible text into the application fields using Claude Vision.
+              </li>
+              <li>
+                <strong>Fail-Open / Zero-Login:</strong> Template importing and preset selection require zero logins and validate files client- and server-side with informative HTTP 422 error details on malformed records.
+              </li>
+            </ul>
+          </section>
+
+          {/* Section 3: Photo Capture & Uploads */}
           <section className="space-y-2">
             <h3 className="text-lg font-bold text-[#083c6f] flex items-center gap-2 border-b border-slate-200 pb-1">
               <span>📸</span> How to Upload &amp; Photo Roles
@@ -109,11 +133,17 @@ export default function InstructionsModal({ isOpen, onClose }: InstructionsModal
               <span>💡</span> Photo Tips for Optimal Accuracy
             </h3>
             <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-4 space-y-2">
-              <ul className="list-disc list-inside space-y-1.5 text-xs sm:text-sm text-amber-950">
+              <ul className="list-disc list-inside space-y-1.5 text-xs sm:text-amber-950">
                 <li><strong>Flat &amp; Focused:</strong> Keep the label flat and unrolled; tap your device screen to focus text before capturing.</li>
                 <li><strong>Even Lighting &amp; Avoid Glare:</strong> Shoot in bright, diffuse light. Avoid direct flash glare or heavy reflections on glossy bottles and metallic foils.</li>
-                <li><strong>Straight-On Angle:</strong> Hold the camera parallel to the label surface rather than at an oblique angle.</li>
+                <li><strong>Straight-On Angle:</strong> Hold the camera parallel to the label surface (tilt &le; 25&deg;) rather than at an oblique angle.</li>
                 <li><strong>Tight Cropping &amp; Close-Ups:</strong> Fill the frame with the label. For small mandatory text (such as net contents or ABV statements), take an additional close-up shot.</li>
+                <li>
+                  <strong>Physical Scale Marker (Option A):</strong> To verify physical type size (1.0 mm for &le;237 mL, 2.0 mm for &gt;237 mL to 3 L, 3.0 mm for &gt;3 L), place a standard plastic card (ISO/IEC 7810 ID-1 card long edge 85.60 mm), calibrated ArUco target, or millimeter ruler co-planar beside the Government Warning statement.
+                </li>
+                <li>
+                  <strong>Scale Marker Retake Guidance:</strong> If the scale marker is missing, obscured, tilted (&gt;25&deg;), or text is blurry, the tool emits a <code className="font-mono bg-white px-1 py-0.5 rounded text-amber-900 border border-amber-300">cannot_measure</code> state with targeted retake instructions.
+                </li>
               </ul>
             </div>
           </section>
@@ -199,7 +229,7 @@ export default function InstructionsModal({ isOpen, onClose }: InstructionsModal
               <span>⚠️</span> Known Gaps &amp; Current Scope
             </h3>
             <p className="text-xs sm:text-sm text-slate-700 bg-slate-100 p-3 rounded-lg border border-slate-300">
-              <strong>Known gaps &amp; Scope:</strong> Modernized standards of fill under T.D. TTB-200 (effective Jan 2025) are fully automated for wine (§4.72) and spirits (§5.203). Exact type-size verification under 27 CFR 16.22 (physical millimeter measurement) is not measured from uncalibrated photos and still requires a physical gauge or scale.
+              <strong>Known gaps &amp; Scope:</strong> Modernized standards of fill under T.D. TTB-200 (effective Jan 2025) are fully automated for wine (§4.72) and spirits (§5.203). Type-size verification under 27 CFR 16.22 (physical millimeter measurement) is verified when a physical scale marker (Option A) is present; uncalibrated field photos without a reference scale marker honestly disclose that type size is unverified from uncalibrated photos and provide statutory thresholds for physical gauge measurement.
             </p>
           </section>
         </div>

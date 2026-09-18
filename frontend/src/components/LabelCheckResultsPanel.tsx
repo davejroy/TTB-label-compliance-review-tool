@@ -3,6 +3,7 @@ import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
 import ConfidenceBadge from "./ConfidenceBadge";
 import LabelImageViewer from "./LabelImageViewer";
 import StatusBadge from "./StatusBadge";
+import TypeSizeDetailsView from "./TypeSizeDetailsView";
 
 /**
  * Renders one Label-Only Check result: the label image viewer (with
@@ -105,6 +106,9 @@ export default function LabelCheckResultsPanel({
                     </p>
                   </div>
                 </div>
+                {check.type_size_details && (
+                  <TypeSizeDetailsView details={check.type_size_details} />
+                )}
               </div>
             );
           })}

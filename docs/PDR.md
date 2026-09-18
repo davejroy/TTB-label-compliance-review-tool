@@ -50,6 +50,8 @@ commit history (Dave, Jenny, Sarah, Marcus).
 | FR-6 | Support a Label-Only Check that validates extracted fields against TTB mandatory label requirements (27 CFR Parts 4, 5, 7, 16) without application data, including the correct ABV-statement requirement/exemption per beverage type. |
 | FR-7 | Provide a zoomable label image viewer that highlights the approximate region used for each extracted field, with a transcription confidence badge (High/Medium/Low). |
 | FR-8 | Allow a manual text override when OCR/vision extraction quality is insufficient. |
+| FR-9 | Calibrated 27 CFR 16.22 Type-Size Verification: Detect physical scale markers (ISO/IEC 7810 ID-1 card, ArUco fiducials), compute spatial resolution (px/mm), measure Government Warning capital-letter height in mm, compare against statutory volume tiers (1.0 mm / 2.0 mm / 3.0 mm), and provide transparent pass / fail / advisory / retake states. Uncalibrated photos retain physical gauge advisory with zero invented mm. |
+| FR-10 | COLA Application Pre-fill & Template Import: Support importing application records from CSV or JSON template files, downloading sample templates, and selecting built-in demo presets (Bourbon, Cabernet, IPA, Scotch) for zero-login, fail-open Match mode testing. |
 
 ## 5. Non-functional requirements
 
@@ -59,38 +61,34 @@ commit history (Dave, Jenny, Sarah, Marcus).
 | NFR-2 | No persistence - uploaded images and extracted/compliance data are not stored server-side. |
 | NFR-3 | UI must be usable by non-technical agents: large text, big buttons, drag-and-drop upload, color-coded status badges. |
 | NFR-4 | Backend test suite must run without requiring an Anthropic API key (matching/requirements logic is pure and independently testable). |
-| NFR-5 | Sacred Fail-Open / Zero-Login: Public API access is unobstructed; no 401/403 gates block anonymous evaluators. |
-| NFR-6 | Defense-in-Depth Header Hardening: HTTP security headers applied by default to all responses. |
-| NFR-7 | Abuse Prevention & Fail-Open Rate Limiting: Inbound rate limiting (slowapi) returns HTTP 429 (never 401/403) with Retry-After; health/demo-info endpoints remain unlimited; Claude concurrency capped with asyncio.Semaphore. |
-
 
 ## 6. Architecture
 
 ```
-ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ        multipart/form-data         ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ   React + Vite   ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ¶ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ  FastAPI (uvicorn)    ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ   frontend       ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ /api/review, /api/review/batch,     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ  backend/app/main.py ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ                  ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ /api/label-check/batch               ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ                       ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ                  ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ                       ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ        JSON results                 ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ¬ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                                     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                                     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ image bytes +
-                                                                     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ tool-call schema
-                                                                     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ¼
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ  Anthropic API        ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ  Claude (vision)      ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ  claude_client.py     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ¬ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                                     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                                     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ structured fields
-                                                                     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ (ExtractedLabelData)
-                                                                     ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ¼
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ  compliance.py        ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ  matching & TTB       ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ  requirement checks   ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
-                                                          ÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂ
+┌─────────────────┐        multipart/form-data         ┌────────────────────────┐
+│   React + Vite  │ ──────────────────────────────────>│  FastAPI (uvicorn)     │
+│   frontend      │ /api/review, /api/review/batch,    │  backend/app/main.py   │
+│                 │ /api/label-check/batch             │                        │
+│                 │<───────────────────────────────────│                        │
+└─────────────────┘        JSON results                └───────────┬────────────┘
+                                                                   │
+                                                                   │ image bytes +
+                                                                   │ tool-call schema
+                                                                   ▼
+                                                        ┌───────────────────────┐
+                                                        │  Anthropic API        │
+                                                        │  Claude (vision)      │
+                                                        │  claude_client.py     │
+                                                        └───────────┬───────────┘
+                                                                   │
+                                                                   │ structured fields
+                                                                   │ (ExtractedLabelData)
+                                                                   ▼
+                                                        ┌───────────────────────┐
+                                                        │  compliance.py        │
+                                                        │  matching & TTB       │
+                                                        │  requirement checks   │
+                                                        └───────────────────────┘
 ```
 
 ### Backend (`backend/app/`)
@@ -290,10 +288,9 @@ implemented in the current codebase.
   has its own readability floor so Government Warning body text (long text on a
   curved bottle) is allowed a lower score than brand name. A field below its
   threshold fails with a named retake request.
-- **Concurrent multi-photo extraction and merging** (`merge_extracted_label_data`,
-  `photo_roles` batch param): front and back label photos are extracted
-  concurrently and merged so each panel gets dedicated Claude attention with minimal latency.
-- **RequestTiming middleware**: logs request timings (`RequestTiming`) and returns `X-Process-Time` HTTP header.
+- **Multi-photo extraction and merging** (`merge_extracted_label_data`,
+  `photo_roles` batch param): front and back label photos can be extracted
+  independently and merged so each panel gets dedicated Claude attention.
 - `LabelCheckResult.photo_sources` records which photo roles contributed.
 - `ExtractedLabelData.per_field_confidence` dict added to model and schema.
 
@@ -305,11 +302,11 @@ implemented in the current codebase.
 - **Frontend types synced**: `LabelCheckResult` in `types.ts` now includes `needs_beverage_confirmation`, `beverage_type_confirmed`, `photo_sources` optional fields to match the backend Pydantic model.
 - **`checkLabelsBatch` API function updated**: accepts `confirmedBeverageType` and `photoRoles` parameters and passes them via `FormData` to the backend batch endpoint.
 
-### W10 Anti-Hallucination & Brand Validation Fix
+### Phase 4 Performance & Observability enhancements
 
-- **Vision prompt and tool schema rules**: Prohibits guessing or inferring brand name from designations or producer text; requires empty string and 0.0 readability if missing.
-- **Zero-pass on missing brand**: Enforces failure status when brand is absent or empty in compliance checks.
-- **Low-confidence retake gating**: Ensures unreadable or low-confidence brand name inputs trigger explicit retake notices (`LowConfidenceError`).
+- **Structured request-timing logging (`RequestTiming`)**: implemented across `/api/review`, `/api/review/batch`, `/api/review/batch/stream`, and `/api/label-check/batch` measuring wall clock duration, Claude Vision API time, Claude API call count, image count, and result status without logging secrets or raw image bytes.
+- **Concurrent multi-photo extraction**: multi-panel extraction runs each photo concurrently via `asyncio.gather` while preserving field merge semantics and per-role failure attribution.
+- **Image pipeline efficiency**: confirmed single-pass enhancement/downscaling to max 1600px with quality 82 JPEG compression and client-side downscale prevention.
 
 ### Phase 5 User Guidance & Onboarding
 
@@ -321,11 +318,18 @@ implemented in the current codebase.
   - **Issue D — Treasury Decision TTB-200 Standards of Fill**: Automated allow-lists updated for 27 CFR 4.72 and 5.203 authorized container sizes effective 2025-01-10.
   - **Issue E — 27 CFR 16.22 Honesty Advisory**: Explicit advisory on verified labels acknowledging that physical millimeter type-size measurement is not verified from uncalibrated photos.
 
+### Phase 6 Calibrated Type-Size Verification & COLA Pre-fill (September 2026)
+
+- **27 CFR 16.22 Option A (Scale-Marker) MVP Implementation**: Deterministic Computer Vision measurement module (`backend/app/cv_typesize.py`) using OpenCV and Pillow. Detects standard ISO/IEC 7810 ID-1 cards (85.60 mm) and ArUco markers, calculates spatial resolution (px/mm), estimates perspective tilt (<25°), segments uppercase glyphs in Government Warning text, calculates median capital letter height in mm with 95% confidence intervals, and evaluates statutory thresholds (1.0 mm / 2.0 mm / 3.0 mm). Uncalibrated photos retain physical gauge advisory with zero invented mm.
+- **COLA / Application Form Pre-Fill**: Single Review form supports pre-filling application data from label presets and CSV/JSON import, with fail-open 422 validation.
+- **Fail-Open Security & Concurrency Guardrails**: Inbound rate limiting (`slowapi`) returning HTTP 429, process-wide Claude concurrency semaphore (`MAX_CONCURRENT_CLAUDE_CALLS`, default 5), daily spend monitoring (`MAX_REVIEW_REQUESTS_PER_DAY`), and `USE_FAST_EXTRACTION` feature flag (default `false`).
+- **Always-on Hosting Decision**: Render Starter instance adopted for production hosting to eliminate 30–60s idle wake delays, allowing keep-alive pinger scripts to be paused/archived.
+- **OpenAPI Schema Alignment**: Fully exposed `TypeSizeMeasurement` and `FieldResult.type_size_details` schemas across FastAPI endpoints.
+
 ## 10. Remaining next steps
 
-- **Documented Compliance Boundaries**:
-  - Calibrated physical type-size measurement for **27 CFR 16.22** (currently evaluated via vision OCR confidence and text matching with explicit honest advisory disclosure; physical millimeter measurement requires container dimension calibration or physical gauge).
 - Integrate with COLA to pull application data automatically.
+- Optional 27 CFR 16.22 Option B container-geometry calibration if scale markers are unavailable.
 - Add state-level ABV and label requirement checks.
 
 ## 11. Bug fixes

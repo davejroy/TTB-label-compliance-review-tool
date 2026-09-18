@@ -26,7 +26,7 @@ Performance notes:
 """
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 import time
@@ -40,7 +40,7 @@ from anthropic import (
     RateLimitError,
 )
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -54,13 +54,25 @@ from .compliance import (
     overall_status,
     run_compliance_checks,
 )
-from .models import ApplicationData, ExtractedLabelData, LabelCheckResult, ReviewResult
+from .cv_typesize import evaluate_type_size_from_image_bytes
+from .models import (
+    ApplicationData,
+    CalibrationMethod,
+    ExtractedLabelData,
+    LabelCheckResult,
+    ReviewResult,
+    TypeSizeMeasurement,
+)
 from .auth import require_demo_access, demo_username, auth_enabled
 from .limiter import (
     limiter,
     rate_limit_exceeded_handler,
     get_review_rate_limit,
     daily_spend_guard,
+)
+from .prefill import (
+    BUILTIN_COLA_PRESETS,
+    parse_application_template,
 )
 
 # Module-level logger. In production configure JSON handler for log aggregators.
@@ -87,7 +99,6 @@ def set_claude_semaphore_limit(limit: int) -> None:
     global _claude_semaphore, _CLAUDE_SEMAPHORE_LIMIT
     _CLAUDE_SEMAPHORE_LIMIT = limit
     _claude_semaphore = asyncio.Semaphore(limit)
-
 
 
 def _log_request_timing(
@@ -135,7 +146,7 @@ _cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] i
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -193,60 +204,99 @@ def demo_info() -> dict:
     return {"auth_enabled": auth_enabled(), "username": demo_username()}
 
 
+@app.get("/api/cola/presets")
+def list_cola_presets() -> list[dict]:
+    """Return built-in COLA application sample presets for one-click demos."""
+    return BUILTIN_COLA_PRESETS
+
+
+@app.post("/api/cola/parse-template")
+async def parse_cola_template(file: UploadFile = File(...)) -> list[ApplicationData]:
+    """Parse an uploaded CSV or JSON file into validated ApplicationData objects.
+
+    Returns HTTP 422 with actionable error detail on invalid structure, bad headers,
+    missing mandatory fields, or malformed JSON/CSV. Never returns 401 or 500.
+    """
+    try:
+        content = await file.read()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not read uploaded template file '{file.filename}': {exc}",
+        ) from exc
+
+    try:
+        results = await run_in_threadpool(
+            parse_application_template,
+            content,
+            file.filename or "template.csv",
+        )
+    except ValueError as exc:
+        # User-fixable template input error -> HTTP 422 Unprocessable Entity
+        _log.info("Template parse validation error for '%s': %s", file.filename, exc)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Unexpected error parsing template '%s': %s", file.filename, exc)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Error parsing template file '{file.filename}': {exc}",
+        ) from exc
+
+    return results
+
+
 # Accepted image container signatures (magic bytes). Validating the actual
 # file content — not the client-supplied MIME type or extension — prevents a
 # spoofed/renamed non-image file from reaching the image pipeline.
-_IMAGE_SIGNATURES: tuple[bytes, ...] = (
-    b"\xff\xd8\xff",          # JPEG
-    b"\x89PNG\r\n\x1a\n",   # PNG
-    b"GIF87a",                 # GIF
-    b"GIF89a",                 # GIF
-    b"BM",                     # BMP
-    b"II*\x00",                # TIFF (little-endian)
-    b"MM\x00*",                # TIFF (big-endian)
-)
+_IMAGE_SIGNATURES: list[tuple[bytes, ...]] = [
+    (b"\xff\xd8\xff",),               # JPEG / JFIF / EXIF
+    (b"\x89PNG\r\n\x1a\n",),          # PNG
+    (b"GIF87a", b"GIF89a"),            # GIF
+    (b"BM",),                          # BMP
+    (b"II*\x00", b"MM\x00*"),          # TIFF (little / big endian)
+    (b"RIFF",),                        # WEBP (starts RIFF....WEBP)
+]
 
 
-def _reject_if_not_image(data: bytes, filename: str) -> str | None:
-    """Return a user-facing error if 'data' is not a recognized image, else None.
-
-    WEBP ('RIFF'....'WEBP') is handled as a special case. HEIC/HEIF are not
-    listed here and will be rejected with a clear message (Pillow cannot decode
-    them without extra plugins); the frontend already advises re-taking as JPEG.
-    """
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return None
-    if any(data.startswith(sig) for sig in _IMAGE_SIGNATURES):
-        return None
-    _log.info("Rejected non-image upload '%s' (unrecognized signature).", filename)
-    return (
-        f"File '{filename}' is not a supported image. Please upload a JPEG, "
-        f"PNG, WEBP, GIF, BMP, or TIFF photo of the label."
-    )
+def _is_image_bytes(data: bytes) -> bool:
+    """Return True if data starts with a recognized image format signature."""
+    if len(data) < 4:
+        return False
+    for sigs in _IMAGE_SIGNATURES:
+        if any(data.startswith(sig) for sig in sigs):
+            # Extra check for WEBP: bytes 8..12 must be 'WEBP'
+            if data.startswith(b"RIFF"):
+                return len(data) >= 12 and data[8:12] == b"WEBP"
+            return True
+    return False
 
 
 async def _read_and_validate_file(
     file: UploadFile,
 ) -> tuple[bytes, str] | str:
-    """Read one uploaded file, validate it, and return pre-processed bytes.
+    """Read an UploadFile, check size limit, validate magic bytes, and run
+    Layer A image preparation (enhance contrast/sharpness + cap resolution).
 
-    Returns ``(processed_jpeg_bytes, filename)`` on success, or an error
-    string on failure. Using pre-processed bytes means extract_label_fields
-    can skip the Pillow pipeline entirely (preprocessed=True), avoiding
-    double-processing the same image.
+    Returns (prepared_bytes, media_type) on success, or an error string on
+    failure. Preparing the image here means the Pillow work happens once per
+    upload rather than being repeated inside extract_label_fields.
     """
-    image_bytes = await file.read()
-    if len(image_bytes) > MAX_FILE_SIZE:
-        return f"File '{file.filename}' exceeds 10 MB limit."
-    sig_error = _reject_if_not_image(image_bytes, file.filename or "label.jpg")
-    if sig_error:
-        return sig_error
     try:
-        processed_bytes, _media_type = await run_in_threadpool(
-            prepare_image,
-            image_bytes,
-            file.filename or "label.jpg",
-        )
+        content = await file.read()
+    except Exception as exc:
+        return f"Could not read {file.filename}: {exc}"
+
+    if not content:
+        return f"{file.filename} is empty."
+    if len(content) > MAX_FILE_SIZE:
+        return f"{file.filename} exceeds 10 MB limit ({len(content) / 1024 / 1024:.1f} MB)."
+    if not _is_image_bytes(content):
+        return f"{file.filename} is not a supported image file (JPEG, PNG, GIF, BMP, TIFF, WEBP)."
+
+    # Offload Pillow preparation to thread pool so the event loop stays responsive
+    try:
+        prepared_bytes = await run_in_threadpool(prepare_image, content, file.filename or "")
+        return prepared_bytes, _media_type_for(file.filename or "")
     except ImageQualityError as exc:
         # Surface the user-friendly message directly - no internal details.
         # HTTP 422 Unprocessable Entity signals a client-fixable input problem
@@ -254,40 +304,26 @@ async def _read_and_validate_file(
         _log.info("Image quality rejected for '%s': %s", file.filename, exc.user_message)
         return exc.user_message
     except ValueError as exc:
-        # Unexpected decode error - include filename but not internal exc detail.
-        _log.warning("Decode error for '%s': %s", file.filename, exc)
-        return f"File '{file.filename}' could not be read as a valid image. Please submit a new photo."
-    return processed_bytes, file.filename or "label.jpg"
+        return f"Could not process {file.filename}: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("Image preparation unexpected error for '%s': %s", file.filename, exc)
+        return f"Could not process {file.filename} as an image."
 
 
-async def _read_images(
+async def _read_and_validate_files(
     files: list[UploadFile],
-    filenames: list[str],
 ) -> list[tuple[bytes, str]] | str:
-    """Read and validate all uploaded files concurrently.
-
-    Returns a list of (processed_bytes, filename) tuples on success, or an
-    error string describing the first file that failed validation.
-    """
-    # Enforce maximum-images-per-label limit before allocating any I/O resources.
-    # Returning a plain string signals an error to callers (_extract_fields).
+    """Read and validate all files concurrently using asyncio.gather."""
+    if not files:
+        return "No files provided."
     if len(files) > MAX_IMAGES_PER_LABEL:
-        _log.warning(
-            "Upload rejected: %d files submitted, limit is %d.",
-            len(files),
-            MAX_IMAGES_PER_LABEL,
-        )
-        return (
-            f"A maximum of {MAX_IMAGES_PER_LABEL} images may be uploaded per label. "
-            f"You submitted {len(files)}. Please resubmit with 4 or fewer photos."
-        )
-    read_results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
-    images: list[tuple[bytes, str]] = []
-    for result in read_results:
-        if isinstance(result, str):
-            return result
-        images.append(result)
-    return images
+        return f"Too many images for a single label: got {len(files)}, maximum is {MAX_IMAGES_PER_LABEL}."
+
+    results = await asyncio.gather(*[_read_and_validate_file(f) for f in files])
+    for res in results:
+        if isinstance(res, str):
+            return res  # Return the first validation error encountered
+    return results  # type: ignore[return-value]
 
 
 @dataclass
@@ -295,58 +331,52 @@ class ExtractionMetrics:
     """Holds timing and call counts for an extraction operation."""
     claude_time_ms: int = 0
     claude_calls: int = 0
+    images: list[tuple[bytes, str]] = field(default_factory=list)
+
+
+_read_images = _read_and_validate_files
 
 
 async def _extract_fields_with_retry(
     images: list[tuple[bytes, str]],
     metrics: ExtractionMetrics | None = None,
 ) -> tuple[ExtractedLabelData | None, str | None]:
-    """Call extract_label_fields with concurrency gating and one automatic retry on transient errors.
+    """Run extract_label_fields with concurrency gating and retry on transient Claude API errors.
 
-    Images are passed as pre-processed JPEG bytes (preprocessed=True) so
-    Claude client skips the Pillow pipeline entirely.
-
-    Returns ``(extracted, None)`` on success or ``(None, error_msg)`` on
-    failure after exhausting retries.
+    If MAX_CONCURRENT_CLAUDE_CALLS is reached, waits up to CLAUDE_CONCURRENCY_TIMEOUT
+    seconds to acquire the semaphore before returning a busy message.
     """
     try:
         await asyncio.wait_for(_claude_semaphore.acquire(), timeout=_CLAUDE_SEMAPHORE_TIMEOUT_S)
     except asyncio.TimeoutError:
-        _log.warning(
-            "Claude concurrency limit reached (capacity=%d, timeout=%.1fs). Rejecting with busy message.",
-            _CLAUDE_SEMAPHORE_LIMIT,
-            _CLAUDE_SEMAPHORE_TIMEOUT_S,
-        )
-        return (
-            None,
-            "The review service is currently processing a high volume of label requests. "
-            "Please wait a moment and resubmit.",
-        )
+        _log.warning("Claude semaphore acquisition timed out after %.1fs", _CLAUDE_SEMAPHORE_TIMEOUT_S)
+        return None, "System is currently busy processing other label reviews. Please try again in a few seconds."
 
     try:
         for attempt in range(2):
             call_start = time.monotonic()
             try:
-                if metrics is not None:
-                    metrics.claude_calls += 1
                 extracted = await run_in_threadpool(
-                    extract_label_fields, images, True
+                    extract_label_fields, images, preprocessed=True
                 )
                 if metrics is not None:
                     metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                    metrics.claude_calls += 1
                 return extracted, None
-            except AuthenticationError:
-                if metrics is not None:
-                    metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-                return None, "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
             except _RETRYABLE as exc:
                 if metrics is not None:
                     metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                    metrics.claude_calls += 1
                 if attempt == 0:
-                    # First attempt failed on a transient error - wait then retry.
+                    _log.warning(
+                        "Transient Claude error on attempt 1 (%s: %s) - retrying in %.1fs",
+                        type(exc).__name__,
+                        exc,
+                        _RETRY_DELAY_S,
+                    )
                     await asyncio.sleep(_RETRY_DELAY_S)
                     continue
-                # Second attempt also failed.
+                _log.error("Claude error on retry attempt 2: %s", exc)
                 if isinstance(exc, RateLimitError):
                     return None, "Anthropic rate limit reached. Please try again shortly."
                 if isinstance(exc, APITimeoutError):
@@ -356,20 +386,27 @@ async def _extract_fields_with_retry(
             except APIStatusError as exc:
                 if metrics is not None:
                     metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-                # 529 = overloaded; retry once.
-                if attempt == 0 and exc.status_code == 529:
-                    await asyncio.sleep(_RETRY_DELAY_S)
-                    continue
-                return None, f"Claude API error ({exc.status_code}): {exc.message}"
-            except ValueError as exc:
+                    metrics.claude_calls += 1
+                if exc.status_code == 401:
+                    return None, "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
+                if exc.status_code == 429:
+                    return None, "Anthropic rate limit reached. Please try again shortly."
+                if exc.status_code in (500, 529):
+                    return None, "Claude API is currently overloaded. Please try again shortly."
+                _log.warning("Claude API error: %s", exc)
+                return None, f"Claude API error ({exc.status_code}). Please try again."
+            except AuthenticationError:
+                return None, "API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable."
+            except RateLimitError:
                 if metrics is not None:
                     metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
-                # Non-alcohol label guard (raised by extract_label_fields when
-                # is_alcohol_beverage_label is False). Surface directly to user.
-                return None, str(exc)
+                    metrics.claude_calls += 1
+                return None, "Anthropic rate limit reached. Please try again shortly."
             except RuntimeError as exc:
                 if metrics is not None:
                     metrics.claude_time_ms += int((time.monotonic() - call_start) * 1000)
+                if "busy" in str(exc).lower():
+                    return None, str(exc)
                 _log.warning("Runtime extraction error: %s", exc)
                 return None, "Could not process label image(s). Please submit clearer photos."
             except Exception as exc:  # noqa: BLE001
@@ -382,30 +419,23 @@ async def _extract_fields_with_retry(
         _claude_semaphore.release()
 
 
-
-
 async def _extract_fields(
     files: list[UploadFile],
     filenames: list[str],
     photo_roles: list[str] | None = None,
     metrics: ExtractionMetrics | None = None,
 ) -> tuple[ExtractedLabelData | None, str | None, list[str]]:
-    """Shared image-read + Claude-extraction pipeline with multi-photo merging.
-
-    When photo_roles identifies multiple distinct panels (e.g. "front" and "back"),
-    each photo is extracted concurrently via asyncio.gather and merged via
-    merge_extracted_label_data.
-
-    Returns (merged_extraction, error_msg, effective_roles).
+    """Validate files, execute extraction (single call or per-role concurrent
+    calls merged), and return (extracted, error_msg, effective_roles).
     """
-    if not (1 <= len(files) <= MAX_IMAGES_PER_LABEL):
-        return None, f"Upload between 1 and {MAX_IMAGES_PER_LABEL} images per label.", []
-
-    images_or_error = await _read_images(files, filenames)
+    images_or_error = await _read_images(files)
     if isinstance(images_or_error, str):
         return None, images_or_error, []
 
     images: list[tuple[bytes, str]] = images_or_error
+    if metrics is not None:
+        metrics.images = images
+
     effective_roles: list[str] = photo_roles or []
     unique_roles = set(effective_roles) if effective_roles else set()
     do_per_role = (
@@ -414,39 +444,38 @@ async def _extract_fields(
         and len(unique_roles) > 1
     )
 
-    if not do_per_role:
-        extracted, error_msg = await _extract_fields_with_retry(images, metrics=metrics)
-        return extracted, error_msg, effective_roles
-
-    role_metrics = [ExtractionMetrics() for _ in images]
-    gather_results = await asyncio.gather(
-        *[
-            _extract_fields_with_retry([img], metrics=m)
-            for img, m in zip(images, role_metrics)
+    if do_per_role:
+        _log.info(
+            "Multi-photo per-role extraction: %d photos with roles %s",
+            len(images),
+            effective_roles,
+        )
+        tasks = [
+            _extract_fields_with_retry([img], metrics=metrics)
+            for img in images
         ]
-    )
+        results = await asyncio.gather(*tasks)
+        for ext, err in results:
+            if err:
+                return None, err, effective_roles
 
-    if metrics is not None:
-        for rm in role_metrics:
-            metrics.claude_calls += rm.claude_calls
-            metrics.claude_time_ms += rm.claude_time_ms
+        extractions = [ext for ext, _ in results if ext is not None]
+        extracted = merge_extracted_label_data(extractions, effective_roles)
+        return extracted, None, effective_roles
 
-    extractions: list[ExtractedLabelData] = []
-    for (ext, err), role in zip(gather_results, effective_roles):
-        if err or ext is None:
-            return None, f"Extraction failed for {role} photo: {err}", effective_roles
-        extractions.append(ext)
+    extracted, error_msg = await _extract_fields_with_retry(images, metrics=metrics)
+    return extracted, error_msg, effective_roles
 
-    merged = await run_in_threadpool(merge_extracted_label_data, extractions, effective_roles)
-    return merged, None, effective_roles
 
 async def _review_single(files: list[UploadFile], application: ApplicationData) -> ReviewResult:
-    """Run an application-vs-label review for one label's image(s)."""
+    """Execute review for a single label: read files, extract fields with Claude,
+    run 27 CFR 16.22 physical type-size verification, and run compliance matching.
+    """
     start = time.monotonic()
     filenames = [f.filename or "unknown" for f in files]
     metrics = ExtractionMetrics()
 
-    extracted, error_msg, _roles = await _extract_fields(files, filenames, metrics=metrics)
+    extracted, error_msg, _ = await _extract_fields(files, filenames, metrics=metrics)
     wall_time_ms = int((time.monotonic() - start) * 1000)
 
     if error_msg:
@@ -467,7 +496,37 @@ async def _review_single(files: list[UploadFile], application: ApplicationData) 
             error=error_msg,
         )
 
-    fields = run_compliance_checks(application, extracted)
+    # 27 CFR 16.22 Option A Scale Marker Type-Size Verification
+    type_size_details: TypeSizeMeasurement | None = None
+    if metrics.images:
+        gw_locs = [loc for loc in extracted.field_locations if getattr(loc, "field", None) == "government_warning"]
+        gw_bbox = (gw_locs[0].x, gw_locs[0].y, gw_locs[0].width, gw_locs[0].height) if gw_locs else None
+
+        for img_bytes, img_name in metrics.images:
+            try:
+                ts_res = await run_in_threadpool(
+                    evaluate_type_size_from_image_bytes,
+                    img_bytes,
+                    filename=img_name,
+                    net_contents=application.net_contents or extracted.net_contents,
+                    gw_bbox=gw_bbox,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("Type-size evaluation error in _review_single for '%s': %s", img_name, exc)
+                ts_res = TypeSizeMeasurement(
+                    method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+                    required_min_height_mm=2.0,
+                    state="cannot_measure",
+                    verification_note=f"Type-size evaluation encountered an unexpected condition ({type(exc).__name__}). Physical gauge measurement recommended.",
+                )
+            # If marker was found in this photo, use its measurement
+            if ts_res.method not in (CalibrationMethod.UNCALIBRATED_ESTIMATE, CalibrationMethod.NONE):
+                type_size_details = ts_res
+                break
+            if type_size_details is None:
+                type_size_details = ts_res
+
+    fields = run_compliance_checks(application, extracted, type_size_details=type_size_details)
     status = overall_status(fields)
     _log_request_timing(
         endpoint="/api/review",
@@ -581,18 +640,13 @@ async def review_labels_batch_stream(
     image_counts: str = Form(...),
     applications: str = Form(...),
 ) -> StreamingResponse:
-    """Streaming batch review — yields NDJSON result lines as each label completes.
+    """Streaming batch review: yields NDJSON objects as each label review finishes.
 
-    This endpoint processes labels sequentially and streams each result as a
-    newline-terminated JSON object the moment it is ready, rather than waiting
-    for all labels to finish. Clients can begin rendering results immediately,
-    dramatically improving perceived performance for large batches.
-
-    Response format: Content-Type: application/x-ndjson
-    Each line is a complete JSON object with either a ReviewResult payload or
-    an error object: {"index": N, "result": {...}} or {"index": N, "error": "..."}
-
-    A sentinel line {"done": true, "total": N} is emitted after all results.
+    Pre-reads all file bytes upfront (concurrently) before streaming, then
+    processes each label in sequence, immediately yielding:
+      {"index": int, "result": ReviewResult}
+    and concluding with:
+      {"done": true, "total": int}
     """
     batch_start = time.monotonic()
     try:
@@ -631,22 +685,18 @@ async def review_labels_batch_stream(
 
     daily_spend_guard.record_request(len(application_list))
 
-    label_file_groups: list[list[UploadFile]] = []
+    # Read all files concurrently before the response stream begins
+    async def _read_file_entry(f: UploadFile) -> tuple[bytes, str]:
+        content = await f.read()
+        return content, f.filename or "unknown"
+
+    all_file_data = await asyncio.gather(*[_read_file_entry(f) for f in files])
+
+    file_data_groups: list[list[tuple[bytes, str]]] = []
     offset = 0
     for count in counts:
-        label_file_groups.append(files[offset: offset + count])
+        file_data_groups.append(all_file_data[offset: offset + count])
         offset += count
-
-    # Read all file bytes eagerly before entering the async generator.
-    # UploadFile objects can only be read once; we must do it before streaming
-    # begins so the generator can operate without awaiting on request state.
-    file_data_groups: list[list[tuple[bytes, str]]] = []
-    for group in label_file_groups:
-        group_data = []
-        for f in group:
-            raw = await f.read()
-            group_data.append((raw, f.filename or "label.jpg"))
-        file_data_groups.append(group_data)
 
     async def generate():
         total_claude_time_ms = 0
@@ -656,40 +706,73 @@ async def review_labels_batch_stream(
             claude_call_start = 0
             claude_call_duration_ms = 0
             try:
-                # Build UploadFile-compatible tuples for _review_single by
-                # re-wrapping bytes. Since _review_single reads from UploadFile
-                # objects, we use the lower-level helpers directly here.
-                processed_images: list[tuple[bytes, str]] = []
-                for raw_bytes, fname in file_data:
-                    try:
-                        proc_bytes, _ = await run_in_threadpool(prepare_image, raw_bytes, fname)
-                        processed_images.append((proc_bytes, fname))
-                    except ImageQualityError as exc:
-                        raise ValueError(exc.user_message) from exc
+                # Validate and prepare images in thread pool
+                prepared_or_errors = await asyncio.gather(
+                    *[
+                        run_in_threadpool(
+                            lambda c=content, fn=fname: (
+                                prepare_image(c, fn),
+                                _media_type_for(fn),
+                            )
+                            if _is_image_bytes(c) and len(c) <= MAX_FILE_SIZE and len(c) > 0
+                            else (
+                                None,
+                                f"{fn} exceeds 10 MB limit." if len(c) > MAX_FILE_SIZE
+                                else f"{fn} is empty." if len(c) == 0
+                                else f"{fn} is not a supported image file."
+                            )
+                        )
+                        for content, fname in file_data
+                    ]
+                )
+
+                for prepared, err_or_mime in prepared_or_errors:
+                    if prepared is None:
+                        raise ValueError(err_or_mime)
+
+                processed_images = [
+                    (prep, fname)
+                    for (prep, _), (_, fname) in zip(prepared_or_errors, file_data)
+                ]
 
                 claude_call_start = time.monotonic()
-                try:
-                    await asyncio.wait_for(_claude_semaphore.acquire(), timeout=_CLAUDE_SEMAPHORE_TIMEOUT_S)
-                except asyncio.TimeoutError:
-                    _log.warning(
-                        "Streaming batch index %d: Claude concurrency limit reached (capacity=%d).",
-                        idx,
-                        _CLAUDE_SEMAPHORE_LIMIT,
-                    )
-                    raise RuntimeError("The review service is currently busy. Please wait a moment and try again.")
-                try:
-                    extracted = await run_in_threadpool(
-                        extract_label_fields,
-                        processed_images,
-                        True,  # preprocessed=True
-                    )
-                finally:
-                    _claude_semaphore.release()
+                extracted, extract_err = await _extract_fields_with_retry(processed_images)
+                if extract_err or extracted is None:
+                    raise RuntimeError(extract_err or "Extraction returned no data.")
 
                 claude_call_duration_ms = int((time.monotonic() - claude_call_start) * 1000)
                 total_claude_time_ms += claude_call_duration_ms
-                fields = run_compliance_checks(app_data, extracted)
-                status = overall_status([f.status for f in fields])
+
+                # 27 CFR 16.22 Option A Scale Marker Type-Size Verification
+                type_size_details: TypeSizeMeasurement | None = None
+                if processed_images:
+                    gw_locs = [loc for loc in extracted.field_locations if getattr(loc, "field", None) == "government_warning"]
+                    gw_bbox = (gw_locs[0].x, gw_locs[0].y, gw_locs[0].width, gw_locs[0].height) if gw_locs else None
+                    for img_bytes, img_name in processed_images:
+                        try:
+                            ts_res = await run_in_threadpool(
+                                evaluate_type_size_from_image_bytes,
+                                img_bytes,
+                                filename=img_name,
+                                net_contents=app_data.net_contents or extracted.net_contents,
+                                gw_bbox=gw_bbox,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            _log.warning("Type-size evaluation error in stream for '%s': %s", img_name, exc)
+                            ts_res = TypeSizeMeasurement(
+                                method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+                                required_min_height_mm=2.0,
+                                state="cannot_measure",
+                                verification_note=f"Type-size evaluation encountered an unexpected condition ({type(exc).__name__}). Physical gauge measurement recommended.",
+                            )
+                        if ts_res.method not in (CalibrationMethod.UNCALIBRATED_ESTIMATE, CalibrationMethod.NONE):
+                            type_size_details = ts_res
+                            break
+                        if type_size_details is None:
+                            type_size_details = ts_res
+
+                fields = run_compliance_checks(app_data, extracted, type_size_details=type_size_details)
+                status = overall_status(fields)
                 wall_ms = int((time.monotonic() - start) * 1000)
                 result = ReviewResult(
                     filenames=[fname for _, fname in processed_images],
@@ -770,7 +853,6 @@ async def review_labels_batch_stream(
     )
 
 
-
 async def _label_check_single(
     files: list[UploadFile],
     confirmed_beverage_type: str | None = None,
@@ -808,11 +890,40 @@ async def _label_check_single(
             error=error_msg,
         )
 
+    # 27 CFR 16.22 Option A Scale Marker Type-Size Verification
+    type_size_details: TypeSizeMeasurement | None = None
+    if metrics.images:
+        gw_locs = [loc for loc in extracted.field_locations if getattr(loc, "field", None) == "government_warning"]
+        gw_bbox = (gw_locs[0].x, gw_locs[0].y, gw_locs[0].width, gw_locs[0].height) if gw_locs else None
+        for img_bytes, img_name in metrics.images:
+            try:
+                ts_res = await run_in_threadpool(
+                    evaluate_type_size_from_image_bytes,
+                    img_bytes,
+                    filename=img_name,
+                    net_contents=extracted.net_contents,
+                    gw_bbox=gw_bbox,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("Type-size evaluation error in _label_check_single for '%s': %s", img_name, exc)
+                ts_res = TypeSizeMeasurement(
+                    method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+                    required_min_height_mm=2.0,
+                    state="cannot_measure",
+                    verification_note=f"Type-size evaluation encountered an unexpected condition ({type(exc).__name__}). Physical gauge measurement recommended.",
+                )
+            if ts_res.method not in (CalibrationMethod.UNCALIBRATED_ESTIMATE, CalibrationMethod.NONE):
+                type_size_details = ts_res
+                break
+            if type_size_details is None:
+                type_size_details = ts_res
+
     type_confirmed = confirmed_beverage_type is not None
     try:
         checks = check_label_requirements(
             extracted,
             confirmed_beverage_type=confirmed_beverage_type,
+            type_size_details=type_size_details,
         )
     except LowConfidenceError as exc:
         _log_request_timing(
@@ -926,9 +1037,7 @@ async def label_check_batch(
         except (json.JSONDecodeError, ValueError) as exc:
             _log.warning("Invalid photo_roles: %s", exc)
             raise HTTPException(status_code=422, detail="Invalid photo_roles.") from exc
-        if not isinstance(roles_list, list) or any(
-            not isinstance(role, str) for role in roles_list
-        ):
+        if not isinstance(roles_list, list) or any(not isinstance(r, str) for r in roles_list):
             raise HTTPException(
                 status_code=422,
                 detail="photo_roles must be a JSON array of strings.",
@@ -943,25 +1052,18 @@ async def label_check_batch(
     daily_spend_guard.record_request(len(counts))
 
     label_file_groups: list[list[UploadFile]] = []
-    label_role_groups: list[list[str] | None] = []
+    label_role_groups: list[list[str]] = []
     offset = 0
     for count in counts:
         label_file_groups.append(files[offset: offset + count])
-        if roles_list and len(roles_list) >= offset + count:
-            label_role_groups.append(roles_list[offset: offset + count])
-        else:
-            label_role_groups.append(None)
+        label_role_groups.append(roles_list[offset: offset + count] if roles_list else [])
         offset += count
 
-
+    bev_type = confirmed_beverage_type.strip() or None
     results: list[LabelCheckResult] = await asyncio.gather(
         *[
-            _label_check_single(
-                lf,
-                confirmed_beverage_type=confirmed_beverage_type or None,
-                photo_roles=lr,
-            )
-            for lf, lr in zip(label_file_groups, label_role_groups)
+            _label_check_single(lf, confirmed_beverage_type=bev_type, photo_roles=roles)
+            for lf, roles in zip(label_file_groups, label_role_groups)
         ]
     )
 

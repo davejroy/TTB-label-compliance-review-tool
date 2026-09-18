@@ -1,8 +1,9 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-python-multipart==0.0.20
+python-multipart==0.0.32
 anthropic==0.45.2
 pydantic==2.10.5
 python-dotenv==1.0.1
 Pillow==11.1.0
+opencv-python-headless==5.0.0.93
 slowapi==0.1.9

@@ -1,6 +1,6 @@
 import { authHeader } from "./authStore";
 import { ensureImagesResized } from "./imageUtils";
-import type { ApplicationData, LabelCheckResult, ReviewResult } from "./types";
+import type { ApplicationData, ColaPreset, LabelCheckResult, ReviewResult } from "./types";
 
 // In production the frontend and backend are deployed as separate Render
 // services, so the backend's hostname is baked in at build time via
@@ -73,6 +73,37 @@ async function safeFetch(url: string, init: RequestInit): Promise<Response> {
   }
   // Both attempts failed with a retryable status - return the last response.
   return lastError as Response;
+}
+
+/** GET /api/cola/presets — List built-in COLA application presets for demo. */
+export async function getColaPresets(): Promise<ColaPreset[]> {
+  const response = await safeFetch(`${API_BASE}/api/cola/presets`, {
+    method: "GET",
+    headers: { ...authHeader() },
+  });
+  if (!response.ok) {
+    const detail = await parseErrorBody(response);
+    throw new Error(`Failed to load presets (${response.status}): ${detail}`);
+  }
+  return response.json() as Promise<ColaPreset[]>;
+}
+
+/** POST /api/cola/parse-template — Upload CSV or JSON file to parse into ApplicationData[]. */
+export async function parseColaTemplate(file: File): Promise<ApplicationData[]> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await safeFetch(`${API_BASE}/api/cola/parse-template`, {
+    method: "POST",
+    headers: { ...authHeader() },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const detail = await parseErrorBody(response);
+    throw new Error(`Template import failed (${response.status}): ${detail}`);
+  }
+  return response.json() as Promise<ApplicationData[]>;
 }
 
 /** POST /api/review - Single Review mode. */
