@@ -4,12 +4,12 @@ This directory manages the existing Render backend and frontend services for the
 
 ## Safety model
 
-- Terraform manages service configuration, not application secrets.
-- Do not put \`ANTHROPIC_API_KEY\`, demo tokens, or other secrets in Terraform files or state.
-- Review \`terraform plan\` before every apply.
-- Import the existing Render services before the first apply. Importing prevents Terraform from attempting to create duplicates.
-- This module does not erase data, rotate credentials, or perform destructive workstation operations.
-- Use a protected remote Terraform state backend for team or legal/audit use. Local state is acceptable only for a controlled single-operator dry run.
+- Terraform manages service configuration, but the Render provider also reads existing environment-variable values and secret-file contents into state during import and refresh.
+- Never commit application secrets to Terraform configuration. Omission, sensitive attributes, and `lifecycle.ignore_changes` do not keep imported secrets out of state.
+- Before importing production services, configure an encrypted, access-controlled remote state backend. Treat state, backups, and saved plans as secret-bearing artifacts; never commit them. Do not import if policy prohibits storing these secrets in state.
+- Review `terraform plan` before every apply, including any proposed environment-variable or secret-file removals.
+- Import the existing Render services before the first apply to avoid duplicates.
+- Use local state only with non-production, non-secret services in a controlled single-operator dry run.
 
 The official Render provider is \`render-oss/render\`. The provider requires a Render API key and owner/workspace ID supplied outside Git.
 
