@@ -31,6 +31,12 @@ resource "render_web_service" "backend" {
       auto_deploy   = var.auto_deploy
     }
   }
+
+  # Render returns dashboard-managed variables during import. Keep Terraform
+  # from deleting or rewriting them; secrets remain managed in Render.
+  lifecycle {
+    ignore_changes = [env_vars, secret_files]
+  }
 }
 
 resource "render_static_site" "frontend" {
