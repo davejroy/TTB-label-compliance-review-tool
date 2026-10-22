@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (ignored by Git) and replace every placeholder.
+render_api_key  = "REPLACE_WITH_RENDER_API_KEY"
+render_owner_id = "REPLACE_WITH_RENDER_OWNER_ID"
+
+# Optional overrides:
+# branch                = "main"
+# backend_service_name  = "ttb-label-backend"
+# frontend_service_name = "ttb-label-frontend"
+# backend_plan          = "standard"
