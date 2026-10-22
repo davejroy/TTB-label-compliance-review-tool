@@ -118,8 +118,13 @@ npm run build   # outputs to frontend/dist
 Serve `frontend/dist` with any static file host, and run the FastAPI app
 behind a process manager (e.g. `uvicorn app.main:app` with a reverse proxy).
 Set `ANTHROPIC_API_KEY` (and optionally `CLAUDE_MODEL` and `CORS_ORIGINS`) as environment
-variables for the backend process. Note that authentication is intentionally NOT enabled
-(fail-open / zero-login product requirement) so all evaluators have immediate access.
+variables for the backend process.
+
+For the public demo, leave `DEMO_ACCESS_TOKEN` unset to preserve the zero-login evaluator
+experience. For a non-public demo, set `DEMO_ACCESS_TOKEN` and optionally
+`DEMO_USERNAME` to enable the demonstration bearer-token gate. This is not production
+authentication or authorization, and the demo must not process sensitive data. The
+application does not support an `API_AUTH_TOKEN` variable.
 
 ## Deploying to Render
 
