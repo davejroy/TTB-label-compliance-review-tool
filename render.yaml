@@ -3,9 +3,10 @@ services:
     name: ttb-label-backend
     runtime: python
     rootDir: backend
-    plan: free
+    plan: standard
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.10
@@ -18,7 +19,7 @@ services:
     name: ttb-label-frontend
     runtime: static
     rootDir: frontend
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
       - key: VITE_API_HOST
