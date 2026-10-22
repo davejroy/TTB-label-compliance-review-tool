@@ -3,5 +3,7 @@ all:
   children:
     build_hosts:
       hosts:
-        local:
-          ansible_connection: local
+        build01:
+          ansible_host: 192.0.2.10
+          ansible_user: ttbdeploy
+          ansible_connection: ssh
