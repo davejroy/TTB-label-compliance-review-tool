@@ -28,5 +28,7 @@ crash.log
 
 # Ansible
 *.retry
-infra/ansible/inventory/hosts.yml
-infra/ansible/group_vars/*/vault.yml
+infra/ansible/inventory/*.yml
+!infra/ansible/inventory/hosts.example.yml
+infra/ansible/group_vars/*.yml
+!infra/ansible/group_vars/*.example.yml
