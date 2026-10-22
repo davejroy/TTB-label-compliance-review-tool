@@ -17,3 +17,16 @@ dist/
 
 # Editor / OS
 .DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# Ansible
+*.retry
+infra/ansible/inventory/hosts.yml
+infra/ansible/group_vars/*/vault.yml

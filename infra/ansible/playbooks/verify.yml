@@ -1,0 +1,15 @@
+---
+- name: Verify the deployed backend health endpoint
+  hosts: build_hosts
+  gather_facts: false
+  vars:
+    healthcheck_url: "https://ttb-label-backend.onrender.com/api/health"
+
+  tasks:
+    - name: Request backend health
+      ansible.builtin.uri:
+        url: "{{ healthcheck_url }}"
+        method: GET
+        status_code: 200
+        return_content: false
+        timeout: 15
