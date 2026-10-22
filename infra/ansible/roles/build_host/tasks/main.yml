@@ -1,0 +1,50 @@
+---
+- name: Refresh apt metadata
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install build and diagnostic packages
+  ansible.builtin.apt:
+    name: "{{ build_packages }}"
+    state: present
+
+- name: Create the deployment group
+  ansible.builtin.group:
+    name: "{{ build_user }}"
+    state: present
+
+- name: Create a non-root deployment user
+  ansible.builtin.user:
+    name: "{{ build_user }}"
+    group: "{{ build_user }}"
+    create_home: true
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Create application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ build_user }}"
+    group: "{{ build_user }}"
+    mode: "0750"
+  loop:
+    - "{{ application_root }}"
+    - "{{ application_root }}/releases"
+    - "{{ application_root }}/shared"
+
+- name: Allow SSH through UFW when explicitly enabled
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    from_ip: "{{ ssh_allowed_cidr }}"
+  when: enable_ufw | bool
+
+- name: Enable UFW only when explicitly enabled
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+  when: enable_ufw | bool
