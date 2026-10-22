@@ -10,5 +10,5 @@ output "frontend_service_id" {
 
 output "backend_health_url" {
   description = "Backend health endpoint."
-  value       = "https://" + var.backend_host + "/api/health"
+  value       = format("https://%s/api/health", var.backend_host)
 }
