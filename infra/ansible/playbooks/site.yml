@@ -9,18 +9,18 @@
     application_root: /opt/ttb-label-compliance
     enable_ufw: false
     ssh_allowed_cidr: ""
+    node_major_version: "22"
 
     build_packages:
       - ca-certificates
       - curl
+      - gnupg
       - git
       - jq
       - build-essential
       - python3
       - python3-venv
       - python3-pip
-      - nodejs
-      - npm
 
   pre_tasks:
     - name: Require a Debian-family host
