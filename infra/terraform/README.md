@@ -46,3 +46,10 @@ terraform apply tfplan
 \`\`\`
 
 Do not run apply from an untrusted or compromised workstation. Use a clean, authenticated operator or CI environment and retain the plan and resulting state according to the project’s change-control policy.
+
+
+## Important state and secret warning
+
+The Render provider can read existing dashboard-managed environment variables and secret-file contents into Terraform state during import. \`sensitive\` and \`ignore_changes\` help prevent accidental changes, but they do not guarantee that imported values are absent from state or plan artifacts.
+
+Use protected, access-controlled state and plan storage. If policy forbids production secrets in Terraform state, do not import the production backend into Terraform; manage it through Render/Blueprint controls that keep secrets outside Terraform state. Never keep production state or plan files on an untrusted or compromised workstation.
