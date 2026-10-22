@@ -43,7 +43,9 @@ resource "render_static_site" "frontend" {
   auto_deploy    = var.auto_deploy
 
   env_vars = {
-    VITE_API_HOST = var.backend_host
+    VITE_API_HOST = {
+      value = var.backend_host
+    }
   }
 
   routes = [
