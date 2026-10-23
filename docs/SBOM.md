@@ -100,7 +100,7 @@ npm audit
 
 | Date | Change | Author |
 |---|---|---|
-| 2026-07-07 | Initial SBOM authored | davejroy |
-| 2026-09-09 | Updated transitive dependency pins and added latency logging dependencies | Kilroy_Lives |
-| 2026-09-16 | Updated OpenCV and SlowAPI dependencies | Kilroy_Lives |
-| 2026-09-18 | Conducted dependency security audit (`pip-audit`, `npm audit`), bumped `python-multipart` to `0.0.32`, applied `npm audit fix`, and documented CVE review rationale | Kilroy_Lives |
+| 2026-07-07 | Initial SBOM authored | Maintainer |
+| 2026-09-09 | Updated transitive dependency pins and added latency logging dependencies | Maintainer |
+| 2026-09-16 | Updated OpenCV and SlowAPI dependencies | Maintainer |
+| 2026-09-18 | Conducted dependency security audit (`pip-audit`, `npm audit`), bumped `python-multipart` to `0.0.32`, applied `npm audit fix`, and documented CVE review rationale | Maintainer |

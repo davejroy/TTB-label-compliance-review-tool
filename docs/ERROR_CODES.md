@@ -80,9 +80,9 @@ This document lists all user-facing error messages returned by the API, their ca
 
 | Date | Change | Author |
 |---|---|---|
-| 2026-09-18 | Added fallback `cannot_measure` entry for unhandled CV exceptions during type-size evaluation | Kilroy_Lives |
-| 2026-09-16 | Added rate limiting and daily spend guard error codes | Kilroy_Lives |
-| 2026-09-09 | Added image quality diagnostics and low confidence error codes | Kilroy_Lives |
+| 2026-09-18 | Added fallback `cannot_measure` entry for unhandled CV exceptions during type-size evaluation | Maintainer |
+| 2026-09-16 | Added rate limiting and daily spend guard error codes | Maintainer |
+| 2026-09-09 | Added image quality diagnostics and low confidence error codes | Maintainer |
 
 ---
 

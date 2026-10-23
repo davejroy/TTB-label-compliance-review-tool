@@ -162,20 +162,20 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 
 | Date | Change | Author |
 |---|---|---|
-| 2026-07-07 | Initial architecture document created under documentation-governance skill | davejroy |
-| 2026-07-08 | Added Related Documentation cross-links; added CONFIGURATION.md and DEPLOYMENT.md references | davejroy |
-| 2026-09-09 | Added structured RequestTiming latency logging and concurrent multi-photo extraction documentation | Kilroy_Lives |
-| 2026-09-09 | Added field-test documentation suite (`docs/field-tests/`) and synthetic test fixtures for 19 scenarios | Kilroy_Lives |
-| 2026-09-16 | Added performance, UX, and simplification analysis (`docs/PERFORMANCE_UX_ANALYSIS.md`) and fixed demo auth header propagation | Kilroy_Lives |
-| 2026-09-16 | Added in-app Instructions/Help guide modal (`InstructionsModal.tsx`) and header trigger button | Kilroy_Lives |
-| 2026-09-16 | Implemented deterministic brand containment guard, strict GW uppercase casing, structured missing GW failure, TTB-200 standards of fill modernization, and 27 CFR 16.22 honesty advisory | Kilroy_Lives |
-| 2026-09-18 | Integrated 27 CFR 16.22 Option A scale marker Computer Vision pipeline, fail-open exception handling, and uncalibrated advisory mode | Kilroy_Lives |
-| 2026-09-18 | Implemented COLA application pre-fill MVP with CSV/JSON import and demo presets | Kilroy_Lives |
-| 2026-09-18 | Documented 27 CFR 16.22 Option A CV type-size measurement, COLA pre-fill, fail-open rate limiting/concurrency, and always-on Starter hosting decision | Kilroy_Lives |
+| 2026-07-07 | Initial architecture document created under documentation-governance skill | Maintainer |
+| 2026-07-08 | Added Related Documentation cross-links; added CONFIGURATION.md and DEPLOYMENT.md references | Maintainer |
+| 2026-09-09 | Added structured RequestTiming latency logging and concurrent multi-photo extraction documentation | Maintainer |
+| 2026-09-09 | Added field-test documentation suite (`docs/field-tests/`) and synthetic test fixtures for 19 scenarios | Maintainer |
+| 2026-09-16 | Added performance, UX, and simplification analysis (`docs/PERFORMANCE_UX_ANALYSIS.md`) and fixed demo auth header propagation | Maintainer |
+| 2026-09-16 | Added in-app Instructions/Help guide modal (`InstructionsModal.tsx`) and header trigger button | Maintainer |
+| 2026-09-16 | Implemented deterministic brand containment guard, strict GW uppercase casing, structured missing GW failure, TTB-200 standards of fill modernization, and 27 CFR 16.22 honesty advisory | Maintainer |
+| 2026-09-18 | Integrated 27 CFR 16.22 Option A scale marker Computer Vision pipeline, fail-open exception handling, and uncalibrated advisory mode | Maintainer |
+| 2026-09-18 | Implemented COLA application pre-fill MVP with CSV/JSON import and demo presets | Maintainer |
+| 2026-09-18 | Documented 27 CFR 16.22 Option A CV type-size measurement, COLA pre-fill, fail-open rate limiting/concurrency, and always-on Starter hosting decision | Maintainer |
 
 ## Related Documentation
 
-- [ALWAYS_ON_HOSTING.md](./ALWAYS_ON_HOSTING.md) - always-on hosting strategy and Render vs. Homelab comparison.
+- [ALWAYS_ON_HOSTING.md](./ALWAYS_ON_HOSTING.md) - always-on hosting strategy and Render vs. self-hosted comparison.
 - [TYPE_SIZE_16_22_DESIGN.md](./TYPE_SIZE_16_22_DESIGN.md) - architectural design for calibrated 27 CFR 16.22 physical type-size verification.
 - [ACCEPTANCE_CHECKLIST.md](./field-tests/typesize/ACCEPTANCE_CHECKLIST.md) - field acceptance checklist for calibrated type size verification.
 - [PERFORMANCE_UX_ANALYSIS.md](./PERFORMANCE_UX_ANALYSIS.md) - ranked performance, UX, and simplification recommendations matrix.

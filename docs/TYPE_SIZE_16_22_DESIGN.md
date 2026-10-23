@@ -1,7 +1,7 @@
 # Calibrated 27 CFR 16.22 Government Warning Type-Size Measurement Design
 
 - **Status:** Proposed (Design Specification — Zero Implementation in this PR)
-- **Author:** Kilroy_Lives / Claude Engineering
+- **Author:** Project Maintainer / Claude Engineering
 - **Target Repository:** `davejroy/TTB-label-compliance-review-tool-dev`
 - **Scope:** Technical Architecture, Mathematical Foundations, UX Flow, State Model, and Acceptance Criteria for Calibrated Physical Millimeter (mm) Type-Size Verification under 27 CFR 16.22.
 
@@ -42,7 +42,7 @@ All designs in this specification adhere strictly to the repository's foundation
 | **No Invented Measurements** | If calibration markers or geometric bounds are missing, degraded, or ambiguous, the engine **must never synthesize or guess millimeter numbers**. It must return `cannot_measure` or fall back to the existing `advisory(needs_review)` state. |
 | **Pessimistic Safety (Prefer Retake/Review over False Pass)** | A false pass is unacceptable under federal regulatory standards. Edge cases or high measurement variance must fail-safe to `needs_review` or trigger guided retake prompts. |
 | **Feature Flags Preserved** | `USE_FAST_EXTRACTION` remains default `false` (Sonnet vision default). Calibration and CV routines run as fast deterministic preprocessing or alongside vision extraction. |
-| **Statutory Hard-Fails Unchanged** | Strict statutory checks (W02 missing warning hard fail, W03 uppercase casing `GOVERNMENT WARNING:`, brand containment guard, T.D. TTB-200 fill checks) remain immutable. Type-size evaluation is layered on top of, and does not dilute, text compliance. |
+| **Statutory Hard-Fails Unchanged** | Strict statutory checks (W02 missing warning hard fail, W03 uppercase casing `GOVERNMENT WARNING:`, brand containment guard, T.D. TTB-200 fill checks) remain in force, unchanged. Type-size evaluation is layered on top of, and does not dilute, text compliance. |
 
 ---
 
@@ -248,7 +248,7 @@ Input: ExtractedLabelData, ImagePayload, ContainerVolume, MeasurementMode (Auto 
 
 ---
 
-## 7. Quality / Speed / Accuracy Tradeoffs (Mandatory Kilroy Evaluation)
+## 7. Quality / Speed / Accuracy Tradeoffs (Mandatory Project Owner Evaluation)
 
 Every proposal for 27 CFR 16.22 compliance verification must be weighed holistically against **Quality**, **Speed**, and **Accuracy** — rather than treating compliance gap closure in isolation.
 
@@ -369,7 +369,7 @@ class FieldResult(BaseModel):
 
 ---
 
-## 10. Explicit Open Questions for Project Leadership & Kilroy
+## 10. Explicit Open Questions for Project Leadership & Project Owner
 
 Before implementing production backend code, the following architectural decisions require leadership alignment:
 
