@@ -13,8 +13,6 @@ This document lists all user-facing error messages returned by the API, their ca
 | File FILENAME exceeds 10 MB limit. | The uploaded file is larger than 10 MB. | Compress the image or reduce its resolution before uploading. |
 | File FILENAME could not be read as a valid image. Please submit a new photo. | An unexpected decode error occurred after passing initial format checks. | Try re-saving the image in a different format and re-uploading. |
 | A maximum of 4 images may be uploaded per label. You submitted N. Please resubmit with 4 or fewer photos. | More than 4 images were submitted for a single label. | Split your submission and upload at most 4 photos per label review. |
-| The following label field(s) could not be read clearly enough to produce a reliable compliance result: "{field}". (Confidence scores: {field} N%.) Please retake the photo focusing on the affected area... | A required field's per-field confidence is below `FIELD_CONFIDENCE_THRESHOLDS` (for example a front-only photo with no readable bottler name/address). Raised as `LowConfidenceError`. | Retake the photo so the affected text is fully visible, flat, well-lit, and in focus. Include the back or neck label if the missing field is printed there. |
-| The label image quality is too low to reliably read the required fields (confidence N%, minimum M% for {class}). Please retake the photo... | Overall `extraction_confidence` is below the per-class `min_confidence` in `BEVERAGE_TOLERANCE`. Raised as `LowConfidenceError`. | Retake with the camera flat-on, the full label in frame, sharp focus, and even lighting. |
 
 ---
 
@@ -70,23 +68,22 @@ This document lists all user-facing error messages returned by the API, their ca
 
 | Code | Meaning |
 |------|---------|
-| 200  | Success, including structured failures such as low-confidence retake prompts (`overall_status=fail`, `error` set). Review and label-check paths must not convert `LowConfidenceError` into HTTP 500. |
+| 200  | Success |
 | 400  | Bad request - malformed input data |
-| 401  | Unauthorized - missing or invalid demo access token when DEMO_ACCESS_TOKEN gate is active (never returned for rate limits, low-confidence retakes, or normal public evaluator access) |
-| 422  | Unprocessable entity - user-fixable input problem (per RFC 9110 Section 15.5.21). Low-confidence extraction is **not** a 422; it is returned in the 200 result body. |
+| 401  | Unauthorized - missing or invalid demo access token when DEMO_ACCESS_TOKEN gate is active (never returned for rate limits or normal public evaluator access) |
+| 422  | Unprocessable entity - user-fixable input problem (per RFC 9110 Section 15.5.21) |
 | 429  | Too Many Requests - soft inbound IP rate limit exceeded; returns actionable retry message |
-| 500  | Internal server error - unexpected backend failure. Must not be used for unreadable required fields; those return the retake message on HTTP 200. |
+| 500  | Internal server error - unexpected backend failure |
 | 503  | Service Unavailable - concurrency cap timeout or temporary upstream outage |
 
 ## Change Log
 
 | Date | Change | Author |
 |---|---|---|
-| 2026-10-23 | Documented `LowConfidenceError` retake messages on review routes (HTTP 200 with `error`, never 500) | Kilroy_Lives |
 | 2026-09-18 | Added fallback `cannot_measure` entry for unhandled CV exceptions during type-size evaluation | Maintainer |
 | 2026-09-16 | Added rate limiting and daily spend guard error codes | Maintainer |
 | 2026-09-09 | Added image quality diagnostics and low confidence error codes | Maintainer |
 
 ---
 
-*Last updated: October 23, 2026*
+*Last updated: September 18, 2026*

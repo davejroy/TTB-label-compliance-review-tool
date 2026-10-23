@@ -15,8 +15,6 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
-- **Low-confidence review retake (October 2026)**: `_review_single` and `/api/review/batch/stream` now catch `LowConfidenceError` from `run_compliance_checks` and return the retake-photo message on HTTP 200 (`overall_status=fail`, `error` set), matching the label-check path. Unreadable required fields (for example a front-only photo with `name_and_address` at 0%) no longer produce a bare HTTP 500. `/api/review/batch` inherits the fix because it calls `_review_single`. Regression tests live in `backend/tests/test_review_low_confidence.py`.
-
 - **Promotion of Features from `-dev` (September 2026)**:
   - **27 CFR 16.22 Option A (Scale-Marker) Type-Size Verification MVP**: Integrated deterministic Computer Vision (OpenCV/Pillow) calibration supporting ISO/IEC 7810 ID-1 cards and printable ArUco fiducials. Measures capital letter heights in mm against statutory volume tiers (1.0 mm / 2.0 mm / 3.0 mm) with confidence margins. Uncalibrated photos retain an honest statutory advisory with zero invented mm.
   - **COLA Application Pre-fill & Template Import (#24)**: Added CSV/JSON template parsing, sample template downloads, and built-in demo presets (Bourbon, Cabernet, IPA, Scotch) with zero-login, fail-open access across Single and Batch Review modes.
@@ -126,7 +124,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## Handoff Checklist
 - [x] Code builds
-- [x] Tests pass (all 160 backend pytest tests + 77 frontend vitest tests pass)
+- [x] Tests pass (all 154 backend pytest tests + 77 frontend vitest tests pass)
 - [x] Required docs updated (/docs/ERROR_CODES.md, HANDOFF.md, PDR.md, REGULATORY_REFRENCES.md, SBOM.md, TECHNICAL_ARCHITECTURE.md)
 - [x] Secrets removed / verified no secrets committed
 - [x] Dependencies reviewed
@@ -184,10 +182,8 @@ The items below were listed as known gaps and have now been implemented:
   `compliance.py` maps each beverage class to its ABV tolerance and minimum
   extraction-confidence threshold.
 - **Confidence-gated extraction.** `extraction_confidence` (0.0-1.0) is populated
-  by Claude. Images below the per-class threshold raise `LowConfidenceError`.
-  Review and label-check routes return the retake message in the result body
-  (HTTP 200, `overall_status=fail`, `error` set) instead of silently passing
-  or returning HTTP 500.
+  by Claude. Images below the per-class threshold raise `LowConfidenceError`
+  (HTTP 422) and request a retake instead of silently passing.
 - **Beverage-type confirmation.** `check_label_requirements` now accepts
   `confirmed_beverage_type` override; unknown types return
   `needs_beverage_confirmation=True` so the agent can confirm before evaluation.

@@ -7,11 +7,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 
 ## [Unreleased]
 
-### Fixed
-- Review routes catch `LowConfidenceError` from `run_compliance_checks` and return the retake-photo message on HTTP 200 (`overall_status=fail`, `error` set) instead of a bare HTTP 500. Covers `/api/review`, `/api/review/batch` (via `_review_single`), and `/api/review/batch/stream`.
-- OCR mis-reading of hyphenated line breaks (e.g., CON-SUMPTION misread as DO NOT)
-- Low-quality images now return user-friendly error instead of internal exception
-
 ### Added
 - SECURITY.md: vulnerability disclosure policy
 - CONTRIBUTING.md: developer setup and code standards
@@ -25,6 +20,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 - backend/app/claude_client.py: Add ImageQualityError exception, module logger, minimum pixel check
 - backend/app/compliance.py: Add module logger for audit-trail logging
 - backend/app/compliance.py: Fix _normalize_whitespace to rejoin hyphenated line breaks
+
+### Fixed
+- OCR mis-reading of hyphenated line breaks (e.g., CON-SUMPTION misread as DO NOT)
+- Low-quality images now return user-friendly error instead of internal exception
 
 ---
 
