@@ -126,7 +126,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## Handoff Checklist
 - [x] Code builds
-- [x] Tests pass (all 154 backend pytest tests + 77 frontend vitest tests pass)
+- [x] Tests pass (all 160 backend pytest tests + 77 frontend vitest tests pass)
 - [x] Required docs updated (/docs/ERROR_CODES.md, HANDOFF.md, PDR.md, REGULATORY_REFRENCES.md, SBOM.md, TECHNICAL_ARCHITECTURE.md)
 - [x] Secrets removed / verified no secrets committed
 - [x] Dependencies reviewed
