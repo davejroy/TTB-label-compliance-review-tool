@@ -295,7 +295,7 @@ async def _read_and_validate_file(
 
     # Offload Pillow preparation to thread pool so the event loop stays responsive
     try:
-        prepared_bytes = await run_in_threadpool(prepare_image, content, file.filename or "")
+        prepared_bytes, _ = await run_in_threadpool(prepare_image, content, file.filename or "")
         return prepared_bytes, _media_type_for(file.filename or "")
     except ImageQualityError as exc:
         # Surface the user-friendly message directly - no internal details.
@@ -711,7 +711,7 @@ async def review_labels_batch_stream(
                     *[
                         run_in_threadpool(
                             lambda c=content, fn=fname: (
-                                prepare_image(c, fn),
+                                prepare_image(c, fn)[0],
                                 _media_type_for(fn),
                             )
                             if _is_image_bytes(c) and len(c) <= MAX_FILE_SIZE and len(c) > 0
