@@ -55,8 +55,9 @@ from .models import ApplicationData, ExtractedLabelData, FieldResult, TypeSizeMe
 class LowConfidenceError(ValueError):
     """Raised when extraction confidence is below the per-class minimum threshold.
 
-    Callers (main.py) should catch this and return HTTP 422 with the
-    user_message so the agent knows to retake the photo.
+    Callers (main.py) should catch this and return the user_message on the
+    result so the agent knows to retake the photo. Do not let this escape as
+    an unhandled HTTP 500.
     """
 
     def __init__(self, user_message: str, confidence: float, threshold: float) -> None:
