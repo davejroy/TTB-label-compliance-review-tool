@@ -104,7 +104,7 @@ None. The system is stateless with no database, object storage, or persistent qu
 
 ## Error Handling
 
-Structured errors and their user-facing messages, causes, and remediation are documented in [ERROR_CODES.md](./ERROR_CODES.md). Notable failure modes include low-confidence extraction (retake-photo prompt), unsupported image formats (e.g. HEIC), and transient upstream errors (HTTP 429/503/529) which the client retries via `safeFetch`.
+Structured errors and their user-facing messages, causes, and remediation are documented in [ERROR_CODES.md](./ERROR_CODES.md). Notable failure modes include low-confidence extraction (retake-photo prompt on HTTP 200 with `error` set — never HTTP 500), unsupported image formats (e.g. HEIC), and transient upstream errors (HTTP 429/503/529) which the client retries via `safeFetch`. `_review_single`, `/api/review/batch/stream`, and `_label_check_single` all catch `LowConfidenceError` from the compliance gate.
 
 ## Observability
 
@@ -162,6 +162,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 
 | Date | Change | Author |
 |---|---|---|
+| 2026-10-23 | Documented LowConfidenceError handling on review routes (HTTP 200 retake message, never 500) | Kilroy_Lives |
 | 2026-07-07 | Initial architecture document created under documentation-governance skill | Maintainer |
 | 2026-07-08 | Added Related Documentation cross-links; added CONFIGURATION.md and DEPLOYMENT.md references | Maintainer |
 | 2026-09-09 | Added structured RequestTiming latency logging and concurrent multi-photo extraction documentation | Maintainer |

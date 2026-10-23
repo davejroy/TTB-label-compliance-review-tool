@@ -526,7 +526,26 @@ async def _review_single(files: list[UploadFile], application: ApplicationData) 
             if type_size_details is None:
                 type_size_details = ts_res
 
-    fields = run_compliance_checks(application, extracted, type_size_details=type_size_details)
+    try:
+        fields = run_compliance_checks(application, extracted, type_size_details=type_size_details)
+    except LowConfidenceError as exc:
+        _log_request_timing(
+            endpoint="/api/review",
+            wall_time_ms=wall_time_ms,
+            claude_time_ms=metrics.claude_time_ms,
+            claude_calls=metrics.claude_calls,
+            image_count=len(files),
+            status="fail",
+            extra={"error_type": "LowConfidenceError"},
+        )
+        return ReviewResult(
+            filenames=filenames,
+            overall_status="fail",
+            fields=[],
+            extracted=extracted,
+            processing_time_ms=wall_time_ms,
+            error=exc.user_message,
+        )
     status = overall_status(fields)
     _log_request_timing(
         endpoint="/api/review",
@@ -771,27 +790,49 @@ async def review_labels_batch_stream(
                         if type_size_details is None:
                             type_size_details = ts_res
 
-                fields = run_compliance_checks(app_data, extracted, type_size_details=type_size_details)
-                status = overall_status(fields)
-                wall_ms = int((time.monotonic() - start) * 1000)
-                result = ReviewResult(
-                    filenames=[fname for _, fname in processed_images],
-                    overall_status=status,
-                    fields=fields,
-                    extracted=extracted,
-                    processing_time_ms=wall_ms,
-                )
-                successful_labels += 1
-                _log_request_timing(
-                    endpoint="/api/review/batch/stream",
-                    wall_time_ms=wall_ms,
-                    claude_time_ms=claude_call_duration_ms,
-                    claude_calls=1,
-                    image_count=len(processed_images),
-                    status=status,
-                    extra={"batch_index": idx},
-                )
-                line = json.dumps({"index": idx, "result": result.model_dump()})
+                try:
+                    fields = run_compliance_checks(app_data, extracted, type_size_details=type_size_details)
+                except LowConfidenceError as exc:
+                    wall_ms = int((time.monotonic() - start) * 1000)
+                    _log_request_timing(
+                        endpoint="/api/review/batch/stream",
+                        wall_time_ms=wall_ms,
+                        claude_time_ms=claude_call_duration_ms,
+                        claude_calls=1,
+                        image_count=len(processed_images),
+                        status="fail",
+                        extra={"batch_index": idx, "error_type": "LowConfidenceError"},
+                    )
+                    result = ReviewResult(
+                        filenames=[fname for _, fname in processed_images],
+                        overall_status="fail",
+                        fields=[],
+                        extracted=extracted,
+                        processing_time_ms=wall_ms,
+                        error=exc.user_message,
+                    )
+                    line = json.dumps({"index": idx, "result": result.model_dump()})
+                else:
+                    status = overall_status(fields)
+                    wall_ms = int((time.monotonic() - start) * 1000)
+                    result = ReviewResult(
+                        filenames=[fname for _, fname in processed_images],
+                        overall_status=status,
+                        fields=fields,
+                        extracted=extracted,
+                        processing_time_ms=wall_ms,
+                    )
+                    successful_labels += 1
+                    _log_request_timing(
+                        endpoint="/api/review/batch/stream",
+                        wall_time_ms=wall_ms,
+                        claude_time_ms=claude_call_duration_ms,
+                        claude_calls=1,
+                        image_count=len(processed_images),
+                        status=status,
+                        extra={"batch_index": idx},
+                    )
+                    line = json.dumps({"index": idx, "result": result.model_dump()})
             except Exception as exc:  # noqa: BLE001
                 _log.warning("Streaming batch error at index %d: %s", idx, exc)
                 wall_ms = int((time.monotonic() - start) * 1000)

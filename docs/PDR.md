@@ -264,8 +264,9 @@ implemented in the current codebase.
 - **Confidence-gated extraction.** `ExtractedLabelData.extraction_confidence`
   (0.0-1.0) is populated by Claude based on image readability. `assert_extraction_confidence()`
   in `compliance.py` is called at the top of both entry points; images below the
-  per-class threshold raise `LowConfidenceError` (HTTP 422 in `main.py`) and
-  request a retake instead of silently passing on a low-quality best guess.
+  per-class threshold raise `LowConfidenceError`. `main.py` returns the retake
+  message on the result (`overall_status=fail`, `error` set, HTTP 200) for
+  review and label-check routes instead of silently passing or returning HTTP 500.
 - **Label-Only Check: beverage-type confirmation.** `check_label_requirements`
   now accepts `confirmed_beverage_type` (agent override). When the type cannot
   be resolved, `LabelCheckResult.needs_beverage_confirmation=True` is returned and
@@ -334,6 +335,12 @@ implemented in the current codebase.
 
 ## 11. Bug fixes
 
+- **Review `LowConfidenceError` HTTP 500.** `_review_single` (used by
+  `/api/review` and `/api/review/batch`) let `LowConfidenceError` escape when a
+  required field could not be read, producing a bare HTTP 500. The handler now
+  matches the label-check path: HTTP 200 with `overall_status=fail` and
+  `error` set to the retake-photo message. `/api/review/batch/stream` uses the
+  same handling around `run_compliance_checks`.
 - **`api.ts` Label-Only Check 404 (commit `1eea52f`).** `checkLabelsBatch` called
   `fetch()` with URL `${API_BASE}/label-check/batch` — missing the `/api` segment
   — so every Label-Only Check submission returned HTTP 404 Not Found and the UI
