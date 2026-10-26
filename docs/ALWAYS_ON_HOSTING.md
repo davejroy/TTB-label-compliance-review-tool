@@ -185,7 +185,7 @@ The TTB review tool requires runtime secrets and feature toggles. Regardless of 
 | `CLAUDE_MODEL` | No | No | `render.yaml` or Docker env | Vision model override (Default: `claude-sonnet-4-5`; Render default: `claude-sonnet-4-6`). |
 | `USE_FAST_EXTRACTION` | No | No | `render.yaml` or Docker env | **Must stay `false`** (OFF) on production and default dev deployments to preserve Sonnet accuracy. |
 | `EXTRACTION_FAST_MODEL` | No | No | `render.yaml` or Docker env | Fast model identifier (`claude-3-5-haiku-latest`) used only when flag is enabled. |
-| `CORS_ORIGINS` | No | No | Render Dashboard (`sync: false`) or Docker env | Allowed browser origins. Defaults fail-open to `*` for evaluator previews. |
+| `CORS_ORIGINS` | No | No | Render Dashboard (`sync: false`) or Docker env | Allowed browser origins. Defaults fail-open to local Vite + `https://ttb-label-frontend.onrender.com` (the `render.yaml` frontend). |
 | `DEMO_ACCESS_TOKEN` | No | **YES** | Render Dashboard (`sync: false`) or a secrets manager | **Must remain UNSET** for public evaluator demos to prevent login barriers. |
 | `RATE_LIMIT_REVIEW` | No | No | Environment | Soft IP rate limit on review endpoints (Default: `20/minute`). |
 | `MAX_CONCURRENT_CLAUDE_CALLS`| No | No | Environment | Concurrency semaphore capacity (Default: `5`). |
