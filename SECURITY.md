@@ -41,7 +41,7 @@ This tool processes uploaded beverage label images and calls the Anthropic Claud
 - The Anthropic API key is read from the environment and is never echoed in API responses or logs.
 - User-facing error messages do not include internal exception details or stack traces (masked in streaming batch outputs).
 - Fail-open authentication design ensures public evaluators are never locked out: `DEMO_ACCESS_TOKEN` is unset by default and no mandatory `API_AUTH_TOKEN` is required.
-- CORS origins are configurable via the `CORS_ORIGINS` environment variable and default fail-open to `*` for local development and public evaluators.
+- CORS origins are configurable via the `CORS_ORIGINS` environment variable. When unset they fail-open to local Vite (`localhost`/`127.0.0.1:5173`) and the Render frontend from `render.yaml` (`https://ttb-label-frontend.onrender.com`), with methods limited to GET/POST/OPTIONS, headers limited to Authorization and Content-Type, and credentials disabled. Operators may set `CORS_ORIGINS=*` to restore a wildcard.
 
 ## Disclosure Policy
 

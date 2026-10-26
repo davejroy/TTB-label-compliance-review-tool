@@ -85,7 +85,7 @@ Key environment variables (see [HANDOFF.md](./HANDOFF.md) for the authoritative 
 | `USE_FAST_EXTRACTION` | Feature flag to route extractions to faster/cheaper model on -dev (default: `false`) | No | No |
 | `EXTRACTION_FAST_MODEL` | Fast model when `USE_FAST_EXTRACTION=true` (default: `claude-3-5-haiku-latest`) | No | No |
 | `VITE_API_HOST` | Backend host the frontend calls (build-time) | Yes (frontend) | No |
-| `CORS_ORIGINS` | Allowed origins for the backend API | Recommended | No |
+| `CORS_ORIGINS` | Allowed browser origins for the backend API. Unset fails open to local Vite + the `render.yaml` frontend (`https://ttb-label-frontend.onrender.com`); methods GET/POST/OPTIONS, headers Authorization/Content-Type, credentials off. | Recommended | No |
 
 `ANTHROPIC_API_KEY` is marked `sync: false` in `render.yaml` and must be set manually in the Render dashboard.
 
@@ -172,6 +172,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-09-18 | Integrated 27 CFR 16.22 Option A scale marker Computer Vision pipeline, fail-open exception handling, and uncalibrated advisory mode | Maintainer |
 | 2026-09-18 | Implemented COLA application pre-fill MVP with CSV/JSON import and demo presets | Maintainer |
 | 2026-09-18 | Documented 27 CFR 16.22 Option A CV type-size measurement, COLA pre-fill, fail-open rate limiting/concurrency, and always-on Starter hosting decision | Maintainer |
+| 2026-10-26 | CORS defaults fail-open to local Vite + the render.yaml frontend (not `*`); methods/headers restricted; credentials off (port of -dev 91e88ff) | Maintainer |
 
 ## Related Documentation
 

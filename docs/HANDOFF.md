@@ -15,6 +15,12 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **CORS tightening ported from `-dev` 91e88ff (October 2026)**:
+  - Replaced the `*` default allowlist with local Vite origins plus `https://ttb-label-frontend.onrender.com` (the `render.yaml` frontend service).
+  - Restricted CORS methods to GET/POST/OPTIONS and headers to Authorization/Content-Type; credentials remain disabled.
+  - Review endpoints stay fail-open (no auth gate). Operators can still set `CORS_ORIGINS=*`.
+  - Added `backend/tests/test_cors.py`. `USE_FAST_EXTRACTION` defaults and the demo-access gate were not changed.
+
 - **Promotion of Features from `-dev` (September 2026)**:
   - **27 CFR 16.22 Option A (Scale-Marker) Type-Size Verification MVP**: Integrated deterministic Computer Vision (OpenCV/Pillow) calibration supporting ISO/IEC 7810 ID-1 cards and printable ArUco fiducials. Measures capital letter heights in mm against statutory volume tiers (1.0 mm / 2.0 mm / 3.0 mm) with confidence margins. Uncalibrated photos retain an honest statutory advisory with zero invented mm.
   - **COLA Application Pre-fill & Template Import (#24)**: Added CSV/JSON template parsing, sample template downloads, and built-in demo presets (Bourbon, Cabernet, IPA, Scotch) with zero-login, fail-open access across Single and Batch Review modes.
@@ -25,7 +31,7 @@ This is a functional prototype operating in production. Both review modes (COLA 
   - **Soft Rate Limiting (High)**: Integrated `slowapi` inbound rate limiting on expensive review endpoints (`/api/review`, `/api/review/batch`, `/api/review/batch/stream`, `/api/label-check/batch`) keyed by client IP (`X-Forwarded-For` first hop or `request.client.host`). Returns HTTP **429** Too Many Requests with retry advice, NOT 401. Endpoints `/api/health` and `/api/demo-info` remain strictly unlimited.
   - **Concurrency Cap for Claude Calls**: Process-wide `asyncio.Semaphore` (configurable via `MAX_CONCURRENT_CLAUDE_CALLS`, default 5; timeout `CLAUDE_CONCURRENCY_TIMEOUT`, default 30.0s) wrapping Claude vision extractions across single, batch, and streaming endpoints to prevent unbounded-parallel burn of Anthropic API credits. Returns a friendly 503/429 busy message upon timeout — never an auth error.
   - **Spend / Abuse Soft Guardrail**: Implemented `DailySpendGuard` (`MAX_REVIEW_REQUESTS_PER_DAY`) tracking process-wide review volume and logging a loud warning when threshold is exceeded without blocking evaluator access. Documented that multi-instance deployments will require Redis in future iterations.
-  - **Hygiene & Hardening**: Explicitly capped Pillow `Image.MAX_IMAGE_PIXELS = 64_000_000` to prevent decompression bombs. Masked raw exception strings in streaming batch responses (`/api/review/batch/stream`) with server-side logs and user-safe failure messages. Clarified CORS fail-open `*` default in docs and verified `DEMO_ACCESS_TOKEN` is left unset for public evaluator demos.
+  - **Hygiene & Hardening**: Explicitly capped Pillow `Image.MAX_IMAGE_PIXELS = 64_000_000` to prevent decompression bombs. Masked raw exception strings in streaming batch responses (`/api/review/batch/stream`) with server-side logs and user-safe failure messages. CORS defaults fail-open to local Vite plus the `render.yaml` frontend origin (not `*`). Verified `DEMO_ACCESS_TOKEN` is left unset for public evaluator demos.
   - **Test Coverage**: Added test suite `backend/tests/test_rate_limit_and_concurrency.py` (8 new tests, 116 total pytest tests passing; 65 frontend vitest tests passing).
 
 - **Accuracy, Fill Standards & Honesty Gaps Modernization (September 2026)**:
@@ -40,7 +46,7 @@ This is a functional prototype operating in production. Both review modes (COLA 
   - Added centralized security response headers middleware (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy`, API `Content-Security-Policy: default-src 'none'`, and HSTS on HTTPS).
   - Sanitized error surfaces across Claude API and extraction runtime to prevent leaking internal exception details to clients.
   - Tightened batch input validation (`image_counts` positive integers cap ≤4, `photo_roles` array of strings, `confirmed_beverage_type` enum) returning HTTP 422 Unprocessable Entity.
-  - Maintained fail-open CORS defaults (`*` when unset) allowing immediate evaluator and production frontend access.
+  - CORS defaults fail-open to local Vite and the Render frontend from `render.yaml` so evaluator review traffic is not blocked; methods/headers are restricted and credentials stay off.
   - Added comprehensive automated test suite `test_safe_hardening.py` covering anonymous access, security headers, safer error surfaces, and 422 batch validation.
 
 ## How to Run Locally
@@ -89,7 +95,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 |---|---|---|---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude vision extraction | Yes | `sk-ant-...` | Yes |
 | `CLAUDE_MODEL` | Claude model override | No | `claude-sonnet-4-6` | No |
-| `CORS_ORIGINS` | Allowed CORS origins (defaults to `*` fail-open) | No | `https://ttb-label-frontend.onrender.com` | No |
+| `CORS_ORIGINS` | Allowed CORS origins (defaults to local Vite + Render frontend, not `*`) | No | `https://ttb-label-frontend.onrender.com` | No |
 | `DEMO_ACCESS_TOKEN` | Optional demo access gate token (defaults to open) | No | `secret-token` | Yes |
 | `DEMO_USERNAME` | Display username in demo modal | No | `ttb-demo` | No |
 

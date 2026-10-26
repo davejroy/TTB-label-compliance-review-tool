@@ -133,21 +133,60 @@ app = FastAPI(title="TTB Label Compliance Review Tool")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
-# CORS - configure allowed origins via CORS_ORIGINS (comma-separated).
-# Defaults to "*" (fail-open) so local dev and live frontend deployments
-# work without mandatory configuration.
+# CORS: allowlist via CORS_ORIGINS (comma-separated). Ported from -dev 91e88ff.
+# When unset, fail-open to local Vite origins plus the Render frontend service
+# declared in render.yaml so the public review UI is never blocked. Operators
+# may still set CORS_ORIGINS=* explicitly. Methods/headers are restricted to
+# what the review frontend actually sends; credentials stay off (no cookies).
+_LOCAL_VITE_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+)
+# render.yaml frontend service name `ttb-label-frontend` → Render default URL.
+_RENDER_FRONTEND_ORIGIN = "https://ttb-label-frontend.onrender.com"
+_DEFAULT_CORS_ORIGINS = [*_LOCAL_VITE_ORIGINS, _RENDER_FRONTEND_ORIGIN]
+_CORS_ALLOW_METHODS = ["GET", "POST", "OPTIONS"]
+_CORS_ALLOW_HEADERS = ["Authorization", "Content-Type"]
+
+
+def _parse_cors_origins(raw: str | None) -> list[str]:
+    """Parse CORS_ORIGINS into a browser origin allowlist.
+
+    Empty or whitespace-only values fail-open to the local Vite origins and
+    the Render frontend hostname from render.yaml. An explicit ``*`` remains
+    allowed so operators can restore a wildcard. Comma-separated values are
+    stripped; duplicates are preserved in listed order.
+
+    Args:
+        raw: Raw ``CORS_ORIGINS`` environment value, or None if unset.
+
+    Returns:
+        Origin strings suitable for FastAPI CORSMiddleware.allow_origins.
+    """
+    if not raw or not raw.strip():
+        return list(_DEFAULT_CORS_ORIGINS)
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if not origins:
+        return list(_DEFAULT_CORS_ORIGINS)
+    if "*" in origins:
+        return ["*"]
+    return origins
+
+
 _cors_origins_env = os.environ.get("CORS_ORIGINS", "")
-if not _cors_origins_env:
+if not _cors_origins_env.strip():
     _log.warning(
-        "CORS_ORIGINS env var is not set — defaulting to '*' (allow all). "
-        "Set CORS_ORIGINS to the frontend hostname before any deployment."
+        "CORS_ORIGINS env var is not set — defaulting to local Vite origins "
+        "and the Render frontend from render.yaml. Set CORS_ORIGINS to "
+        "override the allowlist."
     )
-_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()] if _cors_origins_env else ["*"]
+_cors_origins = _parse_cors_origins(_cors_origins_env)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=_CORS_ALLOW_METHODS,
+    allow_headers=_CORS_ALLOW_HEADERS,
+    allow_credentials=False,
 )
 
 

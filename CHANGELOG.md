@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 
 ## [Unreleased]
 
+### Security
+- CORS no longer defaults to `*`. Unset `CORS_ORIGINS` fails open to local Vite and the Render frontend from `render.yaml`; methods/headers are restricted and credentials stay off (port of -dev 91e88ff).
+
 ### Added
 - SECURITY.md: vulnerability disclosure policy
 - CONTRIBUTING.md: developer setup and code standards

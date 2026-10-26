@@ -34,7 +34,7 @@ full semantics):
 
 - ANTHROPIC_API_KEY - set manually in the Render dashboard (sync: false); never committed.
 - CLAUDE_MODEL - set to claude-sonnet-4-6 in deployment (the in-code default is claude-sonnet-4-5).
-- CORS_ORIGINS - allowed browser origins for the frontend.
+- CORS_ORIGINS - allowed browser origins. Unset fails open to local Vite plus `https://ttb-label-frontend.onrender.com`.
 - DEMO_ACCESS_TOKEN - set manually in the dashboard (sync: false); enables the access gate.
 - DEMO_USERNAME - ttb-demo.
 

@@ -5,7 +5,7 @@ Verifies:
 2. Security response headers are present on all responses (nosniff, DENY, no-referrer, Permissions-Policy, CSP, HSTS).
 3. Safer error surfaces: Exception details are not echoed in client responses.
 4. Input validation: Batch input validation failures return HTTP 422 (not 401 or 500).
-5. CORS configuration defaults to fail-open ("*").
+5. CORS configuration fails open to local Vite + the render.yaml frontend (not "*").
 """
 
 from __future__ import annotations
