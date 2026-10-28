@@ -1,12 +1,21 @@
+import sys
+from pathlib import Path
+
 from app.compliance import (
     CANONICAL_WARNING_BODY,
     CANONICAL_WARNING_HEADER,
+    _is_brand_in_address,
     check_label_requirements,
     merge_extracted_label_data,
     overall_status,
     run_compliance_checks,
 )
 from app.models import ApplicationData, ExtractedLabelData, FieldLocation
+
+_FIXTURE_DIR = Path(__file__).parent / "fixtures"
+if str(_FIXTURE_DIR) not in sys.path:
+    sys.path.insert(0, str(_FIXTURE_DIR))
+from generate_fixtures import COMPLIANT_FIELDS  # noqa: E402
 
 
 def make_application(**overrides) -> ApplicationData:
@@ -497,16 +506,22 @@ def test_confidence_gate_beer_uses_lower_threshold_than_spirits():
         assert_extraction_confidence(spirits_ext, beverage_type="distilled_spirits")
 
 
-def test_per_field_confidence_raises_on_low_brand_name():
-    """A per-field brand_name score below its threshold must raise LowConfidenceError."""
+def test_per_field_confidence_marks_brand_name_unreadable():
+    """A per-field brand_name score below its threshold is unreadable, not a raise."""
+    from app.compliance import analyze_readability
+
     threshold = FIELD_CONFIDENCE_THRESHOLDS["brand_name"]  # 0.35
     ext = make_extracted_with_confidence(
         extraction_confidence=0.90,  # overall fine
         per_field={"brand_name": threshold - 0.01},  # brand_name too low
     )
-    with pytest.raises(LowConfidenceError) as exc_info:
-        assert_extraction_confidence(ext, beverage_type="distilled_spirits")
-    assert "brand name" in exc_info.value.user_message.lower()
+    assert_extraction_confidence(ext, beverage_type="distilled_spirits")  # must not raise
+    analysis = analyze_readability(ext)
+    assert analysis.field_status["brand_name"] == "unreadable"
+    assert analysis.has_required_unreadable
+    assert analysis.error_code == "PHOTO_UNREADABLE_FIELD"
+    assert analysis.retake is not None
+    assert analysis.retake.field == "brand"
 
 
 def test_per_field_confidence_passes_at_brand_name_threshold():
@@ -530,16 +545,20 @@ def test_country_of_origin_zero_score_does_not_raise():
     assert_extraction_confidence(ext, beverage_type="distilled_spirits")  # must not raise
 
 
-def test_gov_warning_body_low_confidence_raises():
-    """Gov Warning body below 0.20 must still raise — it just has a lower bar
-    than brand_name, not *no* bar."""
+def test_gov_warning_body_low_confidence_is_unreadable():
+    """Gov Warning body below 0.20 is unreadable — it just has a lower bar
+    than brand_name, not *no* bar. It must not be reported as absent."""
+    from app.compliance import analyze_readability
+
     threshold = FIELD_CONFIDENCE_THRESHOLDS["government_warning_body"]  # 0.20
     ext = make_extracted_with_confidence(
         extraction_confidence=0.90,
         per_field={"government_warning_body": threshold - 0.01},
     )
-    with pytest.raises(LowConfidenceError):
-        assert_extraction_confidence(ext, beverage_type="distilled_spirits")
+    assert_extraction_confidence(ext, beverage_type="distilled_spirits")  # must not raise
+    analysis = analyze_readability(ext)
+    assert analysis.field_status["government_warning"] == "unreadable"
+    assert analysis.field_status["government_warning"] != "absent"
 
 
 # ---------------------------------------------------------------------------
@@ -654,15 +673,13 @@ def test_multi_photo_merge_sulfite_declaration_absent_on_all_photos():
 # ---------------------------------------------------------------------------
 
 def test_brand_name_in_address_without_distinct_evidence_is_warning():
-    """Issue #9 P1: Extracted brand_name contained in producer/bottler address line
-    without distinct brand heading evidence must NOT clean-pass; must return warning.
-    """
+    """Brand that is the bottler/producer company name is an advisory warning, not a fail."""
     app = make_application(
-        brand_name="BUFFALO TRACE",
+        brand_name="BUFFALO TRACE DISTILLERY",
         name_and_address="Distilled and Bottled by Buffalo Trace Distillery, Frankfort, KY",
     )
     ext = make_extracted(
-        brand_name="BUFFALO TRACE",
+        brand_name="BUFFALO TRACE DISTILLERY",
         name_and_address="Distilled and Bottled by Buffalo Trace Distillery, Frankfort, KY",
         field_locations=[],
         notes="",
@@ -670,14 +687,16 @@ def test_brand_name_in_address_without_distinct_evidence_is_warning():
     results = run_compliance_checks(app, ext)
     brand_res = next(r for r in results if r.field == "brand_name")
     assert brand_res.status == "warning"
+    assert brand_res.status != "fail"
+    assert "Advisory:" in brand_res.message
     assert "appears to be contained within or derived from" in brand_res.message
     assert "Requires human review" in brand_res.message
 
 
 def test_brand_name_in_address_label_only_check_without_distinct_evidence_is_warning():
-    """Issue #9 P1: Label-only check flags brand name derived from address without distinct evidence."""
+    """Label-only check flags a brand that is the bottler company name when boxes are missing."""
     ext = make_extracted(
-        brand_name="BUFFALO TRACE",
+        brand_name="BUFFALO TRACE DISTILLERY",
         name_and_address="Distilled and Bottled by Buffalo Trace Distillery, Frankfort, KY",
         field_locations=[],
         notes="",
@@ -738,6 +757,252 @@ def test_brand_name_distinct_from_address_passes():
     assert brand_res.status == "pass"
 
 
+def test_distinct_display_brand_sharing_producer_words_passes_without_boxes():
+    """Perfect labels: a shorter display brand vs a longer company name, no boxes.
+
+    Regression: compact extraction often omits field_locations. Sharing words
+    with the winery/distillery/brewery must not fire the derived-from-bottler
+    advisory (Crescent Ridge / Iron Hollow / Hopline style labels).
+    """
+    cases = (
+        (
+            "Crescent Ridge",
+            "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+            "wine",
+        ),
+        (
+            "IRON HOLLOW",
+            "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+            "distilled_spirits",
+        ),
+        (
+            "Hopline",
+            "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+            "beer",
+        ),
+    )
+    for brand, address, beverage in cases:
+        ext = make_extracted(
+            brand_name=brand,
+            name_and_address=address,
+            field_locations=[],
+            notes="",
+        )
+        label_results = check_label_requirements(ext, beverage_type=beverage)
+        label_brand = next(r for r in label_results if r.field == "brand_name")
+        assert label_brand.status == "pass", brand
+
+        app = make_application(
+            beverage_type=beverage,
+            brand_name=brand,
+            name_and_address=address,
+        )
+        match_results = run_compliance_checks(app, ext)
+        match_brand = next(r for r in match_results if r.field == "brand_name")
+        assert match_brand.status == "pass", brand
+
+
+def test_brand_that_is_bottler_name_warns_without_boxes():
+    """A brand that really is the bottler/producer company name still warns."""
+    ext = make_extracted(
+        brand_name="Crescent Ridge Winery",
+        name_and_address="Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+        field_locations=[],
+        notes="",
+    )
+    results = check_label_requirements(ext, beverage_type="wine")
+    brand_res = next(r for r in results if r.field == "brand_name")
+    assert brand_res.status == "warning"
+    assert "Advisory:" in brand_res.message
+
+
+def test_wrapped_producer_prefix_still_warns_when_brand_is_company_name():
+    """A line break inside 'Produced and Bottled by' must not drop the prefix."""
+    address = "Produced and\nBottled by Crescent Ridge Winery, Paso Robles, CA"
+    ext = make_extracted(
+        brand_name="Crescent Ridge Winery",
+        name_and_address=address,
+        field_locations=[],
+        notes="",
+    )
+    results = check_label_requirements(ext, beverage_type="wine")
+    brand_res = next(r for r in results if r.field == "brand_name")
+    assert brand_res.status == "warning"
+
+
+def test_prefix_ending_at_linebreak_still_finds_co_company_name():
+    """A prefix that ends at a newline must still read '… Brewing Co.' as the company."""
+    ext = make_extracted(
+        brand_name="Hopline Brewing Co.",
+        name_and_address="Bottled by\nHopline Brewing Co., Portland, OR",
+        field_locations=[],
+        notes="",
+    )
+    results = check_label_requirements(ext, beverage_type="beer")
+    brand_res = next(r for r in results if r.field == "brand_name")
+    assert brand_res.status == "warning"
+
+
+def test_city_state_zip_and_full_state_lines_do_not_join_company_name():
+    """A following city/state/ZIP line is address, not company."""
+    cases = (
+        "Produced and Bottled by Crescent Ridge Winery\nPaso Robles, CA, 93446",
+        "Produced and Bottled by Crescent Ridge Winery\nPaso Robles, California",
+        "Produced and Bottled by Crescent Ridge Winery\nPaso Robles CA 93446",
+        "Produced and Bottled by Crescent Ridge Winery\nPaso Robles, California 93446",
+        "Produced and Bottled by Crescent Ridge Winery\nDenver CO 80202",
+        "Produced and Bottled by Crescent Ridge Winery\nPaso Robles, CA 93446-1234",
+    )
+    for address in cases:
+        company_ext = make_extracted(
+            brand_name="Crescent Ridge Winery",
+            name_and_address=address,
+            field_locations=[],
+            notes="",
+        )
+        company_res = next(
+            r for r in check_label_requirements(company_ext, beverage_type="wine")
+            if r.field == "brand_name"
+        )
+        assert company_res.status == "warning", address
+
+        display_ext = make_extracted(
+            brand_name="Crescent Ridge",
+            name_and_address=address,
+            field_locations=[],
+            notes="",
+        )
+        display_res = next(
+            r for r in check_label_requirements(display_ext, beverage_type="wine")
+            if r.field == "brand_name"
+        )
+        assert display_res.status == "pass", address
+
+
+def test_wrapped_company_name_does_not_warn_for_distinct_display_brand():
+    """A wrap before Winery/Distilling/Brewing is still the longer company name.
+
+    Both review and label-only modes must pass when the display brand is the
+    shorter heading and boxes are missing.
+    """
+    cases = (
+        (
+            "Crescent Ridge",
+            "Produced and Bottled by Crescent Ridge\nWinery, Paso Robles, CA",
+            "wine",
+        ),
+        (
+            "IRON HOLLOW",
+            "Distilled and Bottled by Iron Hollow\nDistilling Co., Bardstown, KY",
+            "distilled_spirits",
+        ),
+    )
+    for brand, address, beverage in cases:
+        ext = make_extracted(
+            brand_name=brand,
+            name_and_address=address,
+            field_locations=[],
+            notes="",
+        )
+        label_results = check_label_requirements(ext, beverage_type=beverage)
+        label_brand = next(r for r in label_results if r.field == "brand_name")
+        assert label_brand.status == "pass", brand
+
+        app = make_application(
+            beverage_type=beverage,
+            brand_name=brand,
+            name_and_address=address,
+        )
+        match_results = run_compliance_checks(app, ext)
+        match_brand = next(r for r in match_results if r.field == "brand_name")
+        assert match_brand.status == "pass", brand
+
+
+def test_overlapping_brand_and_address_boxes_still_warn():
+    """Boxes present but not separated still treat address-overlap as derived."""
+    app = make_application(
+        brand_name="BUFFALO TRACE",
+        name_and_address="Distilled and Bottled by Buffalo Trace Distillery, Frankfort, KY",
+    )
+    ext = make_extracted(
+        brand_name="BUFFALO TRACE",
+        name_and_address="Distilled and Bottled by Buffalo Trace Distillery, Frankfort, KY",
+        field_locations=[
+            FieldLocation(field="brand_name", x=0.50, y=0.70, width=0.40, height=0.08),
+            FieldLocation(field="name_and_address", x=0.52, y=0.72, width=0.42, height=0.10),
+        ],
+        notes="",
+    )
+    results = run_compliance_checks(app, ext)
+    brand_res = next(r for r in results if r.field == "brand_name")
+    assert brand_res.status == "warning"
+
+
+# Ground truth for the committed Old Tom compliant fixture
+# (tests/fixtures/labels/compliant/all_elements_present.jpg), generated from
+# COMPLIANT_FIELDS in tests/fixtures/generate_fixtures.py. The display heading
+# "OLD TOM DISTILLERY" is also repeated in the bottler line.
+OLD_TOM_DISPLAY_BRAND = COMPLIANT_FIELDS["brand_name"]
+OLD_TOM_BOTTLER_LINE = COMPLIANT_FIELDS["name_and_address"]
+OLD_TOM_DISPLAY_LOCATIONS = [
+    FieldLocation(field="brand_name", x=0.50, y=0.12, width=0.60, height=0.12),
+    FieldLocation(field="name_and_address", x=0.50, y=0.62, width=0.55, height=0.08),
+]
+
+
+def test_old_tom_display_brand_also_in_bottler_line_passes():
+    """Regression: compliant Old Tom label must keep brand and pass.
+
+    The prominent display name also appears in 'Bottled by Old Tom Distillery'.
+    That overlap must not blank brand or fail the field.
+    """
+    ext = make_extracted(
+        brand_name=OLD_TOM_DISPLAY_BRAND,
+        class_type=COMPLIANT_FIELDS["class_type"],
+        alcohol_content=COMPLIANT_FIELDS["alcohol_content"],
+        net_contents=COMPLIANT_FIELDS["net_contents"],
+        name_and_address=OLD_TOM_BOTTLER_LINE,
+        field_locations=OLD_TOM_DISPLAY_LOCATIONS,
+        notes="",
+    )
+    assert _is_brand_in_address(ext.brand_name, ext.name_and_address)
+
+    results = check_label_requirements(ext, beverage_type="distilled_spirits")
+    brand_res = next(r for r in results if r.field == "brand_name")
+    assert brand_res.status == "pass"
+    assert brand_res.label_value == OLD_TOM_DISPLAY_BRAND
+
+    app = make_application(
+        brand_name=OLD_TOM_DISPLAY_BRAND,
+        class_type=COMPLIANT_FIELDS["class_type"],
+        alcohol_content=COMPLIANT_FIELDS["alcohol_content"],
+        net_contents=COMPLIANT_FIELDS["net_contents"],
+        name_and_address=OLD_TOM_BOTTLER_LINE,
+    )
+    match_results = run_compliance_checks(app, ext)
+    match_brand = next(r for r in match_results if r.field == "brand_name")
+    assert match_brand.status == "pass"
+    assert match_brand.label_value == OLD_TOM_DISPLAY_BRAND
+
+
+def test_brand_only_inside_bottler_statement_is_advisory():
+    """A brand that occurs only in the bottler statement is advisory, not a fail."""
+    ext = make_extracted(
+        brand_name=OLD_TOM_DISPLAY_BRAND,
+        name_and_address=OLD_TOM_BOTTLER_LINE,
+        field_locations=[],
+        notes="",
+    )
+    assert _is_brand_in_address(ext.brand_name, ext.name_and_address)
+
+    results = check_label_requirements(ext, beverage_type="distilled_spirits")
+    brand_res = next(r for r in results if r.field == "brand_name")
+    assert brand_res.status == "warning"
+    assert brand_res.status != "fail"
+    assert "Advisory:" in brand_res.message
+    assert ext.brand_name == OLD_TOM_DISPLAY_BRAND
+
+
 # ---------------------------------------------------------------------------
 # Issue #5 W02: Missing Government Warning Structured Failure Tests
 # ---------------------------------------------------------------------------
@@ -765,6 +1030,71 @@ def test_missing_gw_returns_fail_without_low_confidence_error():
     assert gw_res.status == "fail"
     assert "Government Warning statement not found on label" in gw_res.message
     assert "retake" not in gw_res.message.lower()
+    from app.compliance import analyze_readability
+    analysis = analyze_readability(ext)
+    assert analysis.field_status["government_warning"] == "absent"
+    assert analysis.field_status["government_warning"] != "unreadable"
+
+
+def test_present_warning_with_empty_text_is_unreadable_not_absent():
+    """A present=True warning whose text scored 0.0 is unreadable, not a missing-warning fail."""
+    from app.compliance import analyze_readability
+
+    ext = make_extracted(
+        government_warning_present=True,
+        government_warning_header="",
+        government_warning_body="",
+        extraction_confidence=0.90,
+        per_field_confidence={
+            "brand_name": 0.95,
+            "government_warning_header": 0.0,
+            "government_warning_body": 0.0,
+        },
+    )
+    analysis = analyze_readability(ext)
+    assert analysis.field_status["government_warning"] == "unreadable"
+    assert analysis.field_status["government_warning"] != "absent"
+    assert analysis.has_required_unreadable
+    assert analysis.retake is not None
+    results = check_label_requirements(ext, beverage_type="distilled_spirits")
+    assert all(item.field != "government_warning" for item in results)
+
+
+def test_imported_origin_low_confidence_forces_retake():
+    """An imported label with a non-zero unreadable origin score must retake, not skip the check."""
+    from app.compliance import analyze_readability
+
+    ext = make_extracted(
+        country_of_origin="",
+        origin_guess="imported",
+        extraction_confidence=0.90,
+        per_field_confidence={"country_of_origin": 0.10, "brand_name": 0.95},
+    )
+    analysis = analyze_readability(ext)
+    assert analysis.field_status["country_of_origin"] == "unreadable"
+    assert analysis.has_required_unreadable
+    results = check_label_requirements(ext, beverage_type="distilled_spirits")
+    assert all(item.field != "country_of_origin" for item in results)
+
+
+def test_empty_zero_score_on_readable_photo_is_absent():
+    """Empty name_and_address with 0.0 confidence on a readable photo is absent."""
+    from app.compliance import analyze_readability
+
+    ext = make_extracted(
+        name_and_address="",
+        extraction_confidence=0.95,
+        per_field_confidence={"name_and_address": 0.0, "brand_name": 0.95},
+    )
+    analysis = analyze_readability(ext)
+    assert analysis.field_status["name_and_address"] == "absent"
+    assert analysis.field_status["name_and_address"] != "unreadable"
+    assert analysis.field_status["brand_name"] == "present"
+    results = check_label_requirements(ext, beverage_type="distilled_spirits")
+    addr = next(item for item in results if item.field == "name_and_address")
+    assert addr.status == "fail"
+    assert "not found" in addr.message.lower()
+    assert any(item.field == "brand_name" for item in results)
 
 
 def test_missing_gw_label_only_check_returns_fail():
@@ -875,3 +1205,4 @@ def test_government_warning_pass_message_includes_16_22_type_size_honesty_note()
     assert gw_res.status == "pass"
     assert "27 CFR 16.22" in gw_res.message
     assert "gauge measurement" in gw_res.message or "physical" in gw_res.message
+

@@ -14,8 +14,29 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .errors import FieldPresence, RetakeGuidance
+
+
+class ImageQualityAdvisory(BaseModel):
+    """Warn-first photo-quality metrics attached to a review result.
+
+    Present when the pre-gate ran and found something worth reporting.
+    Does not change ``overall_status`` unless the gate short-circuited.
+    """
+
+    blur_score: float = Field(description="Laplacian variance (higher is sharper).")
+    exposure: Literal["dark", "ok", "bright"] = Field(
+        description="Mean-luma band: dark, ok, or bright."
+    )
+    glare_fraction: float = Field(description="Fraction of near-white (saturated) pixels.")
+    resolution: dict[str, int] = Field(
+        description="Original EXIF-corrected pixel size {width, height}."
+    )
+    warnings: list[str] = Field(default_factory=list, description="Human-readable quality notes.")
+
 BeverageType = Literal["distilled_spirits", "wine", "beer"]
 Status = Literal["pass", "warning", "fail"]
+OverallStatus = Literal["pass", "warning", "fail", "retake", "error"]
 Confidence = Literal["high", "medium", "low"]
 
 class CalibrationMethod(str, Enum):
@@ -43,6 +64,14 @@ class TypeSizeMeasurement(BaseModel):
         description="Type-size compliance state: pass | fail | warning | cannot_measure",
     )
     verification_note: str = Field(..., description="Plain-language audit explanation or advisory note")
+    estimated_characters_per_inch: Optional[float] = Field(
+        None,
+        description="Estimated 27 CFR 16.22(a)(4) characters per inch from the photo (None when inches cannot be measured).",
+    )
+    max_characters_per_inch: Optional[int] = Field(
+        None,
+        description="Statutory 16.22(a)(4) maximum characters per inch for the container's type-size tier (40 / 25 / 12).",
+    )
 
 class ApplicationData(BaseModel):
     """Data entered by the agent from the COLA application form."""
@@ -80,6 +109,13 @@ class ExtractedLabelData(BaseModel):
     government_warning_header: Optional[str] = None
     government_warning_body: Optional[str] = None
     government_warning_present: bool = False
+    government_warning_header_appears_bold: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Vision estimate of whether the printed GOVERNMENT WARNING heading appears bold "
+            "(27 CFR 16.22(a)(2)). None when unknown. False is a hard fail."
+        ),
+    )
     beverage_type_guess: Optional[str] = None
     origin_guess: Optional[Literal["domestic", "imported", "unknown"]] = None
     field_locations: list[FieldLocation] = Field(default_factory=list)
@@ -108,6 +144,53 @@ class ExtractedLabelData(BaseModel):
         ),
     )
 
+class WarningWordChange(BaseModel):
+    """One word-level difference against the exact 27 CFR 16.21 statement."""
+
+    kind: Literal["missing", "extra", "changed"]
+    expected: Optional[str] = None
+    observed: Optional[str] = None
+    expected_index: Optional[int] = Field(
+        default=None,
+        description="0-based word index in the statutory 16.21 word sequence.",
+    )
+    observed_index: Optional[int] = Field(
+        default=None,
+        description="0-based word index in the observed label word sequence.",
+    )
+
+
+class WarningTextDiff(BaseModel):
+    """Word-level comparison of observed warning text against 27 CFR 16.21."""
+
+    exact_match: bool
+    expected_words: list[str] = Field(default_factory=list)
+    observed_words: list[str] = Field(default_factory=list)
+    missing_words: list[WarningWordChange] = Field(default_factory=list)
+    extra_words: list[WarningWordChange] = Field(default_factory=list)
+    changed_words: list[WarningWordChange] = Field(default_factory=list)
+
+
+class WarningFormatFinding(BaseModel):
+    """One 27 CFR 16.22 format check (type size, characters per inch, or bold header)."""
+
+    code: Literal["type_size", "characters_per_inch", "header_bold"]
+    status: Literal["pass", "advisory", "fail"]
+    citation: str
+    message: str
+    estimated: bool = False
+
+
+class WarningFormatResult(BaseModel):
+    """Rolled-up 27 CFR 16.22 warning-format result for UI display."""
+
+    status: Literal["pass", "advisory", "fail"]
+    required_min_height_mm: float
+    max_characters_per_inch: int
+    estimated_characters_per_inch: Optional[float] = None
+    findings: list[WarningFormatFinding] = Field(default_factory=list)
+
+
 class FieldResult(BaseModel):
     """Result of a single compliance/requirement check for one field."""
 
@@ -121,16 +204,70 @@ class FieldResult(BaseModel):
         default=None,
         description="27 CFR 16.22 physical type-size measurement details (Option A scale marker or uncalibrated advisory).",
     )
+    warning_text_diff: Optional[WarningTextDiff] = Field(
+        default=None,
+        description="Word-level 27 CFR 16.21 diff (missing, extra, and changed words with positions).",
+    )
+    warning_format: Optional[WarningFormatResult] = Field(
+        default=None,
+        description="Rolled-up 27 CFR 16.22 type-size / characters-per-inch / bold-header result.",
+    )
+
+class StageTimings(BaseModel):
+    """Per-stage durations in milliseconds for one label review.
+
+    Keys match the intake/model/compliance pipeline. Values are milliseconds
+    spent in that stage (summed across images for CPU stages). Cache token
+    counts and TTFT come from the Anthropic usage object on each panel call.
+    """
+
+    decode: int = 0
+    pre_gate: int = 0
+    resize: int = 0
+    model: int = 0
+    compliance: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    model_ttft_ms: int = 0
+    model_generation_ms: int = 0
+
 
 class ReviewResult(BaseModel):
     """Response body for /api/review and /api/review/batch."""
 
     filenames: list[str]
-    overall_status: Status
+    overall_status: OverallStatus
     fields: list[FieldResult]
     extracted: ExtractedLabelData
     processing_time_ms: int
     error: Optional[str] = None
+    error_code: Optional[str] = Field(
+        default=None,
+        description="Stable machine-readable code when overall_status is retake or error.",
+    )
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Per-request correlation id; also sent as X-Request-ID.",
+    )
+    retake: Optional[RetakeGuidance] = Field(
+        default=None,
+        description="Recapture guidance when photo quality prevented a complete review.",
+    )
+    field_status: dict[str, FieldPresence] = Field(
+        default_factory=dict,
+        description="present / absent / unreadable for each required label element.",
+    )
+    quality: Optional[ImageQualityAdvisory] = Field(
+        default=None,
+        description="Pre-gate quality advisory (moderate issues; never blocks in warn mode).",
+    )
+    timings_ms: Optional[StageTimings] = Field(
+        default=None,
+        description=(
+            "Per-stage milliseconds for this review (decode, pre_gate, resize, "
+            "model, compliance). Additive; omitted only when timing was not collected."
+        ),
+    )
 
 class LabelCheckResult(BaseModel):
     """Result of validating a label against TTB mandatory label requirements.
@@ -140,11 +277,27 @@ class LabelCheckResult(BaseModel):
     """
 
     filenames: list[str]
-    overall_status: Status
+    overall_status: OverallStatus
     checks: list[FieldResult]
     extracted: ExtractedLabelData
     processing_time_ms: int
     error: Optional[str] = None
+    error_code: Optional[str] = Field(
+        default=None,
+        description="Stable machine-readable code when overall_status is retake or error.",
+    )
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Per-request correlation id; also sent as X-Request-ID.",
+    )
+    retake: Optional[RetakeGuidance] = Field(
+        default=None,
+        description="Recapture guidance when photo quality prevented a complete review.",
+    )
+    field_status: dict[str, FieldPresence] = Field(
+        default_factory=dict,
+        description="present / absent / unreadable for each required label element.",
+    )
     beverage_type: Optional[str] = None
     beverage_type_confirmed: bool = False
     needs_beverage_confirmation: bool = False
@@ -155,3 +308,15 @@ class LabelCheckResult(BaseModel):
             "['front', 'back']. Empty list when photo roles were not supplied."
         ),
     )
+    quality: Optional[ImageQualityAdvisory] = Field(
+        default=None,
+        description="Pre-gate quality advisory (moderate issues; never blocks in warn mode).",
+    )
+    timings_ms: Optional[StageTimings] = Field(
+        default=None,
+        description=(
+            "Per-stage milliseconds for this review (decode, pre_gate, resize, "
+            "model, compliance). Additive; omitted only when timing was not collected."
+        ),
+    )
+

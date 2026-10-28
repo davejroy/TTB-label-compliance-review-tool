@@ -1,13 +1,15 @@
 import { useRef, useState } from "react";
-import { reviewLabel } from "../api";
+import { ApiError, reviewLabel } from "../api";
 import {
   EMPTY_APPLICATION,
   type ApplicationData,
+  type RetakeArea,
   type ReviewResult,
 } from "../types";
 import ApplicationForm from "./ApplicationForm";
 import ColaImportModal from "./ColaImportModal";
-import ImageDropzone from "./ImageDropzone";
+import ErrorResultCard from "./ErrorResultCard";
+import ImageDropzone, { type ImageDropzoneHandle } from "./ImageDropzone";
 import ProcessingStatusBar from "./ProcessingStatusBar";
 import ResultsPanel from "./ResultsPanel";
 
@@ -72,6 +74,8 @@ export default function SingleReview() {
   const statusBarRef = useRef<HTMLDivElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const formTopRef = useRef<HTMLFormElement>(null);
+  const dropzoneRef = useRef<ImageDropzoneHandle>(null);
+  const [requestError, setRequestError] = useState<ApiError | null>(null);
 
   function clearTimers() {
     stepTimers.current.forEach(clearTimeout);
@@ -125,6 +129,7 @@ export default function SingleReview() {
     setFiles([]);
     setResult(null);
     setError(null);
+    setRequestError(null);
     setStatusStep(-1);
     setShowBar(false);
     setPrefillDone(false);
@@ -184,6 +189,7 @@ export default function SingleReview() {
     setLoading(true);
     setShowBar(true);
     setError(null);
+    setRequestError(null);
     setResult(null);
     startProgressTimers();
     // Scroll to status bar after a brief delay so it has rendered
@@ -202,6 +208,7 @@ export default function SingleReview() {
     } catch (err) {
       clearTimers();
       setError(err instanceof Error ? err.message : "Something went wrong.");
+      setRequestError(err instanceof ApiError ? err : null);
       setTimeout(() => {
         statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
@@ -256,7 +263,7 @@ export default function SingleReview() {
           <p className="text-base text-slate-500 mb-4">
             Take a photo or upload an image of the label (front and back, if needed).
           </p>
-          <ImageDropzone files={files} onChange={setFiles} idPrefix="single" />
+          <ImageDropzone ref={dropzoneRef} files={files} onChange={setFiles} idPrefix="single" />
         </div>
 
         {/* Pre-fill button — shown once at least one image has been uploaded */}
@@ -313,7 +320,16 @@ export default function SingleReview() {
           </button>
         )}
 
-        {error && <p className="mt-3 text-base text-red-700">{error}</p>}
+        {error && !requestError && <p className="mt-3 text-base text-red-700">{error}</p>}
+        {requestError && (
+          <div className="mt-3">
+            <ErrorResultCard
+              message={requestError.message}
+              errorCode={requestError.error_code}
+              requestId={requestError.request_id}
+            />
+          </div>
+        )}
       </form>
 
       <div>
@@ -337,7 +353,11 @@ export default function SingleReview() {
 
         {result && (
           <div ref={resultsRef}>
-            <ResultsPanel result={result} files={files} />
+            <ResultsPanel
+              result={result}
+              files={files}
+              onRetake={(area: RetakeArea) => dropzoneRef.current?.openCapture(area)}
+            />
           </div>
         )}
       </div>

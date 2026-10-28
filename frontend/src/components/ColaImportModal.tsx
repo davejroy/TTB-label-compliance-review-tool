@@ -211,17 +211,18 @@ export default function ColaImportModal({
           {/* Section 2: Demo Presets */}
           <section className="space-y-3">
             <h3 className="text-base font-bold text-[#083c6f] flex items-center gap-2 border-b border-slate-200 pb-2">
-              <span>⚡</span> One-Click Demo Presets
+              <span>⚡</span> One-Click Demo & QA Presets
             </h3>
             <p className="text-xs sm:text-sm text-slate-600">
-              Select a pre-configured, statutory-compliant COLA application for quick evaluation testing:
+              Select a pre-configured COLA application for quick evaluation testing. Synthetic QA entries only fill application data; upload the matching fixture image separately:
             </p>
 
             {loadingPresets ? (
               <div className="p-4 text-center text-slate-500 text-sm">Loading presets…</div>
             ) : (
+              <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {presets.map((preset) => (
+                {presets.filter((preset) => preset.category !== "synthetic_qa").map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
@@ -245,6 +246,43 @@ export default function ColaImportModal({
                   </button>
                 ))}
               </div>
+
+              {presets.some((preset) => preset.category === "synthetic_qa") && (
+                <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <h4 className="text-sm font-bold text-amber-900">Synthetic QA fixtures</h4>
+                  <p className="mt-1 text-xs text-amber-800">
+                    Fictional regression cases for testing. They do not add image bytes to the app bundle.
+                    Use the fixture ID in the developer QA matrix to select the matching image.
+                  </p>
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {presets.filter((preset) => preset.category === "synthetic_qa").map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => handlePresetSelect(preset)}
+                        className="text-left p-3.5 rounded-xl border border-amber-200 bg-white hover:border-amber-500 hover:bg-amber-50 transition-all shadow-xs group"
+                        title={preset.expected_result}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wider text-amber-700">
+                            {preset.fixture_id ?? "QA fixture"}
+                          </span>
+                          <span className="text-xs font-semibold text-amber-800 group-hover:underline">
+                            Apply →
+                          </span>
+                        </div>
+                        <div className="font-bold text-slate-900 text-sm mt-1">
+                          {preset.name.replace(/^QA:\s*/, "")}
+                        </div>
+                        <div className="text-xs text-slate-600 mt-0.5">
+                          {preset.expected_result ?? preset.description}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              </>
             )}
           </section>
         </div>

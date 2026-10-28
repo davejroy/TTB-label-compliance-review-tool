@@ -1,10 +1,11 @@
 import { useRef, useState } from "react";
 import { reviewLabelsBatchStream } from "../api";
-import { downloadCsv } from "../csv";
-import { EMPTY_APPLICATION, type ApplicationData, type ReviewResult } from "../types";
+import { downloadCsv, reviewResultCsvRows } from "../csv";
+import { isErrorResult, isRetakeResult } from "../errorContract";
+import { EMPTY_APPLICATION, type ApplicationData, type RetakeArea, type ReviewResult } from "../types";
 import ApplicationForm from "./ApplicationForm";
 import ColaImportModal from "./ColaImportModal";
-import ImageDropzone from "./ImageDropzone";
+import ImageDropzone, { type ImageDropzoneHandle } from "./ImageDropzone";
 import ResultsPanel from "./ResultsPanel";
 import StatusBadge from "./StatusBadge";
 
@@ -48,6 +49,7 @@ export default function BatchReview() {
   const stepTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // Ref for auto-scroll
   const resultsRef = useRef<HTMLDivElement>(null);
+  const dropzoneRefs = useRef<Record<string, ImageDropzoneHandle | null>>({});
 
   function clearTimers() {
     stepTimers.current.forEach(clearTimeout);
@@ -130,22 +132,7 @@ export default function BatchReview() {
       ["Files", "Overall Status", "Field", "Field Status", "Application Value", "Label Value", "Message"],
     ];
     completedResults.forEach((result) => {
-      const files = result.filenames.join(", ");
-      if (result.error) {
-        rows.push([files, "fail", "", "", "", "", result.error]);
-        return;
-      }
-      result.fields.forEach((field) => {
-        rows.push([
-          files,
-          result.overall_status,
-          field.label_name,
-          field.status,
-          field.application_value ?? "",
-          field.label_value ?? "",
-          field.message,
-        ]);
-      });
+      rows.push(...reviewResultCsvRows(result));
     });
     downloadCsv("batch-review-results.csv", rows);
   }
@@ -176,7 +163,7 @@ export default function BatchReview() {
             if (!prev) return prev;
             const next = [...prev];
             next[index] = {
-              status: result.error ? "error" : "done",
+              status: isErrorResult(result) ? "error" : "done",
               result,
             };
             return next;
@@ -255,6 +242,9 @@ export default function BatchReview() {
                 idPrefix={`batch-${item.id}`}
               />
               <ImageDropzone
+                ref={(handle) => {
+                  dropzoneRefs.current[item.id] = handle;
+                }}
                 files={item.files}
                 onChange={(files) => updateItem(item.id, { files })}
                 idPrefix={`batch-${item.id}`}
@@ -353,7 +343,9 @@ export default function BatchReview() {
                 }
 
                 const issues = result.fields?.filter((f) => f.status !== "pass") ?? [];
-                const issueText = result.error ? (
+                const issueText = isRetakeResult(result) ? (
+                  <span className="text-amber-800">{result.error || "Retake required"}</span>
+                ) : isErrorResult(result) ? (
                   <span className="text-red-600">{result.error}</span>
                 ) : issues.length === 0 ? (
                   "No issues found"
@@ -377,15 +369,13 @@ export default function BatchReview() {
                         )}
                       </div>
                       <p className="text-sm text-slate-600">{issueText}</p>
-                      {!result.error && (
-                        <button
-                          type="button"
-                          className="text-sm font-semibold text-[#15396a] underline"
-                          onClick={() => setExpanded(expanded === index ? null : index)}
-                        >
-                          {expanded === index ? "Hide details" : "View details"}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="text-sm font-semibold text-[#15396a] underline"
+                        onClick={() => setExpanded(expanded === index ? null : index)}
+                      >
+                        {expanded === index ? "Hide details" : "View details"}
+                      </button>
                     </div>
 
                     {/* Desktop row */}
@@ -405,21 +395,26 @@ export default function BatchReview() {
                         )}
                       </div>
                       <div className="px-4 py-3">
-                        {!result.error && (
-                          <button
-                            type="button"
-                            className="text-sm font-semibold text-[#15396a] underline"
-                            onClick={() => setExpanded(expanded === index ? null : index)}
-                          >
-                            {expanded === index ? "Hide" : "Details"}
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="text-sm font-semibold text-[#15396a] underline"
+                          onClick={() => setExpanded(expanded === index ? null : index)}
+                        >
+                          {expanded === index ? "Hide" : "Details"}
+                        </button>
                       </div>
                     </div>
 
-                    {expanded === index && !result.error && (
+                    {expanded === index && (
                       <div className="px-4 pb-4">
-                        <ResultsPanel result={result} files={items[index]?.files ?? []} />
+                        <ResultsPanel
+                          result={result}
+                          files={items[index]?.files ?? []}
+                          onRetake={(area: RetakeArea) => {
+                            const id = items[index]?.id;
+                            if (id) dropzoneRefs.current[id]?.openCapture(area);
+                          }}
+                        />
                       </div>
                     )}
                   </div>

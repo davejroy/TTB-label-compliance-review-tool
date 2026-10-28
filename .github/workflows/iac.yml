@@ -2,21 +2,21 @@ name: IaC validation
 
 on:
   pull_request:
+    types: [opened, synchronize, ready_for_review]
     paths:
       - "infra/**"
       - ".github/workflows/iac.yml"
-  push:
-    branches: [main]
-    paths:
-      - "infra/**"
-      - ".github/workflows/iac.yml"
-
+  workflow_dispatch:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   terraform:
     name: Terraform format and validation
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,6 +33,7 @@ jobs:
 
   ansible:
     name: Ansible syntax validation
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     defaults:
       run:

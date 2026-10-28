@@ -1,13 +1,13 @@
 /**
  * Tests for src/csv.ts
- *
- * toCsv() and escapeCsvField() are pure functions with no DOM or API
- * dependencies, making them the ideal first test target per the issue
- * triage recommendation. No API key or browser environment needed.
- *
- * Covers: RFC 4180 quoting, CRLF line endings, special characters,
- * multi-row output, empty inputs, and the UTF-8 BOM stub check.
- */
+  *
+   * toCsv() and escapeCsvField() are pure functions with no DOM or API
+    * dependencies, making them the ideal first test target per the issue
+     * triage recommendation. No API key or browser environment needed.
+      *
+       * Covers: RFC 4180 quoting, CRLF line endings, special characters,
+        * multi-row output, empty inputs, and the UTF-8 BOM stub check.
+         */
 import { describe, it, expect } from 'vitest';
 import { toCsv } from '../csv';
 
@@ -82,9 +82,79 @@ describe('toCsv', () => {
     });
 });
 
+describe('reviewResultCsvRows', () => {
+    it('writes overall_status retake and keeps partial fields', async () => {
+        const { reviewResultCsvRows } = await import('../csv');
+        const rows = reviewResultCsvRows({
+            filenames: ['front.jpg', 'back.jpg'],
+            overall_status: 'retake',
+            processing_time_ms: 100,
+            error: 'Photo quality is too low, please retake.',
+            error_code: 'PHOTO_UNREADABLE_FIELD',
+            fields: [
+                {
+                    field: 'brand_name',
+                    label_name: 'Brand Name',
+                    status: 'pass',
+                    application_value: 'Old Tom',
+                    label_value: 'Old Tom',
+                    message: 'Matches application',
+                },
+            ],
+            extracted: { government_warning_present: true, field_locations: [] },
+        });
+        expect(rows).toHaveLength(1);
+        expect(rows[0][1]).toBe('retake');
+        expect(rows[0][2]).toBe('Brand Name');
+        expect(rows[0]).not.toContain('fail');
+    });
+
+    it('writes overall_status error when there are no fields', async () => {
+        const { reviewResultCsvRows } = await import('../csv');
+        const rows = reviewResultCsvRows({
+            filenames: ['bad.jpg'],
+            overall_status: 'error',
+            processing_time_ms: 40,
+            error: 'The review service timed out. Please try again.',
+            error_code: 'UPSTREAM_TIMEOUT',
+            fields: [],
+            extracted: { government_warning_present: false, field_locations: [] },
+        });
+        expect(rows).toEqual([
+            ['bad.jpg', 'error', '', '', '', '', 'The review service timed out. Please try again.'],
+        ]);
+    });
+});
+
+describe('labelCheckResultCsvRows', () => {
+    it('writes overall_status fail only for a real compliance fail', async () => {
+        const { labelCheckResultCsvRows } = await import('../csv');
+        const rows = labelCheckResultCsvRows({
+            filenames: ['label.jpg'],
+            overall_status: 'fail',
+            beverage_type: 'distilled_spirits',
+            processing_time_ms: 90,
+            checks: [
+                {
+                    field: 'government_warning',
+                    label_name: 'Government Warning',
+                    status: 'fail',
+                    application_value: 'Required',
+                    label_value: '',
+                    message: 'Government Warning statement not found on label.',
+                },
+            ],
+            extracted: { government_warning_present: false, field_locations: [] },
+        }, 'Distilled Spirits');
+        expect(rows[0][2]).toBe('fail');
+        expect(rows[0][3]).toBe('Government Warning');
+    });
+});
+
 describe('downloadColaTemplateCsv', () => {
     it('is a callable function that triggers download of standard COLA headers', async () => {
         const { downloadColaTemplateCsv } = await import('../csv');
         expect(typeof downloadColaTemplateCsv).toBe('function');
     });
 });
+

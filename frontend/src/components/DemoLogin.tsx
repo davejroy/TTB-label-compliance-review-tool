@@ -1,37 +1,39 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { getToken, setToken } from "../authStore";
+import { getToken, onUnauthorized, setToken } from "../authStore";
+import { httpStatusUserMessage } from "../errorContract";
+
+/** Shown when a stored token is rejected (HTTP 401) or the login probe fails. */
+export const ACCESS_EXPIRED_MESSAGE = "Access code expired or incorrect";
 
 /**
  * Demo access gate for the TTB Label Compliance Review Tool.
  *
  * Wraps the application. Behavior:
  *  - On mount it asks the backend (GET /api/demo-info) whether the access gate
- *    is enabled and, if so, which username evaluators should use.
+ *    is enabled. The payload is only `{ auth_enabled }` — no username.
  *  - If the gate is DISABLED (auth_enabled === false), children render
  *    immediately — no login required. This is the default local-dev experience
  *    and guarantees the app is never accidentally locked.
- *  - If the gate is ENABLED and no valid token is stored, a login card is shown
- *    that DISPLAYS the expected demo username so TTB evaluators are never locked
- *    out. They paste the access token provided to them; it is validated against
- *    the backend and stored for the session.
+ *  - If the gate is ENABLED and no valid token is stored, a login card is shown.
+ *    Evaluators paste the access token provided to them.
+ *  - If a later API call returns 401, `api.ts` clears the stored token and this
+ *    card is shown again with "Access code expired or incorrect".
  *
  * This is a demonstration-grade shared-token gate, not real user authentication.
  */
 
-// Mirror the API base resolution used in api.ts so we hit the same backend.
 const API_BASE = import.meta.env.VITE_API_HOST
   ? `https://${import.meta.env.VITE_API_HOST}`
   : "";
 
 interface DemoInfo {
   auth_enabled: boolean;
-  username: string;
 }
 
 type GateState =
   | { status: "loading" }
-  | { status: "open" } // auth disabled or already authenticated
-  | { status: "login"; username: string };
+  | { status: "open" }
+  | { status: "login" };
 
 export default function DemoLogin({ children }: { children: ReactNode }) {
   const [gate, setGate] = useState<GateState>({ status: "loading" });
@@ -39,6 +41,7 @@ export default function DemoLogin({ children }: { children: ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef(false);
+  const authEnabledRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,27 +51,32 @@ export default function DemoLogin({ children }: { children: ReactNode }) {
         if (!res.ok) throw new Error(`demo-info ${res.status}`);
         const info: DemoInfo = await res.json();
         if (cancelled) return;
+        authEnabledRef.current = Boolean(info.auth_enabled);
         if (!info.auth_enabled) {
           setGate({ status: "open" });
           return;
         }
-        // Gate is on: if we already hold a token, trust it for now (a bad token
-        // will be rejected by the first real API call, which clears it).
         if (getToken()) {
           setGate({ status: "open" });
         } else {
-          setGate({ status: "login", username: info.username });
+          setGate({ status: "login" });
         }
       } catch {
-        // If demo-info is unreachable, fail OPEN rather than lock the evaluator
-        // out. The backend is the real enforcement point; the UI gate is a
-        // convenience. A protected call will still 401 if a token is required.
         if (!cancelled) setGate({ status: "open" });
       }
     })();
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    return onUnauthorized(() => {
+      if (!authEnabledRef.current) return;
+      setError(ACCESS_EXPIRED_MESSAGE);
+      setTokenInput("");
+      setGate({ status: "login" });
+    });
   }, []);
 
   async function handleSubmit(e: FormEvent) {
@@ -83,21 +91,23 @@ export default function DemoLogin({ children }: { children: ReactNode }) {
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      // Validate the token against a protected endpoint via a cheap OPTIONS-like
-      // probe. We use /api/demo-info to confirm reachability, then store and let
-      // the app's real calls exercise the token. To actively verify, we hit a
-      // protected route with a HEAD-style empty request expecting 401 vs !=401.
       const probe = await fetch(`${API_BASE}/api/review/batch`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: new FormData(),
       });
       if (probe.status === 401) {
-        setError("That access token was not accepted. Please check and retry.");
+        setError(ACCESS_EXPIRED_MESSAGE);
         return;
       }
-      // Any non-401 (including 422 for the empty body) means the token passed
-      // the auth layer. Store it and enter the app.
+      if (probe.status === 429) {
+        setError(httpStatusUserMessage(429, "Too many failed sign-in attempts. Please wait a few minutes and try again."));
+        return;
+      }
+      if (probe.status === 413) {
+        setError(httpStatusUserMessage(413, "This upload is too large."));
+        return;
+      }
       setToken(token);
       setGate({ status: "open" });
     } catch {
@@ -120,7 +130,6 @@ export default function DemoLogin({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
-  // gate.status === "login"
   return (
     <div className="min-h-screen grid place-items-center bg-slate-100 px-4">
       <div className="w-full max-w-md rounded-xl border border-slate-300 bg-white shadow-sm">
@@ -133,10 +142,6 @@ export default function DemoLogin({ children }: { children: ReactNode }) {
             This demonstration environment is access-controlled. Use the
             credentials provided for your evaluation session.
           </p>
-          <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-sm">
-            <div className="text-slate-500">Demo username</div>
-            <div className="font-mono font-semibold text-slate-800">{gate.username}</div>
-          </div>
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Access token</span>
             <input

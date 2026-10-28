@@ -133,7 +133,7 @@ export default function InstructionsModal({ isOpen, onClose }: InstructionsModal
               <span>💡</span> Photo Tips for Optimal Accuracy
             </h3>
             <div className="bg-amber-50/70 border border-amber-200 rounded-lg p-4 space-y-2">
-              <ul className="list-disc list-inside space-y-1.5 text-xs sm:text-amber-950">
+              <ul className="list-disc list-inside space-y-1.5 text-xs sm:text-sm text-amber-950">
                 <li><strong>Flat &amp; Focused:</strong> Keep the label flat and unrolled; tap your device screen to focus text before capturing.</li>
                 <li><strong>Even Lighting &amp; Avoid Glare:</strong> Shoot in bright, diffuse light. Avoid direct flash glare or heavy reflections on glossy bottles and metallic foils.</li>
                 <li><strong>Straight-On Angle:</strong> Hold the camera parallel to the label surface (tilt &le; 25&deg;) rather than at an oblique angle.</li>
@@ -209,9 +209,9 @@ export default function InstructionsModal({ isOpen, onClose }: InstructionsModal
             </h3>
             <div className="space-y-2 text-slate-700">
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                <strong className="text-slate-900 block mb-1">Government Warning Exact Casing (27 CFR 16.20):</strong>
+                <strong className="text-slate-900 block mb-1">Government Warning Exact Casing (27 CFR 16.21 / 16.22):</strong>
                 <p className="text-xs sm:text-sm text-slate-600">
-                  The heading must appear in exact uppercase as <code className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-slate-300 text-slate-900">GOVERNMENT WARNING:</code> followed by the statutory text. Any altered header casing or text mutation triggers a compliance warning or failure.
+                  The heading must appear in exact uppercase as <code className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-slate-300 text-slate-900">GOVERNMENT WARNING:</code> followed by the full statutory 16.21 text on every container size. Part 16 does not permit a shortened warning. Small containers receive only the smaller 16.22 type-size minimum (1 mm for 237 mL or less, 2 mm up to 3 L, 3 mm above 3 L) and the matching characters-per-inch cap (40 / 25 / 12). A heading that does not appear bold is an advisory only (16.22(a)(2)); vision cannot judge boldness reliably.
                 </p>
               </div>
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">

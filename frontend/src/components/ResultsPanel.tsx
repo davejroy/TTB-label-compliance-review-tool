@@ -1,9 +1,13 @@
 import { useState } from "react";
-import type { ReviewResult } from "../types";
+import { isErrorResult, isRetakeResult } from "../errorContract";
+import type { RetakeArea, ReviewResult } from "../types";
 import ConfidenceBadge from "./ConfidenceBadge";
+import ErrorResultCard from "./ErrorResultCard";
 import LabelImageViewer from "./LabelImageViewer";
+import RetakeCard from "./RetakeCard";
 import StatusBadge from "./StatusBadge";
 import TypeSizeDetailsView from "./TypeSizeDetailsView";
+import WarningFormatView from "./WarningFormatView";
 
 /**
  * How many low-confidence fields trigger the "retake photo" banner.
@@ -23,47 +27,41 @@ const PHOTO_TIPS = [
   "For small print (net contents, ABV), zoom in and take a separate close-up shot.",
 ];
 
-export default function ResultsPanel({ result, files }: { result: ReviewResult; files: File[] }) {
+export default function ResultsPanel({
+  result,
+  files,
+  onRetake,
+}: {
+  result: ReviewResult;
+  files: File[];
+  onRetake?: (area: RetakeArea) => void;
+}) {
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
   const [tipsExpanded, setTipsExpanded] = useState(false);
 
-  if (result.error) {
-    // Detect low-quality image errors and show targeted tips
-    const isImageQualityError =
-      result.error.toLowerCase().includes("confidence") ||
-      result.error.toLowerCase().includes("low quality") ||
-      result.error.toLowerCase().includes("unable to read") ||
-      result.error.toLowerCase().includes("blurr");
-
+  if (isErrorResult(result) && !isRetakeResult(result)) {
     return (
-      <div className="rounded-xl border border-red-300 bg-red-50 p-6 space-y-4">
-        <h3 className="text-xl font-bold text-red-800 mb-2">Could not process label</h3>
-        <p className="text-red-700">{result.error}</p>
-
-        {isImageQualityError && (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
-            <h4 className="text-base font-semibold text-amber-800 mb-2">
-              📷 Tips for a better photo
-            </h4>
-            <ul className="list-disc list-inside text-sm text-amber-900 space-y-1">
-              {PHOTO_TIPS.map((tip) => (
-                <li key={tip}>{tip}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
+      <ErrorResultCard
+        message={result.error || "An unexpected error occurred. Please try again."}
+        errorCode={result.error_code}
+        requestId={result.request_id}
+      />
     );
   }
+
+  const showRetake = isRetakeResult(result);
 
   // Count low-confidence field reads
   const lowConfidenceFields = result.extracted.field_locations.filter(
     (loc) => loc.confidence === "low",
   );
-  const hasLowConfidence = lowConfidenceFields.length >= LOW_CONFIDENCE_THRESHOLD;
+  const hasLowConfidence = !showRetake && lowConfidenceFields.length >= LOW_CONFIDENCE_THRESHOLD;
 
   return (
     <div className="space-y-6">
+      {showRetake && (
+        <RetakeCard message={result.error} retake={result.retake} onRetake={onRetake} />
+      )}
       {files.length > 0 && (
         <LabelImageViewer
           files={files}
@@ -108,6 +106,7 @@ export default function ResultsPanel({ result, files }: { result: ReviewResult; 
         </div>
       )}
 
+      {(result.fields.length > 0 || !showRetake) && (
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
         <div>
@@ -174,8 +173,16 @@ export default function ResultsPanel({ result, files }: { result: ReviewResult; 
                     </p>
                   </div>
                 </div>
-                {field.type_size_details && (
-                  <TypeSizeDetailsView details={field.type_size_details} />
+                {field.warning_format || field.warning_text_diff ? (
+                  <WarningFormatView
+                    format={field.warning_format}
+                    typeSize={field.type_size_details}
+                    textDiff={field.warning_text_diff}
+                  />
+                ) : (
+                  field.type_size_details && (
+                    <TypeSizeDetailsView details={field.type_size_details} />
+                  )
                 )}
               </div>
             );
@@ -191,6 +198,7 @@ export default function ResultsPanel({ result, files }: { result: ReviewResult; 
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

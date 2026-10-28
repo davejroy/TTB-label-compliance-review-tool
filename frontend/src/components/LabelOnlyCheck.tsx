@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { checkLabelsBatch } from "../api";
-import { downloadCsv } from "../csv";
-import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
-import ImageDropzone from "./ImageDropzone";
+import { downloadCsv, labelCheckResultCsvRows } from "../csv";
+import { isErrorResult, isRetakeResult } from "../errorContract";
+import { BEVERAGE_TYPE_LABELS, type LabelCheckResult, type RetakeArea } from "../types";
+import ImageDropzone, { type ImageDropzoneHandle } from "./ImageDropzone";
 import LabelCheckResultsPanel from "./LabelCheckResultsPanel";
 import ProcessingStatusBar from "./ProcessingStatusBar";
 import StatusBadge from "./StatusBadge";
@@ -126,6 +127,7 @@ export default function LabelOnlyCheck() {
   const statusBarRef = useRef<HTMLDivElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const label1BoxRef = useRef<HTMLDivElement>(null);
+  const dropzoneRefs = useRef<Record<string, ImageDropzoneHandle | null>>({});
 
   /**
    * Index of the result currently waiting for beverage-type confirmation.
@@ -203,18 +205,10 @@ export default function LabelOnlyCheck() {
       ["Files","Beverage Type","Overall Status","Check","Check Status","TTB Requirement","Label Value","Notes"],
     ];
     results.forEach((result) => {
-      const files = result.filenames.join("; ");
       const beverageType = result.beverage_type
         ? BEVERAGE_TYPE_LABELS[result.beverage_type] ?? result.beverage_type
         : "";
-      if (result.error) {
-        rows.push([files, beverageType, "fail", "", "", "", "", result.error]);
-        return;
-      }
-      result.checks.forEach((check) => {
-        rows.push([files, beverageType, result.overall_status, check.label_name,
-          check.status, check.application_value ?? "", check.label_value ?? "", check.message]);
-      });
+      rows.push(...labelCheckResultCsvRows(result, beverageType));
     });
     downloadCsv("label-check-results.csv", rows);
   }
@@ -318,8 +312,14 @@ export default function LabelOnlyCheck() {
                 </button>
               )}
             </div>
-            <ImageDropzone files={item.files} onChange={(files) => updateItem(item.id, files)}
-              idPrefix={`labelcheck-${item.id}`} />
+            <ImageDropzone
+              ref={(handle) => {
+                dropzoneRefs.current[item.id] = handle;
+              }}
+              files={item.files}
+              onChange={(files) => updateItem(item.id, files)}
+              idPrefix={`labelcheck-${item.id}`}
+            />
           </div>
         ))}
 
@@ -387,7 +387,9 @@ export default function LabelOnlyCheck() {
             <div className="divide-y divide-slate-100">
               {results.map((result, index) => {
                 const issues = result.checks?.filter((c) => c.status !== "pass") ?? [];
-                const issueText = result.error
+                const issueText = isRetakeResult(result)
+                  ? <span className="text-amber-800">{result.error || "Retake required"}</span>
+                  : isErrorResult(result)
                   ? <span className="text-red-600">{result.error}</span>
                   : issues.length === 0 ? "No issues found"
                   : issues.map((c) => c.label_name).join(", ");
@@ -421,15 +423,13 @@ export default function LabelOnlyCheck() {
                         )}
                       </div>
                       <p className="text-sm text-slate-600">{issueText}</p>
-                      {!result.error && (
-                        <button
-                          type="button"
-                          className="w-full mt-1 rounded-lg border-2 border-blue-700 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-                          onClick={() => setExpanded(expanded === index ? null : index)}
-                        >
-                          {expanded === index ? "Hide details" : "View details"}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="w-full mt-1 rounded-lg border-2 border-blue-700 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                        onClick={() => setExpanded(expanded === index ? null : index)}
+                      >
+                        {expanded === index ? "Hide details" : "View details"}
+                      </button>
                     </div>
                     <div className="hidden sm:grid sm:grid-cols-[2fr_1fr_auto_2fr_auto] items-center">
                       <div className="px-4 py-3 font-medium text-slate-800 text-sm break-all">
@@ -458,15 +458,13 @@ export default function LabelOnlyCheck() {
                         )}
                       </div>
                       <div className="px-4 py-3">
-                        {!result.error && (
-                          <button
-                            type="button"
-                            className="text-sm font-semibold text-blue-700 underline hover:text-blue-900"
-                            onClick={() => setExpanded(expanded === index ? null : index)}
-                          >
-                            {expanded === index ? "Hide details" : "View details"}
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="text-sm font-semibold text-blue-700 underline hover:text-blue-900"
+                          onClick={() => setExpanded(expanded === index ? null : index)}
+                        >
+                          {expanded === index ? "Hide details" : "View details"}
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -476,7 +474,14 @@ export default function LabelOnlyCheck() {
           </div>
           {expanded !== null && results[expanded] && (
             <div className="mt-6">
-              <LabelCheckResultsPanel result={results[expanded]} files={items[expanded]?.files ?? []} />
+              <LabelCheckResultsPanel
+                result={results[expanded]}
+                files={items[expanded]?.files ?? []}
+                onRetake={(area: RetakeArea) => {
+                  const id = items[expanded]?.id;
+                  if (id) dropzoneRefs.current[id]?.openCapture(area);
+                }}
+              />
             </div>
           )}
         </div>

@@ -13,6 +13,26 @@ interface Props {
   highlightedField: string | null;
 }
 
+function ViewerImage({ file, url, alt }: { file: File; url: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="flex min-h-[8rem] w-full flex-col items-center justify-center bg-slate-200 px-3 py-6 text-center" role="img" aria-label={alt}>
+        <span className="max-w-full truncate text-sm font-semibold text-slate-700">{file.name}</span>
+        <span className="mt-1 text-xs text-slate-500">Preview not available</span>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt={alt}
+      className="block max-w-full h-auto select-none"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export default function LabelImageViewer({ files, fieldLocations, highlightedField }: Props) {
   const [zoom, setZoom] = useState(1);
   const urls = useMemo(() => files.map((file) => URL.createObjectURL(file)), [files]);
@@ -36,7 +56,7 @@ export default function LabelImageViewer({ files, fieldLocations, highlightedFie
           return (
             <div key={index} className="overflow-auto rounded-lg border border-slate-200 bg-slate-50 max-h-[28rem]">
               <div className="relative inline-block" style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}>
-                <img src={urls[index]} alt={`Label image ${index + 1}`} className="block max-w-full h-auto select-none" />
+                <ViewerImage key={`${files[index].name}-${files[index].size}-${files[index].lastModified}`} url={urls[index]} file={files[index]} alt={`Label image ${index + 1}`} />
                 {boxes.map((box, bi) => (<div key={bi} className={`absolute border-2 pointer-events-none ${CONFIDENCE_COLORS[box.confidence as Confidence]}`} style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.width * 100}%`, height: `${box.height * 100}%` }} />))}
               </div>
             </div>

@@ -1,9 +1,8 @@
-"""Regression tests for LowConfidenceError handling on review routes.
+"""Regression tests for missing-field handling on review routes.
 
-When extraction cannot read a required field (for example a front-only photo
-with no bottler name/address), run_compliance_checks raises LowConfidenceError.
-Review endpoints must return the user-facing retake message in the result body
-(HTTP 200, overall_status=fail) rather than an unhandled HTTP 500.
+When a readable photo has an empty required field scored 0.0, the field is
+absent — a compliance fail of "X not found on label" — not a photo retake.
+Review endpoints must return HTTP 200 (never 500).
 """
 
 from __future__ import annotations
@@ -34,16 +33,18 @@ def _application() -> dict:
         "class_type": "Whiskey",
         "alcohol_content": "45% ABV",
         "net_contents": "750 mL",
+        "name_and_address": "Bottled by Bourbon Co, Louisville, KY",
     }
 
 
-def _low_confidence_extraction() -> ExtractedLabelData:
-    """Front-only extraction: required name_and_address is unreadable (0%)."""
+def _missing_address_extraction() -> ExtractedLabelData:
+    """Readable photo: bottler name/address is not printed (empty + 0.0)."""
     return ExtractedLabelData(
         brand_name="BOURBON CO",
         class_type="Whiskey",
         alcohol_content="45% ABV",
         net_contents="750 mL",
+        name_and_address="",
         government_warning_present=True,
         government_warning_header=CANONICAL_WARNING_HEADER,
         government_warning_body=CANONICAL_WARNING_BODY,
@@ -57,24 +58,28 @@ def client():
     return TestClient(main_module.app)
 
 
-def _assert_retake_result(payload: dict) -> None:
-    """Shared assertions for the low-confidence retake response body."""
+def _assert_missing_field_fail(payload: dict) -> None:
+    """Shared assertions: missing address is a fail, never a 500 or retake."""
     assert payload["overall_status"] == "fail"
-    assert payload["fields"] == []
-    error = payload.get("error") or ""
-    assert error, "expected a user-facing error message"
-    assert "retake" in error.lower()
-    assert "name and address" in error.lower() or "bottler" in error.lower()
-    assert "500" not in error
+    assert payload.get("error_code") not in {"PHOTO_UNREADABLE_FIELD", "PHOTO_QUALITY_LOW"}
+    field_status = payload.get("field_status") or {}
+    assert field_status.get("name_and_address") == "absent"
+    field_names = {item["field"] for item in payload.get("fields") or []}
+    assert "brand_name" in field_names
+    assert "name_and_address" in field_names
+    addr = next(item for item in payload["fields"] if item["field"] == "name_and_address")
+    assert addr["status"] == "fail"
+    assert "not found on label" in addr["message"].lower()
     extracted = payload.get("extracted") or {}
     assert extracted.get("per_field_confidence", {}).get("name_and_address") == 0.0
+    assert payload.get("request_id")
 
 
-def test_review_single_low_confidence_required_field_returns_retake_message(client):
-    """POST /api/review returns the retake-photo message, never HTTP 500."""
+def test_review_single_missing_required_field_fails_not_retake(client):
+    """POST /api/review fails the missing field, never HTTP 500 or a retake."""
     with patch(
         "app.main._extract_fields_with_retry",
-        AsyncMock(return_value=(_low_confidence_extraction(), None)),
+        AsyncMock(return_value=(_missing_address_extraction(), None)),
     ):
         res = client.post(
             "/api/review",
@@ -84,14 +89,14 @@ def test_review_single_low_confidence_required_field_returns_retake_message(clie
 
     assert res.status_code == 200
     assert res.status_code not in (401, 403, 500)
-    _assert_retake_result(res.json())
+    _assert_missing_field_fail(res.json())
 
 
-def test_review_batch_low_confidence_required_field_returns_retake_message(client):
+def test_review_batch_missing_required_field_fails_not_retake(client):
     """POST /api/review/batch uses _review_single and must not 500."""
     with patch(
         "app.main._extract_fields_with_retry",
-        AsyncMock(return_value=(_low_confidence_extraction(), None)),
+        AsyncMock(return_value=(_missing_address_extraction(), None)),
     ):
         res = client.post(
             "/api/review/batch",
@@ -107,14 +112,14 @@ def test_review_batch_low_confidence_required_field_returns_retake_message(clien
     body = res.json()
     assert isinstance(body, list)
     assert len(body) == 1
-    _assert_retake_result(body[0])
+    _assert_missing_field_fail(body[0])
 
 
-def test_review_batch_stream_low_confidence_required_field_returns_retake_message(client):
-    """POST /api/review/batch/stream returns the retake message in NDJSON."""
+def test_review_batch_stream_missing_required_field_fails_not_retake(client):
+    """POST /api/review/batch/stream reports the missing field in NDJSON."""
     with patch(
-        "app.main._extract_fields_with_retry",
-        AsyncMock(return_value=(_low_confidence_extraction(), None)),
+        "app.main.extract_label_fields",
+        return_value=_missing_address_extraction(),
     ):
         res = client.post(
             "/api/review/batch/stream",
@@ -130,4 +135,4 @@ def test_review_batch_stream_low_confidence_required_field_returns_retake_messag
     lines = [json.loads(line) for line in res.text.strip().split("\n") if line.strip()]
     assert lines, "expected NDJSON result lines"
     result_line = next(item for item in lines if "result" in item)
-    _assert_retake_result(result_line["result"])
+    _assert_missing_field_fail(result_line["result"])

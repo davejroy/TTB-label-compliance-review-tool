@@ -1,9 +1,13 @@
 import { useState } from "react";
-import { BEVERAGE_TYPE_LABELS, type LabelCheckResult } from "../types";
+import { isErrorResult, isRetakeResult } from "../errorContract";
+import { BEVERAGE_TYPE_LABELS, type LabelCheckResult, type RetakeArea } from "../types";
 import ConfidenceBadge from "./ConfidenceBadge";
+import ErrorResultCard from "./ErrorResultCard";
 import LabelImageViewer from "./LabelImageViewer";
+import RetakeCard from "./RetakeCard";
 import StatusBadge from "./StatusBadge";
 import TypeSizeDetailsView from "./TypeSizeDetailsView";
+import WarningFormatView from "./WarningFormatView";
 
 /**
  * Renders one Label-Only Check result: the label image viewer (with
@@ -13,20 +17,25 @@ import TypeSizeDetailsView from "./TypeSizeDetailsView";
 export default function LabelCheckResultsPanel({
   result,
   files,
+  onRetake,
 }: {
   result: LabelCheckResult;
   files: File[];
+  onRetake?: (area: RetakeArea) => void;
 }) {
   const [highlightedField, setHighlightedField] = useState<string | null>(null);
 
-  if (result.error) {
+  if (isErrorResult(result) && !isRetakeResult(result)) {
     return (
-      <div className="rounded-xl border border-red-300 bg-red-50 p-6">
-        <h3 className="text-xl font-bold text-red-800 mb-2">Could not process label</h3>
-        <p className="text-red-700">{result.error}</p>
-      </div>
+      <ErrorResultCard
+        message={result.error || "An unexpected error occurred. Please try again."}
+        errorCode={result.error_code}
+        requestId={result.request_id}
+      />
     );
   }
+
+  const showRetake = isRetakeResult(result);
 
   const beverageLabel = result.beverage_type
     ? BEVERAGE_TYPE_LABELS[result.beverage_type] ?? result.beverage_type
@@ -40,6 +49,9 @@ export default function LabelCheckResultsPanel({
 
   return (
     <div className="space-y-6">
+      {showRetake && (
+        <RetakeCard message={result.error} retake={result.retake} onRetake={onRetake} />
+      )}
       {files.length > 0 && (
         <LabelImageViewer
           files={files}
@@ -48,6 +60,7 @@ export default function LabelCheckResultsPanel({
         />
       )}
 
+      {(result.checks.length > 0 || !showRetake) && (
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
         <div>
@@ -106,8 +119,16 @@ export default function LabelCheckResultsPanel({
                     </p>
                   </div>
                 </div>
-                {check.type_size_details && (
-                  <TypeSizeDetailsView details={check.type_size_details} />
+                {check.warning_format || check.warning_text_diff ? (
+                  <WarningFormatView
+                    format={check.warning_format}
+                    typeSize={check.type_size_details}
+                    textDiff={check.warning_text_diff}
+                  />
+                ) : (
+                  check.type_size_details && (
+                    <TypeSizeDetailsView details={check.type_size_details} />
+                  )
                 )}
               </div>
             );
@@ -123,6 +144,7 @@ export default function LabelCheckResultsPanel({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
