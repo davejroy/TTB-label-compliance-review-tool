@@ -1975,9 +1975,11 @@ async def label_check_batch(
     roles_list: list[str] = []
     if photo_roles.strip():
         try:
-            roles_list = json.loads(photo_roles)
-        except (json.JSONDecodeError, ValueError):
-            roles_list = []
+            parsed = json.loads(photo_roles)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            parsed = []
+        if isinstance(parsed, list):
+            roles_list = [item for item in parsed if isinstance(item, str)]
 
     validated = validate_label_upload_request(
         files,
