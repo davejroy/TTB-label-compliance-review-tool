@@ -1,10 +1,8 @@
-"""Regression tests for prepare_image tuple unpacking.
+"""Regression tests for prepare_image unpacking.
 
-prepare_image returns (processed_bytes, media_type). Callers must unpack
-that pair before passing image data to extract_label_fields. If the tuple
-is forwarded as the image payload, base64 encoding raises:
-
-    TypeError: a bytes-like object is required, not 'tuple'
+prepare_image returns (processed_bytes, media_type). _read_and_validate_file
+wraps that pair in a PreparedImage. Callers must pass JPEG bytes, not the
+PreparedImage object, to extract_label_fields.
 
 These tests run the real _read_and_validate_file / prepare_image path and
 mock only the Anthropic client.
@@ -24,7 +22,7 @@ from PIL import Image
 
 from app.claude_client import extract_label_fields as real_extract_label_fields
 from app.compliance import CANONICAL_WARNING_BODY, CANONICAL_WARNING_HEADER
-from app.main import _read_and_validate_file, app
+from app.main import PreparedImage, _read_and_validate_file, app
 
 VALID_APPLICATION = json.dumps({
     "beverage_type": "distilled_spirits",
@@ -107,11 +105,10 @@ async def test_read_and_validate_file_returns_prepared_bytes_not_tuple() -> None
     upload = UploadFile(filename="label.png", file=io.BytesIO(_sample_png()))
     result = await _read_and_validate_file(upload)
 
-    assert not isinstance(result, str), f"validation failed: {result}"
-    prepared_bytes, media_type = result
-    assert isinstance(prepared_bytes, bytes)
-    assert prepared_bytes.startswith(b"\xff\xd8")
-    assert isinstance(media_type, str)
+    assert isinstance(result, PreparedImage), f"validation failed: {result}"
+    assert isinstance(result.processed_bytes, bytes)
+    assert result.processed_bytes.startswith(b"\xff\xd8")
+    assert isinstance(result.filename, str)
 
 
 def test_single_review_passes_prepared_bytes_to_extract_label_fields(client: TestClient) -> None:
