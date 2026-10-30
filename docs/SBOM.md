@@ -8,7 +8,7 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 
 | Field | Value |
 |---|---|
-| Last Updated | 2026-09-18 |
+| Last Updated | 2026-10-30 |
 | Tool Used | pip-audit, npm audit, pip freeze, npm list |
 | SBOM Format | Manual Markdown Catalog aligned with CycloneDX / SPDX structures |
 | Scope | Full Repository (Backend Python Web Service + Frontend React/TypeScript SPA) |
@@ -30,7 +30,7 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 | `fastapi` | 0.115.6 | Python | Web framework / REST API routing | MIT | PyPI |
 | `uvicorn[standard]` | 0.34.0 | Python | ASGI production server | BSD-3-Clause | PyPI |
 | `python-multipart` | 0.0.32 | Python | Multipart form / file upload parsing | Apache-2.0 | PyPI |
-| `anthropic` | 0.45.2 | Python | Anthropic Claude Vision API SDK | MIT | PyPI |
+| `anthropic` | 2.3.0 | Python | Anthropic Claude Vision API SDK | MIT | PyPI |
 | `pydantic` | 2.10.5 | Python | Data validation & schema serialization | MIT | PyPI |
 | `python-dotenv` | 1.0.1 | Python | Local `.env` environment loader | BSD-3-Clause | PyPI |
 | `Pillow` | 11.1.0 | Python | Image decoding, bounds checking, preprocessing | MIT-CMU | PyPI |
@@ -61,6 +61,10 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 | `happy-dom` | npm (dev) | 18.0.1 | GHSA-37j7-fg3j-429f, GHSA-w4gp-fjgq-3q4g (VM context escape in test runner) | Critical (in VM contexts) | **Deferred** | DevDependency only (used solely inside local Vitest execution). Fix requires breaking major update to `happy-dom@20.x`. Zero impact on production static web bundle. |
 | `@vitest/mocker` / `vitest` | npm (dev) | 3.2.7 | GHSA-82fw-gwwq-j7x9 (Redirect mock path traversal in test runner) | Moderate | **Deferred** | DevDependency only (test execution). Fix requires breaking major upgrade to `vitest@5.x`. Zero impact on production bundle. |
 | Transitive npm packages | npm | Various | Minor transitive vulnerabilities | Low | **Fixed** | Applied safe `npm audit fix` updating non-breaking transitive locks in `frontend/package-lock.json`. All 77 Vitest tests pass cleanly. |
+| `python-dotenv` | Python | 1.0.1 | PYSEC-2026-2270 (fixed in 1.2.2) | Low–Moderate | **Deferred** | Local `.env` loader only. Production uses Render dashboard env vars, not committed `.env` files. Bump is a follow-up, not a review-thread change. |
+| `Pillow` | Python | 11.1.0 | Additional PYSEC/CVE findings requiring 12.x–13.0.0 | Moderate | **Deferred** | Same rationale as September: magic-byte allowlist, 10 MB per-file cap, 50 MB request-body cap, `Image.MAX_IMAGE_PIXELS`. Major upgrade needs a dedicated CV-pipeline validation PR. |
+| Production frontend (`npm audit --omit=dev`) | npm | runtime | none | — | **Clean** | 0 vulnerabilities in production dependencies (React 19). |
+| `vite` / `tinypool` / `zod` | npm (dev) | build/test | GHSA-9jrq-w75r-8gcw, GHSA-5gmw-xhrv-c9v3, GHSA-mrhx-c7xc-m3w5 | High/Critical (dev) | **Deferred** | Dev/build-host only. `npm audit --omit=dev` is clean. `npm audit fix --force` would jump Vitest 3 → 5. |
 
 ## License Review
 
@@ -104,3 +108,4 @@ npm audit
 | 2026-09-09 | Updated transitive dependency pins and added latency logging dependencies | Maintainer |
 | 2026-09-16 | Updated OpenCV and SlowAPI dependencies | Maintainer |
 | 2026-09-18 | Conducted dependency security audit (`pip-audit`, `npm audit`), bumped `python-multipart` to `0.0.32`, applied `npm audit fix`, and documented CVE review rationale | Maintainer |
+| 2026-10-30 | Re-ran pip-audit / npm audit / semgrep / bandit / gitleaks for PR #26. No dependency pins changed. Documented remaining Pillow/dotenv/dev-tool findings. | Maintainer |

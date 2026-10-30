@@ -54,10 +54,15 @@ export function statusLabel(status: Status): string {
   }
 }
 
-const PANEL_ORDER: RetakeArea[] = ["front", "back", "neck"];
+export const PANEL_ORDER: RetakeArea[] = ["front", "back", "neck"];
 
 export function defaultPanelRole(index: number): RetakeArea {
   return PANEL_ORDER[index] ?? "front";
+}
+
+export function nextUnusedPanelRole(used: Array<RetakeArea | undefined>): RetakeArea {
+  const taken = new Set(used.filter((role): role is RetakeArea => !!role));
+  return PANEL_ORDER.find((role) => !taken.has(role)) ?? "front";
 }
 
 export function areaToFileIndex(

@@ -851,6 +851,7 @@ def test_city_state_zip_and_full_state_lines_do_not_join_company_name():
         "Produced and Bottled by Crescent Ridge Winery\nPaso Robles CA 93446",
         "Produced and Bottled by Crescent Ridge Winery\nPaso Robles, California 93446",
         "Produced and Bottled by Crescent Ridge Winery\nDenver CO 80202",
+        "Produced and Bottled by Crescent Ridge Winery\nDenver CO",
         "Produced and Bottled by Crescent Ridge Winery\nPaso Robles, CA 93446-1234",
     )
     for address in cases:

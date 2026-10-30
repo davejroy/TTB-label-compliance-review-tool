@@ -35,8 +35,10 @@ full semantics):
 - ANTHROPIC_API_KEY - set manually in the Render dashboard (sync: false); never committed.
 - CLAUDE_MODEL - set to claude-sonnet-4-6 in deployment (the in-code default is claude-sonnet-4-5).
 - CORS_ORIGINS - allowed browser origins. Unset fails open to local Vite plus `https://ttb-label-frontend.onrender.com`.
-- DEMO_ACCESS_TOKEN - set manually in the dashboard (sync: false); enables the access gate.
+- DEMO_ACCESS_TOKEN - set manually in the dashboard (sync: false); enables the access gate. The `require_demo_access` dependency stays on review routes even when this is unset.
 - DEMO_USERNAME - ttb-demo.
+- MAX_REQUEST_BODY_BYTES - optional total body cap (default 50 MB); applies to Content-Length and chunked uploads.
+- ENABLE_API_DOCS - leave unset in production unless interactive Swagger UI is required.
 
 ## Frontend Service
 

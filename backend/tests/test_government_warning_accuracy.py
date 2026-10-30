@@ -167,15 +167,16 @@ class TestContainerSizeTiers:
 # ---------------------------------------------------------------------------
 
 class TestBoldHeaderFail:
-    def test_not_bold_is_a_hard_fail(self):
+    def test_not_bold_is_advisory_only(self):
         result = _gw(_extracted(government_warning_header_appears_bold=False))
-        assert result.status == "fail"
+        assert result.status == "warning"
         assert result.warning_format is not None
-        assert result.warning_format.status == "fail"
+        assert result.warning_format.status == "advisory"
         bold = next(f for f in result.warning_format.findings if f.code == "header_bold")
-        assert bold.status == "fail"
+        assert bold.status == "advisory"
         assert bold.citation == "27 CFR 16.22(a)(2)"
         assert "bold" in bold.message.lower()
+        assert "advisory" in result.message.lower()
 
     def test_bold_true_or_unknown_does_not_advisory(self):
         for value in (True, None):
@@ -224,7 +225,9 @@ class TestBoldHeaderFail:
             )
         )
         assert result.status == "fail"
-        assert result.warning_format.status == "fail"
+        assert result.warning_format.status == "advisory"
+        bold = next(f for f in result.warning_format.findings if f.code == "header_bold")
+        assert bold.status == "advisory"
 
 
 # ---------------------------------------------------------------------------

@@ -66,11 +66,14 @@ No application data or images are stored server-side; each request is stateless.
 
 The prototype implements a **fail-open security and abuse prevention architecture**:
 
-1. **Fail-open demo gate**: When `DEMO_ACCESS_TOKEN` is unset in the environment, all requests proceed normally (dev/eval never locked out). When set, review endpoints require `Authorization: Bearer <token>`. `/api/health` and `/api/demo-info` remain strictly open. No mandatory `API_AUTH_TOKEN` is introduced.
+1. **Fail-open demo gate (wired, not removed)**: `require_demo_access` is a dependency on every review route. When `DEMO_ACCESS_TOKEN` is unset, requests proceed (dev/eval never locked out). When set, review endpoints require `Authorization: Bearer <token>`. `/api/health` and `/api/demo-info` remain strictly open. No mandatory `API_AUTH_TOKEN` is introduced. Do not strip this dependency before a production promote.
 2. **Soft rate limiting**: Inbound IP rate limiting is enforced via `slowapi` on expensive review endpoints (`RATE_LIMIT_REVIEW`, default 20/min). Exceeding limits returns HTTP **429 Too Many Requests** (never 401/403) with `Retry-After` header. `/api/health` and `/api/demo-info` are exempt and unlimited.
-3. **Concurrency cap for Claude calls**: A process-wide `asyncio.Semaphore` (`MAX_CONCURRENT_CLAUDE_CALLS`, default 5) wraps all Anthropic API extraction calls with timeout `CLAUDE_CONCURRENCY_TIMEOUT` (default 30.0s), preventing batch floods from overwhelming API limits.
+3. **Concurrency cap for Claude calls**: A process-wide `asyncio.Semaphore` (`MAX_CONCURRENT_CLAUDE_CALLS`, default 5) wraps all Anthropic API extraction calls with timeout `CLAUDE_CONCURRENCY_TIMEOUT` (default 30.0s), preventing batch floods from overwhelming API limits. Sync, batch, and **stream** paths share `_extract_fields_with_retry`.
 4. **Soft spend / abuse tracking**: `DailySpendGuard` (`MAX_REVIEW_REQUESTS_PER_DAY`) monitors process request volume on Render and emits loud warnings upon exceeding thresholds without blocking evaluator access. Multi-instance setups will use Redis in future iterations.
 5. **Image decompression protection**: Pillow `Image.MAX_IMAGE_PIXELS` is explicitly set to 64,000,000 to prevent image bomb DoS attacks.
+6. **Request body cap**: `RequestBodyLimitMiddleware` rejects bodies over `MAX_REQUEST_BODY_BYTES` (default 50 MB) using `Content-Length` **and** a running count of streamed / chunked ASGI receive bytes. `/api/health` is never blocked.
+7. **Middleware order (Starlette LIFO)**: last added is outermost. Production stack is body-limit (innermost) → security headers → CORS (outermost) so 413/401/429 short-circuits still receive CORS and security headers.
+8. **Type-size bbox isolation**: `_evaluate_type_size` applies a Government Warning box only when `field_locations.image_index` matches the photo under measurement. `merge_extracted_label_data` remaps each photo's locations onto the merged index so a back-label box is never applied to the front photo.
 
 This is **not** real per-user authentication or authorization: it is designed to keep public demos accessible and safe from abuse. See [REGULATORY_REFERENCES.md](./REGULATORY_REFERENCES.md).
 
@@ -86,6 +89,9 @@ Key environment variables (see [HANDOFF.md](./HANDOFF.md) for the authoritative 
 | `EXTRACTION_FAST_MODEL` | Fast model when `USE_FAST_EXTRACTION=true` (default: `claude-3-5-haiku-latest`) | No | No |
 | `VITE_API_HOST` | Backend host the frontend calls (build-time) | Yes (frontend) | No |
 | `CORS_ORIGINS` | Allowed browser origins for the backend API. Unset fails open to local Vite + the `render.yaml` frontend (`https://ttb-label-frontend.onrender.com`); methods GET/POST/OPTIONS, headers Authorization/Content-Type, credentials off. | Recommended | No |
+| `MAX_REQUEST_BODY_BYTES` | Total HTTP request-body cap (Content-Length and chunked). Default 50 MB. | Recommended | No |
+| `ENABLE_API_DOCS` | When true, serve OpenAPI HTML with a docs-only CSP (Swagger CDN). Default off. | No | No |
+| `DEMO_ACCESS_TOKEN` | Shared-token demo gate. Unset = fail-open. Dependency must remain on review routes. | No | Yes |
 
 `ANTHROPIC_API_KEY` is marked `sync: false` in `render.yaml` and must be set manually in the Render dashboard.
 
@@ -122,8 +128,10 @@ Logs never contain raw image bytes, authorization tokens, or sensitive credentia
 
 - Secrets (Anthropic API key) are confined to the backend environment and excluded from the repo.
 - Uploaded images are sent to a third-party API (Anthropic); this should be disclosed to users and reviewed against any outbound-egress policy.
-- No authentication/authorization layer exists yet (see above).
+- A shared-token demo gate is wired on review routes and fails open when unset (see above). This is not per-user authorization.
 - Input validation checks actual image signatures server-side; client-provided MIME types are not trusted.
+- Chunked or missing-Content-Length uploads are still counted against `MAX_REQUEST_BODY_BYTES`.
+- Vision `government_warning_header_appears_bold=False` is advisory only; statutory GW wording/casing remains a hard fail.
 
 See [../SECURITY.md](../SECURITY.md) for the vulnerability reporting process.
 
@@ -154,7 +162,8 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 - No persistence, distributed tracing, or external metric aggregator (system is intentionally stateless).
 - Not integrated with live COLA database (application data is entered manually or imported via CSV/JSON).
 - **Standards of Fill (T.D. TTB-200)**: Net contents checks validate against the modernized authorized standards of fill under 27 CFR 4.72 (wine) and 27 CFR 5.203 (distilled spirits) effective January 10, 2025 per Treasury Decision TTB-200 (89 FR 96570), with malt beverages (Part 7) unrestricted.
-- **Type Size (27 CFR 16.22 Option A MVP)**: Automated millimeter type-size verification is implemented for calibrated scale markers (ISO/IEC 7810 ID-1 cards, ArUco targets). Uncalibrated photos retain an honest advisory disclosure without invented mm numbers.
+- **Type Size (27 CFR 16.22 Option A MVP)**: Automated millimeter type-size verification is implemented for calibrated scale markers (ISO/IEC 7810 ID-1 cards, ArUco targets). Uncalibrated photos retain an honest advisory disclosure without invented mm numbers. Multi-photo reviews must not reuse another image's normalized warning box.
+- **Heading bold (27 CFR 16.22(a)(2) type)**: Claude's boldness estimate is treated as **advisory**. A false negative must not flip a wording-pass into a hard fail.
 - Government Warning wording is validated against the standard statutory text (plus the <= 100 mL short form per 27 CFR 16.21(c)).
 - Outbound calls to the Anthropic API may conflict with production egress-firewall restrictions.
 
@@ -173,6 +182,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-09-18 | Implemented COLA application pre-fill MVP with CSV/JSON import and demo presets | Maintainer |
 | 2026-09-18 | Documented 27 CFR 16.22 Option A CV type-size measurement, COLA pre-fill, fail-open rate limiting/concurrency, and always-on Starter hosting decision | Maintainer |
 | 2026-10-26 | CORS defaults fail-open to local Vite + the render.yaml frontend (not `*`); methods/headers restricted; credentials off (port of -dev 91e88ff) | Maintainer |
+| 2026-10-30 | PR #26 review fixes: chunked body cap, CORS-wrapped 413, docs CSP, type-size image_index, stream retry, advisory header_bold, access-token gate kept wired | Maintainer |
 
 ## Related Documentation
 

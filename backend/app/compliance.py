@@ -578,11 +578,11 @@ def _build_warning_format(
         findings.append(
             WarningFormatFinding(
                 code="header_bold",
-                status="fail",
+                status="advisory",
                 citation="27 CFR 16.22(a)(2)",
                 message=(
                     "The 'GOVERNMENT WARNING' heading does not appear to be in bold type "
-                    "(27 CFR 16.22(a)(2))."
+                    "(27 CFR 16.22(a)(2)). This is a vision estimate and is advisory only."
                 ),
                 estimated=True,
             )
@@ -1095,9 +1095,17 @@ def _is_city_state_or_street_line(line: str) -> bool:
     work = _strip_trailing_zip_tokens(tokens)
     peeled_zip = work != tokens
     if len(work) >= 2 and _tokens_are_state(work[-1:]):
-        # "Hopline Brewing Co" is a company; "Denver CO 80202" is Colorado.
-        if work[-1].lower() in _LEGAL_ENTITY_SUFFIXES and not peeled_zip:
-            return False
+        # "CO" is both Colorado and the legal suffix "Co". Treat a trailing
+        # state abbrev as an address unless a company-continuation word
+        # precedes it ("Hopline Brewing Co" vs "Denver CO").
+        last = work[-1].lower()
+        if last in _LEGAL_ENTITY_SUFFIXES and not peeled_zip:
+            prior = [token.lower() for token in work[:-1]]
+            if any(
+                token in _COMPANY_CONTINUATION_WORDS or token in _LEGAL_ENTITY_SUFFIXES
+                for token in prior
+            ):
+                return False
         return True
     if len(work) >= 2:
         for start in range(1, len(work)):
@@ -1518,8 +1526,9 @@ def _check_government_warning(
     substituted words are not. GOVERNMENT WARNING must be all capitals.
 
     16.22 type size and heading boldness are rolled into ``warning_format``.
-    A heading that does not appear bold is a hard fail (27 CFR 16.22(a)(2)).
-    Estimated characters-per-inch remains advisory.
+    A heading that does not appear bold is advisory only: vision-estimated
+    boldness is too uncertain to fail an otherwise correct warning
+    (27 CFR 16.22(a)(2)). Estimated characters-per-inch remains advisory.
     """
     field, label_name = "government_warning", "Government Warning"
     warning_format = _build_warning_format(extracted, type_size_details)
@@ -1613,9 +1622,6 @@ def _check_government_warning(
             + _describe_word_diff(text_diff)
             + ")"
         )
-    if any(f.code == "header_bold" and f.status == "fail" for f in warning_format.findings):
-        issues.append("heading must appear in bold type (27 CFR 16.22(a)(2))")
-
     text_ok = not issues
     cpi_over_limit = (
         warning_format.estimated_characters_per_inch is not None
@@ -2428,7 +2434,11 @@ def merge_extracted_label_data(extractions, photo_roles=None):
     confs = [e.extraction_confidence for e in extractions if e.extraction_confidence is not None]
     merged["extraction_confidence"] = max(confs) if confs else None
     merged["per_field_confidence"] = merged_pfc
-    merged["field_locations"] = [loc for e in extractions for loc in e.field_locations]
+    remapped_locations = []
+    for idx, ext in enumerate(extractions):
+        for loc in ext.field_locations:
+            remapped_locations.append(loc.model_copy(update={"image_index": idx}))
+    merged["field_locations"] = remapped_locations
     notes_parts = [e.notes for e in extractions if e.notes]
     merged["notes"] = "\n".join(notes_parts) if notes_parts else None
 

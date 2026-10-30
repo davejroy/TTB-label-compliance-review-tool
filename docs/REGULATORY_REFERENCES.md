@@ -52,6 +52,7 @@ GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink
 | **27 CFR 16.22(a)(3)** | **Containers $> 3\text{ L}$ (101.4 fl. oz.):** Minimum capital-letter height of **$3.0\text{ mm}$** ($0.12\text{ inches}$), max 12 characters per inch. | **Option A (Scale Marker):** Automated via OpenCV ID-1 card / ArUco detection. Emits `pass` / `fail` / `cannot_measure` with exact mm height $\pm$ uncertainty. |
 | **27 CFR 16.22(b)** | **Legibility & Background Contrast:** Prominent, conspicuous, readily legible under ordinary conditions on contrasting background. | OCR extraction confidence & binarization validation. |
 | **Uncalibrated Photos** | N/A (operational safety boundary) | Uncalibrated photos without scale markers emit an honest statutory advisory with **zero invented mm** and require physical gauge verification. |
+| **GOVERNMENT WARNING bold type** | The heading must appear in capital letters and in bold type (27 CFR 16.21 / 16.22). | **Casing remains a hard fail.** Vision `header_appears_bold=False` is **advisory only** because OCR/vision boldness is uncertain; it must not override a statutory text fail or create a false hard fail. |
 
 See [`docs/TYPE_SIZE_16_22_DESIGN.md`](./TYPE_SIZE_16_22_DESIGN.md) and [`docs/field-tests/typesize/ACCEPTANCE_CHECKLIST.md`](./field-tests/typesize/ACCEPTANCE_CHECKLIST.md) for full technical design and validation protocols.
 
@@ -79,4 +80,4 @@ See [`docs/TYPE_SIZE_16_22_DESIGN.md`](./TYPE_SIZE_16_22_DESIGN.md) and [`docs/f
 
 ---
 
-*Last updated: September 2026. Always verify against the current eCFR.*
+*Last updated: October 30, 2026. Always verify against the current eCFR.*

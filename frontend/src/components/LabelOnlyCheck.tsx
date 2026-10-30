@@ -114,6 +114,7 @@ function BeverageTypeDialog({
 export default function LabelOnlyCheck() {
   const [items, setItems] = useState<Item[]>([newItem()]);
   const [results, setResults] = useState<LabelCheckResult[] | null>(null);
+  const [resultItemIds, setResultItemIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -221,6 +222,7 @@ export default function LabelOnlyCheck() {
     setShowBar(true);
     setError(null);
     setResults(null);
+    setResultItemIds([]);
     setExpanded(null);
     setPendingConfirmIdx(null);
     startProgressTimers();
@@ -228,9 +230,11 @@ export default function LabelOnlyCheck() {
       statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 50);
     try {
+      const submittedIds = items.map((item) => item.id);
       const res = await checkLabelsBatch(items.map((item) => ({ files: item.files })));
       clearTimers();
       setStatusStep(STEP_COMPLETE);
+      setResultItemIds(submittedIds);
       setResults(res);
       // Queue the first result that needs beverage-type confirmation
       const firstPending = res.findIndex((r) => r.needs_beverage_confirmation);
@@ -259,7 +263,8 @@ export default function LabelOnlyCheck() {
     setError(null);
     startProgressTimers();
     try {
-      const item = items[idx];
+      const itemId = resultItemIds[idx];
+      const item = items.find((entry) => entry.id === itemId);
       if (!item) return;
       const [confirmed] = await checkLabelsBatch([{ files: item.files }], beverageType);
       clearTimers();
@@ -356,7 +361,7 @@ export default function LabelOnlyCheck() {
       {pendingConfirmIdx !== null && results && (
         <BeverageTypeDialog
           guessedType={results[pendingConfirmIdx]?.beverage_type}
-          labelFiles={items[pendingConfirmIdx]?.files ?? []}
+          labelFiles={items.find((item) => item.id === resultItemIds[pendingConfirmIdx])?.files ?? []}
           loading={loading}
           onConfirm={(type) => confirmBeverageType(pendingConfirmIdx, type)}
           onDismiss={() => setPendingConfirmIdx(null)}
@@ -476,9 +481,9 @@ export default function LabelOnlyCheck() {
             <div className="mt-6">
               <LabelCheckResultsPanel
                 result={results[expanded]}
-                files={items[expanded]?.files ?? []}
+                files={items.find((item) => item.id === resultItemIds[expanded])?.files ?? []}
                 onRetake={(area: RetakeArea) => {
-                  const id = items[expanded]?.id;
+                  const id = resultItemIds[expanded];
                   if (id) dropzoneRefs.current[id]?.openCapture(area);
                 }}
               />

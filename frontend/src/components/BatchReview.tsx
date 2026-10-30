@@ -27,6 +27,7 @@ function newItem(): BatchItem {
 type LabelStatus = "pending" | "processing" | "done" | "error";
 
 interface LabelState {
+  itemId: string;
   status: LabelStatus;
   result?: ReviewResult;
 }
@@ -146,8 +147,9 @@ export default function BatchReview() {
     setExpanded(null);
     startProgressTimers();
 
-    // Initialise all labels as "pending"
-    const initial: LabelState[] = items.map(() => ({ status: "pending" }));
+    // Initialise all labels as "pending", keyed by the submitted item id so
+    // later add/remove of form rows cannot retarget retakes by index.
+    const initial: LabelState[] = items.map((item) => ({ itemId: item.id, status: "pending" }));
     setLabelStates(initial);
 
     // Scroll to results panel after a brief delay
@@ -162,7 +164,10 @@ export default function BatchReview() {
           setLabelStates((prev) => {
             if (!prev) return prev;
             const next = [...prev];
+            const existing = next[index];
+            if (!existing) return prev;
             next[index] = {
+              ...existing,
               status: isErrorResult(result) ? "error" : "done",
               result,
             };
@@ -322,11 +327,12 @@ export default function BatchReview() {
               {labelStates.map((state, index) => {
                 const result = state.result;
                 const isPending = state.status === "pending";
+                const resultItem = items.find((item) => item.id === state.itemId);
 
                 // Pending label — show a spinner row
                 if (isPending || !result) {
                   return (
-                    <div key={index} className="p-4 flex items-center gap-3 text-slate-400">
+                    <div key={state.itemId} className="p-4 flex items-center gap-3 text-slate-400">
                       {isPending ? (
                         <>
                           <svg className="animate-spin h-4 w-4 text-[#15396a]" viewBox="0 0 24 24" fill="none">
@@ -354,7 +360,7 @@ export default function BatchReview() {
                 );
 
                 return (
-                  <div key={index}>
+                  <div key={state.itemId}>
                     {/* Mobile card */}
                     <div className="sm:hidden p-4 space-y-2">
                       <p className="font-medium text-slate-800 text-sm break-all">
@@ -409,10 +415,9 @@ export default function BatchReview() {
                       <div className="px-4 pb-4">
                         <ResultsPanel
                           result={result}
-                          files={items[index]?.files ?? []}
+                          files={resultItem?.files ?? []}
                           onRetake={(area: RetakeArea) => {
-                            const id = items[index]?.id;
-                            if (id) dropzoneRefs.current[id]?.openCapture(area);
+                            if (state.itemId) dropzoneRefs.current[state.itemId]?.openCapture(area);
                           }}
                         />
                       </div>

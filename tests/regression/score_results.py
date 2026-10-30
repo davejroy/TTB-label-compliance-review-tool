@@ -58,16 +58,60 @@ def _defect_field(name: str) -> str:
     return name
 
 
+def _load_results(payload) -> dict:
+    """Return the id→record mapping, rejecting an empty wrapper."""
+    if not isinstance(payload, dict):
+        raise ValueError("results payload must be an object")
+    if "results" in payload:
+        results = payload.get("results")
+        if not isinstance(results, dict) or not results:
+            raise ValueError("empty results mapping")
+        return results
+    if not payload:
+        raise ValueError("empty results mapping")
+    return payload
+
+
+def _http_status(rec) -> int | None:
+    if isinstance(rec, dict) and isinstance(rec.get("status"), int):
+        return rec["status"]
+    return None
+
+
+def _typesize_state(body: dict) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    for item in body.get("fields") or []:
+        if not isinstance(item, dict) or item.get("field") != "government_warning":
+            continue
+        details = item.get("type_size_details") or {}
+        if isinstance(details, dict) and details.get("state"):
+            return details["state"]
+        fmt = item.get("warning_format") or {}
+        for finding in fmt.get("findings") or []:
+            if isinstance(finding, dict) and finding.get("code") == "type_size":
+                return finding.get("status")
+    return None
+
+
 def main() -> int:
     manifest = {row["id"]: row for row in json.loads(MANIFEST.read_text())}
     payload = json.loads(_results_path().read_text())
-    results = payload.get("results") or payload
+    try:
+        results = _load_results(payload)
+    except ValueError as exc:
+        print(f"Refusing to score: {exc}", file=sys.stderr)
+        return 2
     good_ok = 0
     good_n = 0
     deg_ok = 0
     deg_n = 0
     strict = 0
     defect_n = 0
+    ts_ok = 0
+    ts_n = 0
+    edge_ok = 0
+    edge_n = 0
     readable_retakes = []
     rows = []
     for fid, rec in results.items():
@@ -76,6 +120,7 @@ def main() -> int:
         outcome = _outcome(body) if isinstance(body, dict) else "error"
         group = meta.get("group") or rec.get("group")
         expected = meta.get("expected")
+        http_status = _http_status(rec)
         rows.append((fid, group, expected, outcome))
         if group == "good":
             good_n += 1
@@ -95,10 +140,34 @@ def main() -> int:
                 defect_n += 1
                 if fields.get(_defect_field(defect)) == "fail":
                     strict += 1
+        elif group == "typesize":
+            ts_n += 1
+            want = meta.get("ts_expected") or expected
+            measured = _typesize_state(body) if isinstance(body, dict) else None
+            fields = _field_status(body) if isinstance(body, dict) else {}
+            if http_status is not None and http_status >= 500:
+                continue
+            if want == "fail":
+                if measured == "fail" or fields.get("government_warning") == "fail" or outcome == "fail":
+                    ts_ok += 1
+            elif want == "pass":
+                if outcome != "error" and measured != "fail" and fields.get("government_warning") != "fail":
+                    ts_ok += 1
+        elif group == "edge":
+            edge_n += 1
+            if http_status is not None and http_status >= 500:
+                continue
+            if expected == "reject":
+                if outcome in ("error", "retake", "fail"):
+                    edge_ok += 1
+            elif expected and outcome == expected:
+                edge_ok += 1
 
     print(f"good {good_ok}/{good_n}")
     print(f"degraded {deg_ok}/{deg_n}")
     print(f"strict defects {strict}/{defect_n}")
+    print(f"typesize {ts_ok}/{ts_n}")
+    print(f"edge {edge_ok}/{edge_n}")
     print("outcomes", Counter(item[3] for item in rows))
     if readable_retakes:
         print("readable retakes", readable_retakes)
@@ -108,6 +177,8 @@ def main() -> int:
         (deg_n == 0 or deg_ok >= 26 or deg_ok == deg_n, f"degraded {deg_ok}/{deg_n} (want >=26/27)"),
         (defect_n == 0 or strict >= 20, f"strict defects {strict}/{defect_n} (want >=20/26)"),
         (not readable_retakes, "no retake on readable degraded photos"),
+        (ts_n == 0 or ts_ok == ts_n, f"typesize {ts_ok}/{ts_n} (want all ts_expected)"),
+        (edge_n == 0 or edge_ok == edge_n, f"edge {edge_ok}/{edge_n} (want all reject)"),
     ]
     failed = [msg for ok, msg in targets if not ok]
     for ok, msg in targets:

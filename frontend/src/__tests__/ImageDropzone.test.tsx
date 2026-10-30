@@ -112,4 +112,39 @@ describe('ImageDropzone', () => {
     expect(next[0].name).toBe('front.png');
     expect(next[1].name).toBe('back-retake.png');
   });
+
+  it('assigns an unused panel role after the first image is removed', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const front = pngFile('front.png');
+    const back = pngFile('back.png');
+    const { rerender } = render(
+      <ImageDropzone files={[front, back]} onChange={onChange} idPrefix="roles" />,
+    );
+
+    expect(screen.getByText('front')).toBeInTheDocument();
+    expect(screen.getByText('back')).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: 'Remove image' })[0]);
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const afterRemove = onChange.mock.calls.at(-1)?.[0] as File[];
+    expect(afterRemove).toHaveLength(1);
+    expect(afterRemove[0].name).toBe('back.png');
+
+    onChange.mockClear();
+    rerender(<ImageDropzone files={afterRemove} onChange={onChange} idPrefix="roles" />);
+    expect(screen.getByText('back')).toBeInTheDocument();
+    expect(screen.queryByText('front')).not.toBeInTheDocument();
+
+    await user.upload(screen.getByLabelText(/Label Images/i), pngFile('new-front.png'));
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const afterAdd = onChange.mock.calls.at(-1)?.[0] as File[];
+    expect(afterAdd).toHaveLength(2);
+
+    rerender(<ImageDropzone files={afterAdd} onChange={onChange} idPrefix="roles" />);
+    const roles = screen
+      .getAllByText(/^(front|back|neck)$/i)
+      .map((node) => node.textContent?.toLowerCase());
+    expect(roles).toEqual(['back', 'front']);
+  });
 });

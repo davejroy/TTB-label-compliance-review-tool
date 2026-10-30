@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   areaToFileIndex,
   defaultPanelRole,
+  nextUnusedPanelRole,
   httpStatusUserMessage,
   isErrorResult,
   isFailResult,
@@ -52,5 +53,12 @@ describe('areaToFileIndex', () => {
     expect(defaultPanelRole(0)).toBe('front');
     expect(defaultPanelRole(1)).toBe('back');
     expect(defaultPanelRole(2)).toBe('neck');
+  });
+
+  it('picks the first unused panel role after a removal', () => {
+    expect(nextUnusedPanelRole(['back'])).toBe('front');
+    expect(nextUnusedPanelRole(['front', 'neck'])).toBe('back');
+    expect(nextUnusedPanelRole(['front', 'back'])).toBe('neck');
+    expect(nextUnusedPanelRole(['front', 'back', 'neck'])).toBe('front');
   });
 });

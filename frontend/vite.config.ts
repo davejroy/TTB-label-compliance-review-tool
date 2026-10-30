@@ -1,9 +1,9 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { buildContentSecurityPolicy } from './src/cspPolicy'
 
-function cspMetaPlugin() {
+function cspMetaPlugin(apiHost: string | undefined) {
   return {
     name: 'csp-meta',
     transformIndexHtml: {
@@ -13,7 +13,7 @@ function cspMetaPlugin() {
         if (ctx.server) {
           return html
         }
-        const csp = buildContentSecurityPolicy(process.env.VITE_API_HOST, {
+        const csp = buildContentSecurityPolicy(apiHost, {
           frameAncestors: false,
         })
         if (html.includes('http-equiv="Content-Security-Policy"')) {
@@ -29,14 +29,18 @@ function cspMetaPlugin() {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss(), cspMetaPlugin()],
-  server: {
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const apiHost = env.VITE_API_HOST || process.env.VITE_API_HOST
+  return {
+    plugins: [react(), tailwindcss(), cspMetaPlugin(apiHost)],
+    server: {
+      proxy: {
+        '/api': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
       },
     },
-  },
+  }
 })

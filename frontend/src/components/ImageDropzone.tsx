@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { areaToFileIndex, defaultPanelRole } from "../errorContract";
+import { areaToFileIndex, defaultPanelRole, nextUnusedPanelRole } from "../errorContract";
 import { MAX_IMAGES_PER_LABEL, type RetakeArea } from "../types";
 
 interface Props {
@@ -104,8 +104,14 @@ const ImageDropzone = forwardRef<ImageDropzoneHandle, Props>(function ImageDropz
       onChange(next);
       return;
     }
+    const kept = files.map((_, index) => displayRoles[index]);
+    const room = MAX_IMAGES_PER_LABEL - files.length;
+    const addedRoles: RetakeArea[] = [];
+    for (let i = 0; i < Math.min(incoming.length, room); i += 1) {
+      addedRoles.push(nextUnusedPanelRole([...kept, ...addedRoles]));
+    }
     const combined = [...files, ...incoming].slice(0, MAX_IMAGES_PER_LABEL);
-    setRoles(combined.map((_, index) => displayRoles[index] ?? defaultPanelRole(index)));
+    setRoles([...kept, ...addedRoles].slice(0, combined.length));
     onChange(combined);
   }
 

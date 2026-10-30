@@ -533,12 +533,18 @@ def get_cors_configuration() -> tuple[list[str], str | None]:
         return _default_cors()
 
 
-# Initialize CORS middleware on the FastAPI app
+# Initialize CORS middleware on the FastAPI app.
+# Starlette runs the last-added middleware first. Body limit is added first
+# (closest to the app) so oversized uploads are rejected before multipart
+# parsing. Security headers wrap that. CORS is outermost so 413s and other
+# short-circuit responses still receive Access-Control-Allow-Origin.
 _cors_origins, _cors_origin_regex = get_cors_configuration()
 if _cors_origins == ["*"]:
     _log.warning(
         "CORS is configured to allow all origins ('*'). This must not be used in production."
     )
+app.add_middleware(RequestBodyLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -548,10 +554,6 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
     expose_headers=[REQUEST_ID_HEADER],
 )
-# Security headers apply to CORS preflight and streaming bodies alike.
-app.add_middleware(SecurityHeadersMiddleware)
-# Outermost: reject oversized bodies before multipart parsing. Never blocks /api/health.
-app.add_middleware(RequestBodyLimitMiddleware)
 
 # Retry config for transient Claude API errors.
 # One app-level retry with jitter. Anthropic SDK retries are disabled (max_retries=0)
@@ -1261,6 +1263,28 @@ async def _extract_fields(
     merged = await run_in_threadpool(merge_extracted_label_data, extractions, effective_roles)
     return merged, None, effective_roles
 
+def _government_warning_bbox_for_image(
+    extracted: ExtractedLabelData,
+    image_index: int,
+) -> tuple[float, float, float, float] | None:
+    """Return the government-warning box that belongs to *image_index* only.
+
+    A box from another panel must not be reused: normalized coordinates are
+    relative to that photo, and applying them to a different image produces
+    a false type-size / card measurement.
+    """
+    matches = [
+        loc
+        for loc in extracted.field_locations
+        if getattr(loc, "field", None) == "government_warning"
+        and int(getattr(loc, "image_index", 0) or 0) == image_index
+    ]
+    if not matches:
+        return None
+    loc = matches[0]
+    return (loc.x, loc.y, loc.width, loc.height)
+
+
 async def _evaluate_type_size(
     images: list[tuple[bytes, str]],
     extracted: ExtractedLabelData,
@@ -1271,19 +1295,12 @@ async def _evaluate_type_size(
     type_size_details: TypeSizeMeasurement | None = None
     if not images:
         return None
-    gw_locs = [
-        loc
-        for loc in extracted.field_locations
-        if getattr(loc, "field", None) == "government_warning"
-    ]
-    gw_bbox = (
-        (gw_locs[0].x, gw_locs[0].y, gw_locs[0].width, gw_locs[0].height)
-        if gw_locs
-        else None
-    )
     warning_text = _warning_text_for_typesize(extracted)
 
-    async def _measure_one(img_bytes: bytes, img_name: str) -> TypeSizeMeasurement:
+    async def _measure_one(
+        img_bytes: bytes, img_name: str, image_index: int
+    ) -> TypeSizeMeasurement:
+        gw_bbox = _government_warning_bbox_for_image(extracted, image_index)
         try:
             return await run_in_threadpool(
                 evaluate_type_size_from_image_bytes,
@@ -1306,10 +1323,15 @@ async def _evaluate_type_size(
             )
 
     if len(images) == 1:
-        results = [await _measure_one(*images[0])]
+        results = [await _measure_one(*images[0], 0)]
     else:
         results = list(
-            await asyncio.gather(*[_measure_one(data, name) for data, name in images])
+            await asyncio.gather(
+                *[
+                    _measure_one(data, name, idx)
+                    for idx, (data, name) in enumerate(images)
+                ]
+            )
         )
     for ts_res in results:
         if ts_res.method not in (CalibrationMethod.UNCALIBRATED_ESTIMATE, CalibrationMethod.NONE):
@@ -1597,27 +1619,20 @@ async def review_labels_batch_stream(
                 reserve_validated_review(1)
 
                 claude_call_start = time.monotonic()
-                try:
-                    await asyncio.wait_for(_claude_semaphore.acquire(), timeout=_CLAUDE_SEMAPHORE_TIMEOUT_S)
-                except asyncio.TimeoutError:
-                    _log.warning(
-                        "Streaming batch index %d: Claude concurrency limit reached (capacity=%d).",
-                        idx,
-                        _CLAUDE_SEMAPHORE_LIMIT,
+                extracted, extract_error = await _extract_fields_with_retry(
+                    processed_images, metrics=stream_metrics
+                )
+                claude_call_duration_ms = stream_metrics.claude_time_ms or int(
+                    (time.monotonic() - claude_call_start) * 1000
+                )
+                if extract_error or extracted is None:
+                    raise _StructuredUploadError(
+                        extract_error
+                        or ClientError(
+                            UPSTREAM_ERROR,
+                            "The review service is temporarily unavailable. Please try again.",
+                        )
                     )
-                    raise RuntimeError("The review service is currently busy. Please wait a moment and try again.")
-                try:
-                    extracted, call_metrics = await run_in_threadpool(
-                        _run_extract_sync,
-                        processed_images,
-                    )
-                finally:
-                    _claude_semaphore.release()
-
-                claude_call_duration_ms = int((time.monotonic() - claude_call_start) * 1000)
-                stream_metrics.claude_time_ms = claude_call_duration_ms
-                stream_metrics.claude_calls = 1
-                stream_metrics.add_call_metrics(call_metrics)
 
                 compliance_started = time.monotonic()
                 type_size_details = await _evaluate_type_size(
@@ -1644,7 +1659,7 @@ async def review_labels_batch_stream(
                         endpoint="/api/review/batch/stream",
                         wall_time_ms=wall_ms,
                         claude_time_ms=claude_call_duration_ms,
-                        claude_calls=1,
+                        claude_calls=stream_metrics.claude_calls,
                         image_count=len(processed_images),
                         status="retake",
                         extra=_timing_extra(
@@ -1710,7 +1725,7 @@ async def review_labels_batch_stream(
                         endpoint="/api/review/batch/stream",
                         wall_time_ms=wall_ms,
                         claude_time_ms=claude_call_duration_ms,
-                        claude_calls=1,
+                        claude_calls=stream_metrics.claude_calls,
                         image_count=len(processed_images),
                         status=status,
                         extra=_timing_extra(timings, {"batch_index": idx}),

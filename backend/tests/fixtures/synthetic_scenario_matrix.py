@@ -134,6 +134,8 @@ def render_label(fields: dict[str, Any], *, theme: str = "spirits") -> Image.Ima
     put(fields.get("alcohol_content"), body, 10)
     put(fields.get("net_contents"), small, 10)
     put(fields.get("name_and_address"), small, 8)
+    put(fields.get("country_of_origin"), small, 8)
+    put(fields.get("sulfite_declaration"), small, 8)
 
     y = y1 - 270
     if fields.get("government_warning_present", False):

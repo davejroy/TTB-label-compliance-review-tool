@@ -17,6 +17,26 @@ _log = logging.getLogger(__name__)
 PERMISSIONS_POLICY = "camera=(self), microphone=(), geolocation=()"
 HSTS_VALUE = "max-age=31536000; includeSubDomains"
 API_CSP = "default-src 'none'; frame-ancestors 'none'"
+# Interactive OpenAPI docs (ENABLE_API_DOCS=true) need the FastAPI/Swagger CDN.
+# Keep this off the JSON API surface.
+DOCS_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: https://fastapi.tiangolo.com https://cdn.jsdelivr.net; "
+    "font-src 'self' https://cdn.jsdelivr.net; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'"
+)
+_DOCS_PATH_PREFIXES = ("/docs", "/redoc")
+
+
+def csp_for_path(path: str) -> str:
+    """Return the CSP for *path*. Docs HTML gets a separate, usable policy."""
+    normalized = (path or "").rstrip("/") or "/"
+    if normalized in _DOCS_PATH_PREFIXES or normalized.startswith(("/docs/", "/redoc/")):
+        return DOCS_CSP
+    return API_CSP
 
 
 def is_production_runtime() -> bool:
@@ -78,7 +98,7 @@ class SecurityHeadersMiddleware:
                     )
                     headers.setdefault("X-Frame-Options", "DENY")
                     headers.setdefault("Permissions-Policy", PERMISSIONS_POLICY)
-                    headers.setdefault("Content-Security-Policy", API_CSP)
+                    headers.setdefault("Content-Security-Policy", csp_for_path(scope.get("path", "")))
                     if request_is_https(scope):
                         headers.setdefault("Strict-Transport-Security", HSTS_VALUE)
                 except Exception:  # noqa: BLE001

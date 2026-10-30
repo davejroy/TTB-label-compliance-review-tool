@@ -264,9 +264,12 @@ async def _send_json_error(
 
 
 class RequestBodyLimitMiddleware:
-    """Reject requests whose Content-Length exceeds ``MAX_REQUEST_BODY_BYTES``.
+    """Reject requests that exceed ``MAX_REQUEST_BODY_BYTES``.
 
-    ``/api/health`` is never blocked. Header/parse failures fail open.
+    Enforces the cap from ``Content-Length`` when present, and also counts
+    bytes on the raw ASGI receive path so chunked uploads without
+    Content-Length cannot bypass the limit. ``/api/health`` is never blocked.
+    Header/parse failures fail open.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -307,5 +310,59 @@ class RequestBodyLimitMiddleware:
                     return
         except Exception:  # noqa: BLE001
             _log.exception("Body-size middleware failed; allowing request (fail-open)")
+            await self.app(scope, receive, send)
+            return
 
-        await self.app(scope, receive, send)
+        received = 0
+        rejected = False
+        response_started = False
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal response_started
+            if rejected:
+                return
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        async def limited_receive() -> Message:
+            nonlocal received, rejected
+            if rejected:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] != "http.request":
+                return message
+            chunk = message.get("body", b"") or b""
+            received += len(chunk)
+            if received <= max_bytes:
+                return message
+            rejected = True
+            _log.warning(
+                "Request body rejected: streamed %s bytes exceed MAX_REQUEST_BODY_BYTES=%s path=%s",
+                received,
+                max_bytes,
+                path,
+            )
+            try:
+                more = bool(message.get("more_body"))
+                while more:
+                    nxt = await receive()
+                    more = bool(nxt.get("more_body"))
+            except Exception:  # noqa: BLE001
+                _log.exception("Draining oversize streamed body failed; continuing")
+            if not response_started:
+                await _send_json_error(
+                    send,
+                    status=413,
+                    code=FILE_TOO_LARGE,
+                    message=FILE_TOO_LARGE_MESSAGE,
+                )
+            return {"type": "http.disconnect"}
+
+        try:
+            await self.app(scope, limited_receive, send_wrapper)
+        except Exception:  # noqa: BLE001
+            if rejected or response_started:
+                return
+            _log.exception("Body-size middleware failed; allowing request (fail-open)")
+            await self.app(scope, receive, send)

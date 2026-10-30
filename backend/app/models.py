@@ -113,7 +113,7 @@ class ExtractedLabelData(BaseModel):
         default=None,
         description=(
             "Vision estimate of whether the printed GOVERNMENT WARNING heading appears bold "
-            "(27 CFR 16.22(a)(2)). None when unknown. False is a hard fail."
+            "(27 CFR 16.22(a)(2)). None when unknown. False is advisory only."
         ),
     )
     beverage_type_guess: Optional[str] = None

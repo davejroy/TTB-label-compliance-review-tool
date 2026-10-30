@@ -24,20 +24,30 @@ All secrets are supplied via the environment only; none are stored in the repo.
 | MAX_CONCURRENT_CLAUDE_CALLS | No | `5` | Process-wide `asyncio.Semaphore` limit for concurrent Claude extraction calls. Prevents batch floods from burning API capacity. |
 | CLAUDE_CONCURRENCY_TIMEOUT | No | `30.0` | Seconds to wait for a Claude concurrency permit before returning a friendly 503/429 busy message. |
 | MAX_REVIEW_REQUESTS_PER_DAY | No | `0` (disabled) | Soft spend/abuse daily request threshold for single-instance deployments. Logs a loud warning when crossed without blocking evaluator access. Multi-instance setups will require Redis later. |
-| DEMO_ACCESS_TOKEN | No | "" (unset) | Bearer token for the demo access gate. **Leave unset for public TTB evaluator demos** (fails open so evaluators are never locked out). Never enable by default. Do NOT add API_AUTH_TOKEN. |
+| DEMO_ACCESS_TOKEN | No | "" (unset) | Bearer token for the demo access gate. The `require_demo_access` dependency **must stay wired** on review routes. **Leave unset for public TTB evaluator demos** (fails open so evaluators are never locked out). Never enable by default. Do NOT add API_AUTH_TOKEN. Never commit this value. |
 | DEMO_USERNAME | No | "ttb-demo" | Optional display/username paired with the demo access gate. |
+| MAX_REQUEST_BODY_BYTES | No | `52428800` (50 MB) | Hard cap on the entire HTTP request body. Enforced from `Content-Length` and by counting streamed / chunked ASGI receive bytes so chunked transfer cannot bypass the limit. `/api/health` is never blocked. Invalid values fail-open to the default. |
+| MAX_LABELS_PER_BATCH | No | `50` | Maximum labels accepted on `/api/review/batch` and `/api/review/batch/stream`. |
+| MAX_TEMPLATE_BYTES | No | `1048576` (1 MB) | Maximum COLA template upload size. |
+| ENABLE_API_DOCS | No | unset (off) | When `true`/`1`/`yes`/`on`, serves `/docs`, `/redoc`, and `/openapi.json`. Those HTML pages get a separate CSP that allows the FastAPI/Swagger CDN (`cdn.jsdelivr.net`). JSON API routes keep `default-src 'none'`. |
 
 Defined in: backend/app/auth.py (DEMO_ACCESS_TOKEN, DEMO_USERNAME),
 backend/app/claude_client.py (CLAUDE_MODEL, USE_FAST_EXTRACTION, EXTRACTION_FAST_MODEL),
 backend/app/limiter.py (RATE_LIMIT_REVIEW, MAX_REVIEW_REQUESTS_PER_DAY),
-backend/app/main.py (ANTHROPIC_API_KEY, CORS_ORIGINS, MAX_CONCURRENT_CLAUDE_CALLS, CLAUDE_CONCURRENCY_TIMEOUT).
+backend/app/request_limits.py (MAX_REQUEST_BODY_BYTES, MAX_LABELS_PER_BATCH, MAX_TEMPLATE_BYTES),
+backend/app/security.py (API_CSP, DOCS_CSP),
+backend/app/main.py (ANTHROPIC_API_KEY, CORS_ORIGINS, MAX_CONCURRENT_CLAUDE_CALLS, CLAUDE_CONCURRENCY_TIMEOUT, ENABLE_API_DOCS).
 
-## Upload Limits (backend/app/main.py)
+## Upload Limits (backend/app/request_limits.py)
 
 | Constant | Value | Meaning |
 |---|---|---|
-| MAX_FILE_SIZE | 10 MB per image | Uploads exceeding this are rejected. |
+| MAX_FILE_SIZE | 10 MB per image | Per-file uploads exceeding this are rejected (`FILE_TOO_LARGE`). |
 | MAX_IMAGES_PER_LABEL | 4 | Maximum images accepted per label. |
+| DEFAULT_MAX_REQUEST_BODY_BYTES | 50 MB | Total request body cap, including chunked uploads without Content-Length. |
+| DEFAULT_MAX_LABELS_PER_BATCH | 50 | Batch / stream label cap. |
+
+Starlette middleware is LIFO (last added = outermost). Production order is `RequestBodyLimitMiddleware` (innermost) → `SecurityHeadersMiddleware` → `CORSMiddleware` (outermost) so HTTP 413 still receives `Access-Control-Allow-Origin` and security headers.
 
 ## Admin-Tunable Image-Quality Thresholds (backend/app/claude_client.py)
 

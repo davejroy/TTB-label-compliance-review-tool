@@ -41,6 +41,12 @@ describe('frontend CSP', () => {
     expect(metaPolicy).toContain("base-uri 'self'");
   });
 
+  it('loads VITE_API_HOST from mode env files via Vite loadEnv', () => {
+    const viteConfig = readFileSync(resolve(__dirname, '../../vite.config.ts'), 'utf8');
+    expect(viteConfig).toContain('loadEnv');
+    expect(viteConfig).toContain('VITE_API_HOST');
+  });
+
   it('declares the same policy on the Render static site', () => {
     const yaml = readFileSync(resolve(__dirname, '../../../render.yaml'), 'utf8');
     expect(yaml).toContain('Content-Security-Policy');
