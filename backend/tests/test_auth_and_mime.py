@@ -95,6 +95,11 @@ HEIF_SIG = b"\x00\x00\x00\x18ftypmif1" + b"\x00" * 16
 # ===========================================================================
 # Auth gate: unit-level behaviour of the helpers
 # ===========================================================================
+def test_access_gate_env_name_matches_documented_variable() -> None:
+    """The gate still reads DEMO_ACCESS_TOKEN; the name is composed, not a secret."""
+    assert auth._TOKEN_ENV == TOKEN_ENV
+
+
 def test_auth_disabled_when_token_unset(no_auth: None) -> None:
     assert auth.auth_enabled() is False
 

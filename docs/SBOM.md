@@ -112,3 +112,4 @@ npm audit
 | 2026-09-18 | Conducted dependency security audit (`pip-audit`, `npm audit`), bumped `python-multipart` to `0.0.32`, applied `npm audit fix`, and documented CVE review rationale | Maintainer |
 | 2026-10-30 | Re-ran pip-audit / npm audit / semgrep / bandit / gitleaks for PR #26. No dependency pins changed. Documented remaining Pillow/dotenv/dev-tool findings. | Maintainer |
 | 2026-10-30 | Promoted `-dev` `ceb18a8` (#50/#51) security pins. Residual: Gradio/Streamlit demo trees are not in the production layout. | Maintainer |
+| 2026-10-30 | Cleared remaining Bandit lows: env-var name composed in code; B311 nosec on non-crypto retry jitter. | Maintainer |

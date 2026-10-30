@@ -565,7 +565,8 @@ _RETRYABLE = (RateLimitError, APITimeoutError, APIConnectionError)
 
 def _retry_delay_seconds() -> float:
     """Bounded delay plus jitter so concurrent retries do not thundering-herd."""
-    return _RETRY_DELAY_S + random.uniform(0.0, _RETRY_JITTER_S)
+    # Non-cryptographic spacing only; not used for tokens, keys, or secrets.
+    return _RETRY_DELAY_S + random.uniform(0.0, _RETRY_JITTER_S)  # nosec B311
 
 
 @app.get("/api/health")
