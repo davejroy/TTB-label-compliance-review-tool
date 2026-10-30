@@ -68,12 +68,34 @@ def test_review_endpoints_still_declare_access_token_gate():
     assert "/api/health" not in gated
 
 
+def test_government_warning_bbox_is_scoped_to_image_index():
+    """A warning box on photo 1 must never be reused on photo 0."""
+    from app.main import _government_warning_bbox_for_image
+
+    extracted = ExtractedLabelData(
+        field_locations=[
+            FieldLocation(
+                field="government_warning",
+                image_index=1,
+                x=0.1,
+                y=0.2,
+                width=0.3,
+                height=0.4,
+            ),
+        ],
+    )
+    assert _government_warning_bbox_for_image(extracted, 0) is None
+    assert _government_warning_bbox_for_image(extracted, 1) == (0.1, 0.2, 0.3, 0.4)
+
+
 @pytest.mark.asyncio
 async def test_evaluate_type_size_uses_matching_image_index_only():
-    captured: list[tuple | None] = []
+    # Multi-photo measurement runs concurrently in a threadpool, so call order
+    # is not stable. Key the captured bbox by filename instead.
+    captured: dict[str, tuple | None] = {}
 
     def fake_eval(*_args, **kwargs):
-        captured.append(kwargs.get("gw_bbox"))
+        captured[kwargs["filename"]] = kwargs.get("gw_bbox")
         return TypeSizeMeasurement(
             method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
             required_min_height_mm=2.0,
@@ -103,7 +125,10 @@ async def test_evaluate_type_size_uses_matching_image_index_only():
             "750 mL",
             "test",
         )
-    assert captured == [None, (0.1, 0.2, 0.3, 0.4)]
+    assert captured == {
+        "front.jpg": None,
+        "back.jpg": (0.1, 0.2, 0.3, 0.4),
+    }
 
 
 def test_merge_remaps_field_location_image_index():

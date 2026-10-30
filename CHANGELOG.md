@@ -26,6 +26,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 - backend/app/compliance.py: Fix _normalize_whitespace to rejoin hyphenated line breaks
 
 ### Fixed
+- Type-size image-index regression no longer asserts threadpool call order; bbox is keyed by filename.
+- Production `tsc -b` excludes Vitest files so Vite 8 / Vitest 5 matcher types do not fail the frontend bundle; Vite config imports `cspPolicy.ts` with an extension.
 - OCR mis-reading of hyphenated line breaks (e.g., CON-SUMPTION misread as DO NOT)
 - Low-quality images now return user-friendly error instead of internal exception
 

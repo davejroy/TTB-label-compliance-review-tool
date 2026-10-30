@@ -19,6 +19,7 @@ This is a functional prototype operating in production. Both review modes (COLA 
   - Backend pins from `#50` `35a2189` + `#51` `ceb18a8`: `Pillow==13.0.0`, `python-dotenv==1.2.4`, `fastapi==0.162.0`, `starlette==1.10.0`.
   - Frontend pins from `#51`: `vite@8.3.5`, `vitest@5.0.5`, `happy-dom@21.0.4`, `zod@4.6.7` override. Production layout has no Gradio/Streamlit demo trees, so those `#50` demo pins were skipped.
   - Access-token gate stays wired. No secrets committed.
+  - GitHub CI on the pin commit failed two jobs: the type-size `image_index` test raced `asyncio.gather` + threadpool call order (production pairing was already correct), and `tsc -b` typechecked Vitest files after Vitest 5 matcher types changed. Production typecheck now excludes `src/__tests__` and `src/test`.
 
 - **PR #26 review-thread hardening (October 2026)**:
   - **Access-token gate stays ON**: `require_demo_access` remains a dependency on `/api/review`, `/api/review/batch`, `/api/review/batch/stream`, `/api/label-check/batch`, and `/api/cola/parse-template`. `/api/health` stays ungated. The gate still **fails open when `DEMO_ACCESS_TOKEN` is unset** (do not commit a token). Do not remove the dependency.
@@ -151,7 +152,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## Handoff Checklist
 - [x] Code builds
-- [x] Tests pass (475 backend pytest + 115 frontend vitest + ESLint, Oct 30 2026; pins from `-dev` `ceb18a8`)
+- [x] Tests pass (476+ backend pytest + 115 frontend vitest + ESLint + `tsc -b` / `vite build`, Oct 30 2026; pins from `-dev` `ceb18a8`)
 - [x] Required docs updated (/docs/ERROR_CODES.md, HANDOFF.md, PDR.md, REGULATORY_REFRENCES.md, SBOM.md, TECHNICAL_ARCHITECTURE.md)
 - [x] Secrets removed / verified no secrets committed
 - [x] Dependencies reviewed
