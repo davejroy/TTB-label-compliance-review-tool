@@ -15,6 +15,11 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **Re-promote to `-dev` `ceb18a8` (security PRs #50 / #51, October 2026)**:
+  - Backend pins from `#50` `35a2189` + `#51` `ceb18a8`: `Pillow==13.0.0`, `python-dotenv==1.2.4`, `fastapi==0.162.0`, `starlette==1.10.0`.
+  - Frontend pins from `#51`: `vite@8.3.5`, `vitest@5.0.5`, `happy-dom@21.0.4`, `zod@4.6.7` override. Production layout has no Gradio/Streamlit demo trees, so those `#50` demo pins were skipped.
+  - Access-token gate stays wired. No secrets committed.
+
 - **PR #26 review-thread hardening (October 2026)**:
   - **Access-token gate stays ON**: `require_demo_access` remains a dependency on `/api/review`, `/api/review/batch`, `/api/review/batch/stream`, `/api/label-check/batch`, and `/api/cola/parse-template`. `/api/health` stays ungated. The gate still **fails open when `DEMO_ACCESS_TOKEN` is unset** (do not commit a token). Do not remove the dependency.
   - **Request size**: `RequestBodyLimitMiddleware` counts streamed / chunked ASGI body bytes as well as `Content-Length`. Oversize requests return HTTP 413 `FILE_TOO_LARGE`. `/api/health` is skipped.
@@ -121,7 +126,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 - Standards of fill check validates against modernized T.D. TTB-200 authorized size lists (§4.72 / §5.203); custom authorized sizes require manual formula verification.
 - Exact physical type-size verification (27 CFR 16.22) is automated via Option A (scale marker) when an ID-1 card or ArUco target is co-planar; uncalibrated photos retain the honest statutory physical gauge advisory with zero invented mm.
-- **Pre-GO leftover (not in this PR's review-thread scope):** `pip-audit` still flags `Pillow==11.1.0` (fix in 12.x–13.0.0) and `python-dotenv==1.0.1` (fix in 1.2.2). Production `npm audit --omit=dev` is clean; full `npm audit` reports Vite/tinypool/zod issues in **dev/build** tooling only. Bandit reports two lows: env-var name `DEMO_ACCESS_TOKEN` (not a secret) and `random.uniform` retry jitter. See [SBOM.md](./SBOM.md).
+- Gradio (`6.31.0`) / Streamlit (`1.66.1`) demo pins from `-dev` `#50` are not in this production layout (`tools/gradio_demo`, `tools/eval_dashboard` are excluded on promote). See [SBOM.md](./SBOM.md).
 
 ## Operational Notes
 
@@ -146,7 +151,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## Handoff Checklist
 - [x] Code builds
-- [x] Tests pass (475 backend pytest + 115 frontend vitest, Oct 30 2026)
+- [x] Tests pass (475 backend pytest + 115 frontend vitest + ESLint, Oct 30 2026; pins from `-dev` `ceb18a8`)
 - [x] Required docs updated (/docs/ERROR_CODES.md, HANDOFF.md, PDR.md, REGULATORY_REFRENCES.md, SBOM.md, TECHNICAL_ARCHITECTURE.md)
 - [x] Secrets removed / verified no secrets committed
 - [x] Dependencies reviewed
