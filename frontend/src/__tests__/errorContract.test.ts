@@ -34,6 +34,42 @@ describe('httpStatusUserMessage', () => {
     expect(httpStatusUserMessage(429, 'fallback')).toMatch(/too many requests/i);
     expect(httpStatusUserMessage(500, 'Server Error')).toBe('Server Error');
   });
+
+  it('shows the structured 413 FILE_TOO_LARGE message from the API', () => {
+    expect(
+      httpStatusUserMessage(
+        413,
+        'The upload is too large. Please use fewer or smaller photos.',
+        'FILE_TOO_LARGE',
+      ),
+    ).toBe('The upload is too large. Please use fewer or smaller photos.');
+  });
+
+  it.each([
+    'Review failed (413): The upload is too large. Please use fewer or smaller photos.',
+    'Batch review failed (413): The upload is too large. Please use fewer or smaller photos.',
+    'Batch stream failed (413): The upload is too large. Please use fewer or smaller photos.',
+    'Template import failed (413): The template file is too large. Please upload a file under 1 MB.',
+    'Failed to load presets (413): The upload is too large. Please use fewer or smaller photos.',
+  ])('unwraps API 413 wrapper %s so users see the FILE_TOO_LARGE text', (wrapped) => {
+    const shown = httpStatusUserMessage(413, wrapped, 'FILE_TOO_LARGE');
+    expect(shown).not.toMatch(/failed \(\d+\)/i);
+    expect(shown).toMatch(/too large/i);
+    if (wrapped.includes('template file')) {
+      expect(shown).toBe('The template file is too large. Please upload a file under 1 MB.');
+    } else {
+      expect(shown).toBe('The upload is too large. Please use fewer or smaller photos.');
+    }
+  });
+
+  it('does not surface a proxy HTML 413 page', () => {
+    const html = '<html><head><title>413 Request Entity Too Large</title></head><body>nginx</body></html>';
+    const shown = httpStatusUserMessage(413, html);
+    expect(shown).toMatch(/too large/i);
+    expect(shown).not.toMatch(/<html/i);
+    expect(shown).not.toMatch(/request entity too large/i);
+    expect(shown).not.toMatch(/nginx/i);
+  });
 });
 
 describe('areaToFileIndex', () => {

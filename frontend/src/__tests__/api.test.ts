@@ -91,12 +91,70 @@ describe('safeFetch retry', () => {
 
            it('surfaces a clear 413 payload-too-large message without retrying', async () => {
                  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-                         makeResponse(413, { error_code: 'FILE_TOO_LARGE', message: 'The upload is too large.' })));
+                         makeResponse(413, { error_code: 'FILE_TOO_LARGE', message: 'The upload is too large. Please use fewer or smaller photos.' })));
                  const { reviewLabel } = await import('../api');
                  const mockFile = new File(['img'], 'label.jpg', { type: 'image/jpeg' });
                  const mockApp = { beverage_type: 'distilled_spirits' as const, brand_name: 'Test',
                                         class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
-                 await expect(reviewLabel([mockFile], mockApp)).rejects.toThrow(/too large/i);
+                 const err = await reviewLabel([mockFile], mockApp).catch((e: unknown) => e);
+                 expect(err).toMatchObject({
+                       status: 413,
+                       error_code: 'FILE_TOO_LARGE',
+                 });
+                 expect(err).toBeInstanceOf(Error);
+                 expect((err as Error).message).toBe(
+                       'The upload is too large. Please use fewer or smaller photos.',
+                 );
+                 expect((err as Error).message).not.toMatch(/review failed/i);
+           });
+
+           it('does not show a proxy HTML 413 body verbatim', async () => {
+                 vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+                         makeTextResponse(413, '<html><h1>413 Request Entity Too Large</h1></html>')));
+                 const { reviewLabel } = await import('../api');
+                 const mockFile = new File(['img'], 'label.jpg', { type: 'image/jpeg' });
+                 const mockApp = { beverage_type: 'distilled_spirits' as const, brand_name: 'Test',
+                                        class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
+                 const err = await reviewLabel([mockFile], mockApp).catch((e: unknown) => e);
+                 expect(err).toMatchObject({ status: 413 });
+                 expect((err as Error).message).toMatch(/fewer photos or smaller files/i);
+                 expect((err as Error).message).not.toMatch(/<html/i);
+                 expect((err as Error).message).not.toMatch(/request entity too large/i);
+           });
+
+           it('surfaces the API FILE_TOO_LARGE text on batch 413, not the 10 MB generic', async () => {
+                 vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+                         makeResponse(413, { error_code: 'FILE_TOO_LARGE', message: 'The upload is too large. Please use fewer or smaller photos.' })));
+                 const { reviewLabelsBatch } = await import('../api');
+                 const mockFile = new File(['img'], 'label.jpg', { type: 'image/jpeg' });
+                 const mockApp = { beverage_type: 'distilled_spirits' as const, brand_name: 'Test',
+                                        class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
+                 const err = await reviewLabelsBatch([{ files: [mockFile], application: mockApp }]).catch((e: unknown) => e);
+                 expect(err).toMatchObject({ status: 413, error_code: 'FILE_TOO_LARGE' });
+                 expect((err as Error).message).toBe(
+                       'The upload is too large. Please use fewer or smaller photos.',
+                 );
+                 expect((err as Error).message).not.toMatch(/batch review failed/i);
+                 expect((err as Error).message).not.toMatch(/each photo can be up to 10 MB/i);
+           });
+
+           it('surfaces the API FILE_TOO_LARGE text on batch stream 413', async () => {
+                 vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+                         makeResponse(413, { error_code: 'FILE_TOO_LARGE', message: 'The upload is too large. Please use fewer or smaller photos.' })));
+                 const { reviewLabelsBatchStream } = await import('../api');
+                 const mockFile = new File(['img'], 'label.jpg', { type: 'image/jpeg' });
+                 const mockApp = { beverage_type: 'distilled_spirits' as const, brand_name: 'Test',
+                                        class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
+                 const err = await reviewLabelsBatchStream(
+                       [{ files: [mockFile], application: mockApp }],
+                       () => undefined,
+                 ).catch((e: unknown) => e);
+                 expect(err).toMatchObject({ status: 413, error_code: 'FILE_TOO_LARGE' });
+                 expect((err as Error).message).toBe(
+                       'The upload is too large. Please use fewer or smaller photos.',
+                 );
+                 expect((err as Error).message).not.toMatch(/batch stream failed/i);
+                 expect((err as Error).message).not.toMatch(/each photo can be up to 10 MB/i);
            });
 
            it('surfaces a clear 401 unauthorized message', async () => {

@@ -1,9 +1,11 @@
 """Shared upload / request-size guards used by sync, batch, and stream paths.
 
-These checks run before file bytes are decoded or sent to the model. Guard
-failures that are configuration or store errors fail open (log + allow) so
-legitimate reviewers are never locked out by a broken limiter. ``/api/health``
-is never blocked by the body-size middleware.
+These checks run before file bytes are decoded or sent to the model. Count
+and batch validators fail open on internal errors so a broken helper cannot
+lock out a legitimate review. The request-body cap is the exception: if the
+cap cannot be read, the middleware fails closed (HTTP 413) rather than
+accepting an unlimited body. ``GET``/``HEAD`` ``/api/health`` is never
+blocked so probes stay up; other methods on that path are still capped.
 """
 
 from __future__ import annotations
@@ -16,7 +18,16 @@ from fastapi import UploadFile
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from .errors import FILE_TOO_LARGE, INVALID_REQUEST, REQUEST_ID_HEADER, ClientError, current_request_id, error_payload
+from .errors import (
+    FILE_TOO_LARGE,
+    INVALID_REQUEST,
+    REQUEST_ID_HEADER,
+    ClientError,
+    current_request_id,
+    error_payload,
+    sanitize_request_id,
+    set_request_id,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -48,6 +59,7 @@ EMPTY_LABEL_MESSAGE = "Each label must include at least one image."
 UPLOAD_RANGE_MESSAGE = f"Upload between 1 and {MAX_IMAGES_PER_LABEL} images per label."
 
 HEALTH_PATH = "/api/health"
+HEALTH_EXEMPT_METHODS = frozenset({"GET", "HEAD"})
 
 
 def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
@@ -238,6 +250,33 @@ def file_too_large_error(filename: str | None) -> ClientError:
     return ClientError(FILE_TOO_LARGE, f"File '{name}' exceeds 10 MB limit.")
 
 
+def _request_id_from_scope(scope: Scope) -> str:
+    """Adopt a safe incoming X-Request-ID before the inner request-id middleware runs."""
+    try:
+        for key, value in scope.get("headers", []):
+            if key.decode("latin-1").lower() == "x-request-id":
+                rid = sanitize_request_id(value.decode("latin-1"))
+                set_request_id(rid)
+                return rid
+    except Exception:  # noqa: BLE001
+        _log.exception("Could not read incoming X-Request-ID; generating one")
+    return current_request_id()
+
+
+def _request_body_chunk(message: Message) -> bytes:
+    """Return the ASGI body chunk as bytes.
+
+    Non-bytes payloads must not crash ``len()`` or Starlette's parser.
+    A stray ``str`` is encoded so it still counts toward the cap.
+    """
+    chunk = message.get("body")
+    if isinstance(chunk, (bytes, bytearray, memoryview)):
+        return bytes(chunk)
+    if isinstance(chunk, str):
+        return chunk.encode("latin-1", errors="replace")
+    return b""
+
+
 async def _send_json_error(
     send: Send,
     *,
@@ -264,12 +303,23 @@ async def _send_json_error(
 
 
 class RequestBodyLimitMiddleware:
-    """Reject requests that exceed ``MAX_REQUEST_BODY_BYTES``.
+    """Reject requests whose body exceeds ``MAX_REQUEST_BODY_BYTES``.
 
-    Enforces the cap from ``Content-Length`` when present, and also counts
-    bytes on the raw ASGI receive path so chunked uploads without
-    Content-Length cannot bypass the limit. ``/api/health`` is never blocked.
-    Header/parse failures fail open.
+    Fast path: reject when ``Content-Length`` is already over the cap so
+    oversized declared bodies never reach multipart parsing. Streaming path:
+    wrap the ASGI ``receive`` channel and count body bytes as they arrive so
+    chunked transfers, missing ``Content-Length``, or an understated length
+    cannot bypass the limit. The wrapper does not buffer the body to measure
+    it — it forwards each chunk and stops at the first byte past the cap
+    without waiting to drain the rest of the stream.
+
+    ``GET``/``HEAD`` ``/api/health`` is never blocked (including when the
+    cap cannot be read) so probes stay up. Other methods on that path are
+    still capped. If the cap itself cannot be read the middleware fails
+    closed (HTTP 413) so an unlimited body is never accepted. An unparsable
+    ``Content-Length`` skips only the fast precheck and still counts
+    streamed bytes. A 413 is not sent if the inner app already started a
+    response (avoids a second ``http.response.start``).
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -281,12 +331,28 @@ class RequestBodyLimitMiddleware:
             return
 
         path = scope.get("path", "")
-        if path == HEALTH_PATH:
+        method = str(scope.get("method") or "").upper()
+        # Only liveness probes skip the cap. POST/PUT/etc. to this path
+        # used to send an unlimited body past the limiter.
+        if path == HEALTH_PATH and method in HEALTH_EXEMPT_METHODS:
             await self.app(scope, receive, send)
             return
 
         try:
             max_bytes = get_max_request_body_bytes()
+        except Exception:  # noqa: BLE001
+            # Fail closed: a broken cap lookup must not accept an unlimited body.
+            _log.exception("Body-size middleware failed; rejecting request (fail-closed)")
+            _request_id_from_scope(scope)
+            await _send_json_error(
+                send,
+                status=413,
+                code=FILE_TOO_LARGE,
+                message=FILE_TOO_LARGE_MESSAGE,
+            )
+            return
+
+        try:
             headers = {
                 key.decode("latin-1").lower(): value.decode("latin-1")
                 for key, value in scope.get("headers", [])
@@ -301,6 +367,7 @@ class RequestBodyLimitMiddleware:
                         max_bytes,
                         path,
                     )
+                    _request_id_from_scope(scope)
                     await _send_json_error(
                         send,
                         status=413,
@@ -309,48 +376,46 @@ class RequestBodyLimitMiddleware:
                     )
                     return
         except Exception:  # noqa: BLE001
-            _log.exception("Body-size middleware failed; allowing request (fail-open)")
-            await self.app(scope, receive, send)
-            return
+            # A missing or unparsable Content-Length is not a broken limiter.
+            # Continue and enforce the cap on bytes actually received.
+            _log.exception(
+                "Content-Length precheck failed; continuing with streamed byte count"
+            )
 
         received = 0
-        rejected = False
+        exceeded = False
+        error_sent = False
         response_started = False
 
-        async def send_wrapper(message: Message) -> None:
-            nonlocal response_started
-            if rejected:
-                return
-            if message["type"] == "http.response.start":
-                response_started = True
-            await send(message)
-
         async def limited_receive() -> Message:
-            nonlocal received, rejected
-            if rejected:
+            nonlocal received, exceeded, error_sent
+            if exceeded:
                 return {"type": "http.disconnect"}
             message = await receive()
             if message["type"] != "http.request":
                 return message
-            chunk = message.get("body", b"") or b""
+            chunk = _request_body_chunk(message)
             received += len(chunk)
             if received <= max_bytes:
+                # Forward a coerced bytes body so a non-bytes chunk cannot
+                # crash Starlette's parser after we accepted the size.
+                if chunk != message.get("body"):
+                    return {**message, "body": chunk}
                 return message
-            rejected = True
+            exceeded = True
             _log.warning(
-                "Request body rejected: streamed %s bytes exceed MAX_REQUEST_BODY_BYTES=%s path=%s",
+                "Request body rejected: received %s bytes exceeds MAX_REQUEST_BODY_BYTES=%s path=%s",
                 received,
                 max_bytes,
                 path,
             )
-            try:
-                more = bool(message.get("more_body"))
-                while more:
-                    nxt = await receive()
-                    more = bool(nxt.get("more_body"))
-            except Exception:  # noqa: BLE001
-                _log.exception("Draining oversize streamed body failed; continuing")
-            if not response_started:
+            # Send 413 immediately. Do not drain leftover chunks — a chunked
+            # client can leave more_body=True and stall the worker forever.
+            # Do not send a second response.start if the inner app already
+            # began one (ASGI protocol violation / connection abort).
+            if not error_sent and not response_started:
+                error_sent = True
+                _request_id_from_scope(scope)
                 await _send_json_error(
                     send,
                     status=413,
@@ -359,10 +424,18 @@ class RequestBodyLimitMiddleware:
                 )
             return {"type": "http.disconnect"}
 
-        try:
-            await self.app(scope, limited_receive, send_wrapper)
-        except Exception:  # noqa: BLE001
-            if rejected or response_started:
+        async def limited_send(message: Message) -> None:
+            nonlocal response_started
+            if error_sent:
                 return
-            _log.exception("Body-size middleware failed; allowing request (fail-open)")
-            await self.app(scope, receive, send)
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, limited_send)
+        except Exception:
+            if error_sent:
+                _log.info("Inner app exited after oversize body rejection")
+                return
+            raise

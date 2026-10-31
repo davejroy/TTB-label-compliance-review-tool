@@ -24,12 +24,40 @@ export function isFailResult(result: Pick<ReviewResult | LabelCheckResult, "over
   return result.overall_status === "fail";
 }
 
-export function httpStatusUserMessage(status: number, fallback: string): string {
+const GENERIC_413_MESSAGE =
+  "This upload is too large. Please use fewer photos or smaller files (each photo can be up to 10 MB).";
+
+// Unwraps every API wrapper that throwApiError prefixes, including
+// "Batch review failed (413):" and "Batch stream failed (413):".
+const STATUS_LINE_PREFIX =
+  /^(?:[\w][\w /-]*failed|Failed to [^:]+?) \(\d+\):\s*/i;
+
+const ACTIONABLE_413_MESSAGE =
+  /^(?:The upload is too large\.|This upload is too large\.|The template file is too large\.|File '.+' exceeds 10 MB limit\.)/i;
+
+function actionableUploadSizeMessage(fallback: string): string | null {
+  const cleaned = fallback.replace(STATUS_LINE_PREFIX, "").trim();
+  if (!cleaned || /<[a-z!/]/i.test(cleaned) || /request entity too large/i.test(cleaned)) {
+    return null;
+  }
+  return ACTIONABLE_413_MESSAGE.test(cleaned) ? cleaned : null;
+}
+
+export function httpStatusUserMessage(
+  status: number,
+  fallback: string,
+  errorCode?: ErrorCode,
+): string {
   if (status === 401) {
     return "Your session is not authorized. Please sign in again and retry.";
   }
   if (status === 413) {
-    return "This upload is too large. Please use fewer photos or smaller files (each photo can be up to 10 MB).";
+    // Prefer the structured API FILE_TOO_LARGE text. Never surface proxy HTML
+    // ("413 Request Entity Too Large") or a "Review failed (413):" wrapper.
+    if (errorCode === "FILE_TOO_LARGE" || !errorCode) {
+      return actionableUploadSizeMessage(fallback) ?? GENERIC_413_MESSAGE;
+    }
+    return GENERIC_413_MESSAGE;
   }
   if (status === 429) {
     return "Too many requests. Please wait a moment and try again.";

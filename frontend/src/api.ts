@@ -77,7 +77,7 @@ function throwApiError(status: number, payload: { message: string; error_code?: 
     }
   }
   throw new ApiError(
-    httpStatusUserMessage(status, payload.message),
+    httpStatusUserMessage(status, payload.message, payload.error_code),
     status,
     payload.error_code,
     payload.request_id,
