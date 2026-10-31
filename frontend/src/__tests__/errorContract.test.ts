@@ -5,8 +5,11 @@ import {
   nextUnusedPanelRole,
   httpStatusUserMessage,
   isErrorResult,
+  canExportResults,
+  isExportableResult,
   isFailResult,
   isRetakeResult,
+  isServiceUnavailableCode,
 } from '../errorContract';
 
 describe('result classification', () => {
@@ -33,6 +36,37 @@ describe('httpStatusUserMessage', () => {
     expect(httpStatusUserMessage(413, 'fallback')).toMatch(/too large/i);
     expect(httpStatusUserMessage(429, 'fallback')).toMatch(/too many requests/i);
     expect(httpStatusUserMessage(500, 'Server Error')).toBe('Server Error');
+  });
+
+  it('unwraps 503 VISION_UNAVAILABLE into the photo-is-fine message', () => {
+    expect(
+      httpStatusUserMessage(
+        503,
+        'Review failed (503): The label reader is unavailable right now — your photo is fine. Try again shortly.',
+        'VISION_UNAVAILABLE',
+      ),
+    ).toBe('The label reader is unavailable right now — your photo is fine. Try again shortly.');
+    expect(isServiceUnavailableCode('VISION_UNAVAILABLE')).toBe(true);
+    expect(isServiceUnavailableCode('CONFIG_ERROR')).toBe(true);
+    expect(isServiceUnavailableCode('UPSTREAM_TIMEOUT')).toBe(true);
+    expect(isServiceUnavailableCode('RATE_LIMITED')).toBe(true);
+    expect(isExportableResult({ overall_status: 'error', error_code: 'VISION_UNAVAILABLE' })).toBe(false);
+    expect(isExportableResult({ overall_status: 'fail', error_code: null })).toBe(true);
+    expect(isExportableResult({ overall_status: 'retake', error_code: 'PHOTO_QUALITY_LOW' })).toBe(true);
+    expect(canExportResults([{ overall_status: 'error', error_code: 'VISION_UNAVAILABLE' }])).toBe(true);
+    expect(canExportResults([])).toBe(false);
+  });
+
+  it('unwraps 502 / 504 / 429 vision codes without a green-path message', () => {
+    expect(
+      httpStatusUserMessage(502, 'Review failed (502): The label reader is unavailable right now — your photo is fine. Try again shortly.', 'UPSTREAM_ERROR'),
+    ).toMatch(/photo is fine/i);
+    expect(
+      httpStatusUserMessage(504, 'Review failed (504): The label reader timed out — your photo is fine. Try again shortly.', 'UPSTREAM_TIMEOUT'),
+    ).toMatch(/timed out/i);
+    expect(
+      httpStatusUserMessage(429, 'The label reader is busy — your photo is fine. Wait a moment and try again.', 'RATE_LIMITED'),
+    ).toMatch(/photo is fine/i);
   });
 
   it('shows the structured 413 FILE_TOO_LARGE message from the API', () => {

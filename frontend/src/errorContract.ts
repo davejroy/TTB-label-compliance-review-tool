@@ -15,9 +15,55 @@ export function isRetakeResult(result: Pick<ReviewResult, "overall_status" | "er
   return result.overall_status === "retake" || isRetakeCode(result.error_code) || !!result.retake;
 }
 
+export const SERVICE_UNAVAILABLE_CODES = new Set<ErrorCode>([
+  "VISION_UNAVAILABLE",
+  "CONFIG_ERROR",
+  "MODEL_UNAVAILABLE",
+  "UPSTREAM_TIMEOUT",
+  "UPSTREAM_ERROR",
+  "RATE_LIMITED",
+]);
+
+export const INVALID_FILE_CODES = new Set<ErrorCode>([
+  "UNSUPPORTED_FILE",
+  "FILE_TOO_LARGE",
+]);
+
+export const LABEL_READER_UNAVAILABLE_MESSAGE =
+  "The label reader is unavailable right now — your photo is fine. Try again shortly.";
+
+export function isServiceUnavailableCode(code?: ErrorCode | null): boolean {
+  return !!code && SERVICE_UNAVAILABLE_CODES.has(code);
+}
+
+export function isInvalidFileResult(result: Pick<ReviewResult, "error_code">): boolean {
+  return !!result.error_code && INVALID_FILE_CODES.has(result.error_code);
+}
+
 export function isErrorResult(result: Pick<ReviewResult, "overall_status" | "error_code">): boolean {
   if (result.overall_status === "error") return true;
   return !!result.error_code && !isRetakeCode(result.error_code);
+}
+
+/** True when CSV may be offered: any completed result, including all-error runs. */
+export function canExportResults(
+  results: Array<Pick<ReviewResult, "overall_status" | "error_code">>,
+): boolean {
+  return results.length > 0;
+}
+
+/** Every completed result is exported. Status + Comments distinguish outcomes. */
+export function resultsForCsvExport<T extends Pick<ReviewResult, "error_code">>(results: T[]): T[] {
+  return results;
+}
+
+export function notReviewedLabel(code?: ErrorCode | null): string {
+  return `NOT REVIEWED — ${code || "INTERNAL_ERROR"}`;
+}
+
+/** @deprecated Use canExportResults; kept for callers that treated errors as non-exportable. */
+export function isExportableResult(result: Pick<ReviewResult, "overall_status" | "error_code">): boolean {
+  return !isErrorResult(result) && !isInvalidFileResult(result);
 }
 
 export function isFailResult(result: Pick<ReviewResult | LabelCheckResult, "overall_status">): boolean {
@@ -59,8 +105,22 @@ export function httpStatusUserMessage(
     }
     return GENERIC_413_MESSAGE;
   }
+  if (status === 429 && errorCode === "RATE_LIMITED") {
+    const cleaned = fallback.replace(STATUS_LINE_PREFIX, "").trim();
+    if (cleaned && !/<[a-z!/]/i.test(cleaned) && /photo is fine|busy|wait/i.test(cleaned)) {
+      return cleaned;
+    }
+    return "Too many requests. Please wait a moment and try again.";
+  }
   if (status === 429) {
     return "Too many requests. Please wait a moment and try again.";
+  }
+  if ((status === 502 || status === 503 || status === 504) && isServiceUnavailableCode(errorCode)) {
+    const cleaned = fallback.replace(STATUS_LINE_PREFIX, "").trim();
+    if (cleaned && !/<[a-z!/]/i.test(cleaned)) {
+      return cleaned;
+    }
+    return LABEL_READER_UNAVAILABLE_MESSAGE;
   }
   return fallback;
 }

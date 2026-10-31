@@ -39,7 +39,9 @@ def test_health_anonymous_access_and_security_headers(client):
     """Anonymous /api/health succeeds with 200 and includes all required security headers."""
     res = client.get("/api/health")
     assert res.status_code == 200
-    assert res.json() == {"status": "ok"}
+    body = res.json()
+    assert body["status"] == "ok"
+    assert isinstance(body.get("vision_configured"), bool)
 
     headers = res.headers
     assert headers["x-content-type-options"] == "nosniff"

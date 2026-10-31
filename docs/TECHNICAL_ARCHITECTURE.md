@@ -74,6 +74,8 @@ The prototype implements a **fail-open security and abuse prevention architectur
 6. **Request body cap**: `RequestBodyLimitMiddleware` rejects bodies over `MAX_REQUEST_BODY_BYTES` (default 50 MB) using `Content-Length` **and** a running count of the body bytes actually received (chunked, missing, or understated `Content-Length` cannot bypass it). The 413 is sent as soon as the cap is crossed, without draining leftover chunks, and is not sent if the inner app already started a response. If the cap cannot be read the limiter fails closed (HTTP 413). `GET`/`HEAD` `/api/health` is never blocked; other methods on that path are still capped.
 7. **Middleware order (Starlette LIFO)**: last added is outermost. Production stack is body-limit (innermost) → CORS → security headers (outermost). CORS wraps the size limiter so a 413 to an allowed origin still carries `Access-Control-Allow-Origin` (none for disallowed origins); security headers wrap CORS so preflight OPTIONS, which CORS answers itself, still get CSP/HSTS. A wildcard origin is never paired with credentials.
 8. **Type-size bbox isolation**: `_evaluate_type_size` applies a Government Warning box only when `field_locations.image_index` matches the photo under measurement. `merge_extracted_label_data` remaps each photo's locations onto the merged index so a back-label box is never applied to the front photo.
+9. **Docs CSP**: `/docs`, `/redoc`, and `/openapi.json` use a docs CSP (`default-src 'none'` plus jsDelivr / FastAPI assets and `connect-src 'self'`). API JSON keeps `default-src 'none'; frame-ancestors 'none'`.
+10. **Frontend origin**: `VITE_API_HOST` and CSP `connect-src` share `resolveApiOrigin` (hostname gets `https://`; a full URL is kept as-is). Docker nginx stays `connect-src 'self'`.
 
 This is **not** real per-user authentication or authorization: it is designed to keep public demos accessible and safe from abuse. See [REGULATORY_REFERENCES.md](./REGULATORY_REFERENCES.md).
 
@@ -87,9 +89,11 @@ Key environment variables (see [HANDOFF.md](./HANDOFF.md) for the authoritative 
 | `CLAUDE_MODEL` | Vision-capable Claude model override (default: `claude-sonnet-4-5`) | No | No |
 | `USE_FAST_EXTRACTION` | Feature flag to route extractions to faster/cheaper model on -dev (default: `false`) | No | No |
 | `EXTRACTION_FAST_MODEL` | Fast model when `USE_FAST_EXTRACTION=true` (default: `claude-3-5-haiku-latest`) | No | No |
-| `VITE_API_HOST` | Backend host the frontend calls (build-time) | Yes (frontend) | No |
+| `VITE_API_HOST` | Backend host the frontend calls (build-time). `resolveApiOrigin` and CSP `connect-src` share this value (hostname gets `https://`; a full URL is kept as-is). Docker nginx stays `connect-src 'self'`. | Yes (frontend) | No |
 | `CORS_ORIGINS` | Allowed browser origins for the backend API. Unset fails open to local Vite + the `render.yaml` frontend (`https://ttb-label-frontend.onrender.com`); methods GET/POST/OPTIONS, headers Authorization/Content-Type, credentials off. | Recommended | No |
 | `MAX_REQUEST_BODY_BYTES` | Total HTTP request-body cap (Content-Length and chunked). Default 50 MB. | Recommended | No |
+| `MAX_LABELS_PER_BATCH` | Max labels per batch/stream request (default 50) | No | No |
+| `MAX_TEMPLATE_BYTES` | COLA template upload cap (default 1 MB) | No | No |
 | `ENABLE_API_DOCS` | When true, serve OpenAPI HTML with a docs-only CSP (Swagger CDN). Default off. | No | No |
 | `DEMO_ACCESS_TOKEN` | Shared-token demo gate. Unset = fail-open. Dependency must remain on review routes. | No | Yes |
 
@@ -186,6 +190,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-10-30 | Promoted `-dev` `ceb18a8` security pins: FastAPI 0.162.0 / Starlette 1.10.0 / Pillow 13.0.0 / python-dotenv 1.2.4; Vite 8.3.5 / Vitest 5.0.5 | Maintainer |
 | 2026-10-31 | Promoted `-dev` `7b69489` (#49): body cap counts bytes actually read, immediate 413, fail-closed cap lookup; middleware order body-limit → CORS → security headers; frontend structured 413 text | Maintainer |
 | 2026-10-31 | Review fixes: GET/HEAD-only health exemption; no second ASGI response.start; CSV formula neutralization; SHA-pinned Actions; nginx Host=$proxy_host; image 3.11.18-slim + apt upgrade | Maintainer |
+| 2026-10-31 | Vision failures are typed HTTP 502/503/504/429; CSV Status + Comments; health `vision_configured`; type-size image_index; address parse | Maintainer |
 | 2026-10-30 | CI follow-up: type-size bbox test keyed by filename (gather+threadpool); `tsconfig.app.json` excludes Vitest files from production `tsc -b` | Maintainer |
 
 ## Related Documentation

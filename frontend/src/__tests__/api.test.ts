@@ -179,6 +179,26 @@ describe('safeFetch retry', () => {
                  expect(sessionStorage.getItem('ttb_demo_token')).toBeNull();
            });
 
+           it('does NOT retry 503 VISION_UNAVAILABLE', async () => {
+                 const fetchMock = vi.fn().mockResolvedValue(
+                   makeResponse(503, {
+                     error_code: 'VISION_UNAVAILABLE',
+                     message: 'The label reader is unavailable right now — your photo is fine. Try again shortly.',
+                   }),
+                 );
+                 vi.stubGlobal('fetch', fetchMock);
+                 const { reviewLabel } = await import('../api');
+                 const mockFile = new File(['img'], 'label.jpg', { type: 'image/jpeg' });
+                 const mockApp = { beverage_type: 'distilled_spirits' as const, brand_name: 'Test',
+                                        class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
+                 const err = await reviewLabel([mockFile], mockApp).catch((e: unknown) => e);
+                 expect(fetchMock).toHaveBeenCalledTimes(1);
+                 expect(err).toMatchObject({ status: 503, error_code: 'VISION_UNAVAILABLE' });
+                 expect((err as Error).message).toMatch(/photo is fine/i);
+                 expect((err as Error).message).not.toMatch(/review failed/i);
+                 expect((err as Error).message).not.toMatch(/sk-ant/i);
+           });
+
            it('does NOT retry on 404', async () => {
                  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeResponse(404, { detail: 'Not found' })));
                  const { reviewLabel } = await import('../api');
@@ -319,6 +339,51 @@ describe('COLA Presets and Template Import API', () => {
         const { parseColaTemplate } = await import('../api');
         const file = new File(['bad_content'], 'bad.csv', { type: 'text/csv' });
         await expect(parseColaTemplate(file)).rejects.toThrow('Missing required application field(s): brand_name');
+    });
+});
+
+describe('reviewLabelsBatchStream', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('throws when the NDJSON stream ends before every label', async () => {
+        const ndjson =
+            JSON.stringify({
+                index: 0,
+                result: {
+                    filenames: ['a.png'],
+                    overall_status: 'pass',
+                    fields: [],
+                    extracted: { government_warning_present: true, field_locations: [] },
+                    processing_time_ms: 1,
+                },
+            }) + '\n{"done":true,"total":2}\n';
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                new Response(ndjson, {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/x-ndjson' },
+                }),
+            ),
+        );
+        const { reviewLabelsBatchStream } = await import('../api');
+        const mockFile = new File(['img'], 'label.jpg', { type: 'image/jpeg' });
+        const mockApp = {
+            beverage_type: 'distilled_spirits' as const,
+            brand_name: 'Test',
+            class_type: 'Bourbon',
+            alcohol_content: '45%',
+            net_contents: '750 mL',
+        };
+        await expect(
+            reviewLabelsBatchStream(
+                [
+                    { files: [mockFile], application: mockApp },
+                    { files: [mockFile], application: mockApp },
+                ],
+                () => undefined,
+            ),
+        ).rejects.toThrow(/ended before every label/i);
     });
 });
 

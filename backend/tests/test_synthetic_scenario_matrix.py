@@ -74,6 +74,21 @@ def test_glare_is_not_silently_treated_as_clean_input(rendered):
     assert "retake" in result["message"].lower()
 
 
+def test_wine_imported_pass_is_a_compliant_imported_wine():
+    scenario = next(item for item in SCENARIOS if item["id"] == "wine_imported_pass")
+    fields = scenario["fields"]
+    assert fields["origin_guess"] == "imported"
+    assert "Imported" in fields["name_and_address"]
+    assert fields["country_of_origin"]
+    assert fields["sulfite_declaration"]
+    statuses = evaluate_scenario(scenario)
+    for field, expected in scenario["expected"].items():
+        assert statuses[field] == expected
+    source = Path(__file__).parent.joinpath("fixtures", "synthetic_scenario_matrix.py").read_text()
+    assert 'put(fields.get("country_of_origin")' in source
+    assert 'put(fields.get("sulfite_declaration")' in source
+
+
 def test_matrix_contains_compliant_noncompliant_and_capture_conditions():
     kinds = {item["kind"] for item in SCENARIOS}
     transforms = {item["image_transform"] for item in SCENARIOS}

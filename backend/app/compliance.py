@@ -1008,6 +1008,36 @@ _US_STATE_NAMES = frozenset({
     "wisconsin", "wyoming", "districtofcolumbia",
 })
 
+# CO is both Colorado and the legal suffix "Co". Multi-word Colorado cities
+# without a comma ("Colorado Springs CO") must stay address lines, while
+# "Hopline Brewing Co" and "Colorado Gold Co" stay companies. Only an
+# explicit city list is used so a prefix like "Colorado" cannot swallow
+# a company name.
+_MULTIWORD_CITIES_BEFORE_CO = frozenset({
+    "colorado springs",
+    "fort collins",
+    "grand junction",
+    "castle rock",
+    "pueblo west",
+    "greenwood village",
+    "wheat ridge",
+    "commerce city",
+    "federal heights",
+    "glenwood springs",
+    "steamboat springs",
+    "estes park",
+    "pagosa springs",
+    "canon city",
+    "canyon city",
+    "cherry hills village",
+    "highlands ranch",
+    "fort morgan",
+    "manitou springs",
+    "woodland park",
+    "castle pines",
+    "colorado city",
+})
+
 
 def _token_spans(text: str) -> list[tuple[str, int, int]]:
     """Return (normalized_word, start, end) for each non-whitespace token."""
@@ -1070,6 +1100,27 @@ def _tokens_are_state(tokens: list[str]) -> bool:
     return "".join(token.lower() for token in tokens) in _US_STATE_NAMES
 
 
+# Full street words that may end an unnumbered clause ("Main Street").
+# Abbreviations are last-token only so "St George" / "Box Creek" stay names.
+_STREET_SUFFIXES = frozenset({
+    "street", "avenue", "road", "boulevard", "lane", "drive", "highway",
+    "court", "circle", "place", "parkway", "terrace", "trail", "pike",
+})
+_STREET_SUFFIX_ABBREVS = frozenset({
+    "st", "ave", "rd", "blvd", "ln", "dr", "hwy", "ct", "cir", "pl",
+    "pkwy", "ter", "trl",
+})
+_NUMBERED_STREET_RE = re.compile(
+    r"\b(?:(?:p\.?\s*o\.?\s*)?box|(?:rural\s+)?(?:route|rte|rr|hc)|"
+    r"hwy|highway|suite|ste|apt|unit|fl|floor)\s+\d+",
+    re.IGNORECASE,
+)
+_STREET_COMPASS = frozenset({
+    "n", "s", "e", "w", "ne", "nw", "se", "sw",
+    "north", "south", "east", "west",
+})
+
+
 def _clause_is_state_or_zip(clause: str) -> bool:
     tokens = re.findall(r"[A-Za-z0-9]+", clause)
     if not tokens:
@@ -1082,6 +1133,60 @@ def _clause_is_state_or_zip(clause: str) -> bool:
     return _tokens_are_state(rest)
 
 
+def _clause_is_city_or_state_or_zip(clause: str) -> bool:
+    """True for a state/ZIP clause or a leftover city name (no company words)."""
+    if _clause_is_state_or_zip(clause):
+        return True
+    tokens = re.findall(r"[A-Za-z0-9]+", clause)
+    if not tokens:
+        return False
+    if any(token.lower() in _COMPANY_CONTINUATION_WORDS for token in tokens):
+        return False
+    if any(token.lower() in _LEGAL_ENTITY_SUFFIXES for token in tokens):
+        return False
+    work = _strip_trailing_zip_tokens(tokens)
+    if len(work) >= 2 and _tokens_are_state(work[-1:]):
+        return True
+    if len(work) >= 2:
+        for start in range(1, len(work)):
+            if _tokens_are_state(work[start:]):
+                return True
+    return all(not token.isdigit() or _is_zip_token(token) for token in work)
+
+
+def _clause_looks_like_street(clause: str) -> bool:
+    tokens = re.findall(r"[A-Za-z0-9]+", clause)
+    if not tokens:
+        return False
+    if tokens[0].isdigit() or _NUMBERED_STREET_RE.search(clause):
+        return True
+    if any(token.lower() in _COMPANY_CONTINUATION_WORDS for token in tokens):
+        return False
+    if any(token.lower() in _LEGAL_ENTITY_SUFFIXES for token in tokens) and len(tokens) >= 2:
+        return False
+    work = list(tokens)
+    if len(work) >= 2 and work[-1].lower() in _STREET_COMPASS:
+        work = work[:-1]
+    last = work[-1].lower()
+    # Suffix must be the last non-compass token. "St George Spirits" and
+    # "Box Creek" fail that; "St Charles Ave" / "Main Street North" pass.
+    return last in _STREET_SUFFIXES or last in _STREET_SUFFIX_ABBREVS
+
+
+def _is_colorado_city_before_co(city_tokens: list[str]) -> bool:
+    """True for a listed Colorado city in front of the CO abbreviation.
+
+    ``Colorado Springs CO`` and ``Fort Collins CO`` are cities. ``Hopline
+    Brewing Co``, ``Fort Collins Brewing Co``, and ``Colorado Gold Co`` stay
+    companies (industry word, or not in the city list).
+    """
+    if not city_tokens:
+        return False
+    if any(token.lower() in _COMPANY_CONTINUATION_WORDS for token in city_tokens):
+        return False
+    return " ".join(token.lower() for token in city_tokens) in _MULTIWORD_CITIES_BEFORE_CO
+
+
 def _is_city_state_or_street_line(line: str) -> bool:
     """True for a city/state/ZIP or street line, not a wrapped company suffix."""
     tokens = re.findall(r"[A-Za-z0-9]+", line)
@@ -1091,21 +1196,35 @@ def _is_city_state_or_street_line(line: str) -> bool:
         return True
     clauses = [part.strip() for part in re.split(r"[,;]", line) if part.strip()]
     if len(clauses) >= 2:
-        return any(_clause_is_state_or_zip(part) for part in clauses[1:])
+        rest = clauses[1:]
+        # "Frankfort, KY" / "Paso Robles, CA, 93446" are address-only.
+        if all(_clause_is_state_or_zip(part) for part in rest):
+            return True
+        # "Main Street, Louisville, KY" / "PO Box 12, Denver, CO": the next
+        # clause is a city, not a state. Still an address when the first
+        # clause is a street and every later clause is city/state/ZIP.
+        # "Buffalo Trace Distillery, Frankfort, KY" stays a company line.
+        return bool(
+            rest
+            and _clause_is_state_or_zip(rest[-1])
+            and all(_clause_is_city_or_state_or_zip(part) for part in rest)
+            and _clause_looks_like_street(clauses[0])
+        )
     work = _strip_trailing_zip_tokens(tokens)
     peeled_zip = work != tokens
     if len(work) >= 2 and _tokens_are_state(work[-1:]):
-        # "CO" is both Colorado and the legal suffix "Co". Treat a trailing
-        # state abbrev as an address unless a company-continuation word
-        # precedes it ("Hopline Brewing Co" vs "Denver CO").
-        last = work[-1].lower()
-        if last in _LEGAL_ENTITY_SUFFIXES and not peeled_zip:
-            prior = [token.lower() for token in work[:-1]]
-            if any(
-                token in _COMPANY_CONTINUATION_WORDS or token in _LEGAL_ENTITY_SUFFIXES
-                for token in prior
-            ):
-                return False
+        # "Hopline Brewing Co" is a company (3+ tokens + legal suffix, no ZIP).
+        # "Denver CO" is city + state even though CO is also an entity suffix.
+        # "Colorado Springs CO" is a multi-word Colorado city, not a company.
+        if (
+            work[-1].lower() in _LEGAL_ENTITY_SUFFIXES
+            and not peeled_zip
+            and len(work) >= 3
+            and not (
+                work[-1].lower() == "co" and _is_colorado_city_before_co(work[:-1])
+            )
+        ):
+            return False
         return True
     if len(work) >= 2:
         for start in range(1, len(work)):
@@ -1123,8 +1242,14 @@ def _company_clause_from_remainder(remainder: str) -> str:
         if not chunk:
             continue
         first = _first_line_token(chunk)
+        if _is_city_state_or_street_line(chunk) and first not in _COMPANY_CONTINUATION_WORDS:
+            # City/state (e.g. "Denver CO") is never the company, even as the
+            # first remaining line after a producer prefix is stripped.
+            if seen_company:
+                break
+            continue
         if seen_company and first not in _COMPANY_CONTINUATION_WORDS:
-            if not first or _is_city_state_or_street_line(chunk):
+            if not first:
                 break
         clause = re.split(r"[,;]", chunk, maxsplit=1)[0].strip()
         if clause:
@@ -2434,6 +2559,9 @@ def merge_extracted_label_data(extractions, photo_roles=None):
     confs = [e.extraction_confidence for e in extractions if e.extraction_confidence is not None]
     merged["extraction_confidence"] = max(confs) if confs else None
     merged["per_field_confidence"] = merged_pfc
+    # Each per-photo extraction is a single-image call, so Claude returns
+    # image_index=0 on every box. Re-bind boxes to the photo they came from
+    # so a retake of image N cannot paint that image's findings on slot 0.
     remapped_locations = []
     for idx, ext in enumerate(extractions):
         for loc in ext.field_locations:

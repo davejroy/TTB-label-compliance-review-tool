@@ -393,8 +393,10 @@ class TestSpecificImageMessages:
         assert isinstance(result, main_module.ClientError)
         assert result.message == BLANK_IMAGE_MESSAGE
         assert result.retake is not None
+        assert result.retake.cause == "blank"
         assert result.retake.tip == BLANK_IMAGE_TIP
         assert "glare" not in result.retake.tip.lower()
+        assert "glare" not in result.message.lower()
         assert "label" in result.retake.tip.lower()
 
     def test_blank_image_tip_does_not_blame_glare(self):

@@ -50,7 +50,11 @@ export default function App() {
             <div>
               <h1 className="text-3xl font-bold text-white">Label Compliance Review Tool</h1>
               <p className="text-lg text-slate-200 mt-1">
-                Upload a label image and compare it against the application details.
+                {tab === "label-check"
+                  ? "Upload a label image to check it against TTB mandatory requirements."
+                  : tab === "batch"
+                    ? "Review multiple labels against their COLA application details."
+                    : "Upload a label image and compare it against the application details."}
               </p>
             </div>
           </div>

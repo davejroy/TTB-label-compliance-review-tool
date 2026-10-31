@@ -115,3 +115,4 @@ npm audit
 | 2026-10-30 | Cleared remaining Bandit lows: env-var name composed in code; B311 nosec on non-crypto retry jitter. | Maintainer |
 | 2026-10-30 | CI follow-up after ceb18a8 pins: flaky type-size image_index test; production `tsc -b` excludes Vitest files. | Maintainer |
 | 2026-10-31 | PR #27 review: `minimatch@11.0.1` override; backend image `python:3.11.18-slim-bookworm` + apt upgrade + drop pip/setuptools/wheel. | Maintainer |
+| 2026-10-31 | Promote dest `fdc9584` + `b6fa8a6`: vision typed HTTP errors, CSV Comments, type-size image_index, address parse. No dependency pin changes. | Maintainer |

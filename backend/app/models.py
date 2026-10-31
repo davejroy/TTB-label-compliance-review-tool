@@ -112,8 +112,9 @@ class ExtractedLabelData(BaseModel):
     government_warning_header_appears_bold: Optional[bool] = Field(
         default=None,
         description=(
-            "Vision estimate of whether the printed GOVERNMENT WARNING heading appears bold "
-            "(27 CFR 16.22(a)(2)). None when unknown. False is advisory only."
+            "Vision estimate of whether the printed GOVERNMENT WARNING heading appears "
+            "in bold type (27 CFR 16.22(a)(2)). None when boldness cannot be judged. "
+            "False is a hard fail of the government_warning check, not an advisory."
         ),
     )
     beverage_type_guess: Optional[str] = None
