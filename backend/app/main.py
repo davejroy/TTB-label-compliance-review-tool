@@ -1977,19 +1977,28 @@ async def review_labels_batch_stream(
         yield first_rec["line"]
         remaining = stream_tasks[1:]
         if remaining:
-            task_index = {id(task): idx for idx, task in enumerate(stream_tasks)}
-            for finished in asyncio.as_completed(remaining):
-                idx = task_index.get(id(finished), -1)
+            # as_completed yields wrapper coroutines, not the original tasks,
+            # so id(finished) cannot look up the label index. Carry idx on
+            # a wrapper that never swallows the result or the exception.
+            async def _await_indexed(idx: int, task: asyncio.Task):
                 try:
-                    rec = await finished
+                    return idx, await task, None
                 except Exception as exc:  # noqa: BLE001
+                    return idx, None, exc
+
+            indexed = [
+                _await_indexed(idx, task)
+                for idx, task in enumerate(stream_tasks[1:], start=1)
+            ]
+            for finished in asyncio.as_completed(indexed):
+                idx, rec, exc = await finished
+                if exc is not None:
                     _log.warning(
                         "Streaming batch later-label error at index %s: %s",
                         idx,
                         type(exc).__name__,
                     )
-                    if idx >= 0:
-                        yield _stream_error_line(idx, exc)
+                    yield _stream_error_line(idx, exc)
                     continue
                 total_claude_time_ms += rec["claude_ms"]
                 if rec["success"]:

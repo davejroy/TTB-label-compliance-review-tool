@@ -1100,6 +1100,15 @@ def _tokens_are_state(tokens: list[str]) -> bool:
     return "".join(token.lower() for token in tokens) in _US_STATE_NAMES
 
 
+_STREET_DESIGNATORS = frozenset({
+    "st", "street", "ave", "avenue", "rd", "road", "blvd", "boulevard",
+    "ln", "lane", "dr", "drive", "hwy", "highway", "ct", "court",
+    "cir", "circle", "pl", "place", "pkwy", "parkway", "ter", "terrace",
+    "trl", "trail", "way", "box", "po", "rr", "rte", "route",
+    "suite", "ste", "apt", "unit", "fl", "floor", "bldg", "pike",
+})
+
+
 def _clause_is_state_or_zip(clause: str) -> bool:
     tokens = re.findall(r"[A-Za-z0-9]+", clause)
     if not tokens:
@@ -1110,6 +1119,40 @@ def _clause_is_state_or_zip(clause: str) -> bool:
     if rest != tokens and all(token.isdigit() for token in rest):
         return True
     return _tokens_are_state(rest)
+
+
+def _clause_is_city_or_state_or_zip(clause: str) -> bool:
+    """True for a state/ZIP clause or a leftover city name (no company words)."""
+    if _clause_is_state_or_zip(clause):
+        return True
+    tokens = re.findall(r"[A-Za-z0-9]+", clause)
+    if not tokens:
+        return False
+    if any(token.lower() in _COMPANY_CONTINUATION_WORDS for token in tokens):
+        return False
+    if any(token.lower() in _LEGAL_ENTITY_SUFFIXES for token in tokens):
+        return False
+    work = _strip_trailing_zip_tokens(tokens)
+    if len(work) >= 2 and _tokens_are_state(work[-1:]):
+        return True
+    if len(work) >= 2:
+        for start in range(1, len(work)):
+            if _tokens_are_state(work[start:]):
+                return True
+    return all(not token.isdigit() or _is_zip_token(token) for token in work)
+
+
+def _clause_looks_like_street(clause: str) -> bool:
+    tokens = re.findall(r"[A-Za-z0-9]+", clause)
+    if not tokens:
+        return False
+    if tokens[0].isdigit():
+        return True
+    if any(token.lower() in _COMPANY_CONTINUATION_WORDS for token in tokens):
+        return False
+    if any(token.lower() in _LEGAL_ENTITY_SUFFIXES for token in tokens) and len(tokens) >= 2:
+        return False
+    return any(token.lower() in _STREET_DESIGNATORS for token in tokens)
 
 
 def _is_colorado_city_before_co(city_tokens: list[str]) -> bool:
@@ -1135,10 +1178,20 @@ def _is_city_state_or_street_line(line: str) -> bool:
         return True
     clauses = [part.strip() for part in re.split(r"[,;]", line) if part.strip()]
     if len(clauses) >= 2:
+        rest = clauses[1:]
         # "Frankfort, KY" / "Paso Robles, CA, 93446" are address-only.
-        # "Buffalo Trace Distillery, Frankfort, KY" is a company plus a city —
-        # later clauses are not all state/ZIP, so this is not an address line.
-        return all(_clause_is_state_or_zip(part) for part in clauses[1:])
+        if all(_clause_is_state_or_zip(part) for part in rest):
+            return True
+        # "Main Street, Louisville, KY" / "PO Box 12, Denver, CO": the next
+        # clause is a city, not a state. Still an address when the first
+        # clause is a street and every later clause is city/state/ZIP.
+        # "Buffalo Trace Distillery, Frankfort, KY" stays a company line.
+        return bool(
+            rest
+            and _clause_is_state_or_zip(rest[-1])
+            and all(_clause_is_city_or_state_or_zip(part) for part in rest)
+            and _clause_looks_like_street(clauses[0])
+        )
     work = _strip_trailing_zip_tokens(tokens)
     peeled_zip = work != tokens
     if len(work) >= 2 and _tokens_are_state(work[-1:]):

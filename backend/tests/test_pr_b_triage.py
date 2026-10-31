@@ -210,6 +210,14 @@ def test_denver_co_is_city_state_not_company():
     assert _producer_entity_name(
         "Produced and Bottled by Colorado Gold Co"
     ) == "colorado gold co"
+    # Street + city + state is an address, not a company named after the street.
+    assert _is_city_state_or_street_line("Main Street, Louisville, KY") is True
+    assert _is_city_state_or_street_line("PO Box 123, Denver, CO") is True
+    assert _is_city_state_or_street_line("Rural Route 2, Fort Collins, CO") is True
+    assert _producer_entity_name("Main Street, Louisville, KY") == ""
+    assert _producer_entity_name(
+        "Produced and Bottled by Crescent Ridge Winery\nMain Street, Paso Robles, CA"
+    ) == "crescent ridge winery"
 
 
 def test_brand_denver_co_is_not_derived_from_address_city_state():

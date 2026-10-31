@@ -12,6 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 - CSV export is one row per label with Status (`PASS` / `FAIL` / `NEEDS VERIFICATION` / `NOT REVIEWED`) and a Comments column. Every completed row is exported. Formula-injection prefixes (`=`, `+`, `-`, `@`, tab, CR) are neutralized. No `.xlsx` export.
 
 ### Fixed
+- Streaming batch later-label exceptions keep the label index: `as_completed` wrappers no longer drop the error row.
+- Street + city + state lines (`Main Street, Louisville, KY`, `PO Box 123, Denver, CO`) stay addresses; company + city + state is still the bottler name.
 - Type-size 16.22 measurement uses the warning bbox from the matching `image_index` on multi-image submissions.
 - Streaming batch review retries the same transient Claude failures as the single-label path and still fails cleanly per item.
 - City + state abbreviations (`Denver CO`, `Colorado Springs CO`, `Fort Collins CO`) are not parsed as the bottler/importer company name. `Hopline Brewing Co` and `Fort Collins Brewing Co` stay companies.
