@@ -1100,13 +1100,21 @@ def _tokens_are_state(tokens: list[str]) -> bool:
     return "".join(token.lower() for token in tokens) in _US_STATE_NAMES
 
 
-_STREET_DESIGNATORS = frozenset({
-    "st", "street", "ave", "avenue", "rd", "road", "blvd", "boulevard",
-    "ln", "lane", "dr", "drive", "hwy", "highway", "ct", "court",
-    "cir", "circle", "pl", "place", "pkwy", "parkway", "ter", "terrace",
-    "trl", "trail", "way", "box", "po", "rr", "rte", "route",
-    "suite", "ste", "apt", "unit", "fl", "floor", "bldg", "pike",
+# Full street words that may end an unnumbered clause ("Main Street").
+# Abbreviations are last-token only so "St George" / "Box Creek" stay names.
+_STREET_SUFFIXES = frozenset({
+    "street", "avenue", "road", "boulevard", "lane", "drive", "highway",
+    "court", "circle", "place", "parkway", "terrace", "trail", "pike",
 })
+_STREET_SUFFIX_ABBREVS = frozenset({
+    "st", "ave", "rd", "blvd", "ln", "dr", "hwy", "ct", "cir", "pl",
+    "pkwy", "ter", "trl",
+})
+_NUMBERED_STREET_RE = re.compile(
+    r"\b(?:(?:p\.?\s*o\.?\s*)?box|(?:rural\s+)?(?:route|rte|rr|hc)|"
+    r"hwy|highway|suite|ste|apt|unit|fl|floor)\s+\d+",
+    re.IGNORECASE,
+)
 
 
 def _clause_is_state_or_zip(clause: str) -> bool:
@@ -1146,13 +1154,18 @@ def _clause_looks_like_street(clause: str) -> bool:
     tokens = re.findall(r"[A-Za-z0-9]+", clause)
     if not tokens:
         return False
-    if tokens[0].isdigit():
+    if tokens[0].isdigit() or _NUMBERED_STREET_RE.search(clause):
         return True
     if any(token.lower() in _COMPANY_CONTINUATION_WORDS for token in tokens):
         return False
     if any(token.lower() in _LEGAL_ENTITY_SUFFIXES for token in tokens) and len(tokens) >= 2:
         return False
-    return any(token.lower() in _STREET_DESIGNATORS for token in tokens)
+    last = tokens[-1].lower()
+    if last in _STREET_SUFFIXES:
+        return True
+    # "Main St" is a street. "St George Spirits" / "Dr McGillicuddy" are not:
+    # a leading saint/doctor abbrev is not a suffix.
+    return last in _STREET_SUFFIX_ABBREVS and tokens[0].lower() not in {"st", "dr"}
 
 
 def _is_colorado_city_before_co(city_tokens: list[str]) -> bool:

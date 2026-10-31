@@ -218,6 +218,20 @@ def test_denver_co_is_city_state_not_company():
     assert _producer_entity_name(
         "Produced and Bottled by Crescent Ridge Winery\nMain Street, Paso Robles, CA"
     ) == "crescent ridge winery"
+    assert _is_city_state_or_street_line("Main St, Louisville, KY") is True
+    # Designator tokens inside a name are not enough to drop the bottler.
+    assert _is_city_state_or_street_line("Box Creek, Frankfort, KY") is False
+    assert _is_city_state_or_street_line("St George Spirits, Alameda, CA") is False
+    assert _is_city_state_or_street_line("Copper Way, Portland, OR") is False
+    assert _producer_entity_name(
+        "Bottled by Box Creek, Frankfort, KY"
+    ) == "box creek"
+    assert _producer_entity_name(
+        "Distilled by St George Spirits, Alameda, CA"
+    ) == "st george spirits"
+    assert _producer_entity_name(
+        "Brewed by Copper Way, Portland, OR"
+    ) == "copper way"
 
 
 def test_brand_denver_co_is_not_derived_from_address_city_state():
