@@ -8,7 +8,7 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 
 | Field | Value |
 |---|---|
-| Last Updated | 2026-10-30 |
+| Last Updated | 2026-10-31 |
 | Tool Used | pip-audit, npm audit, pip freeze, npm list |
 | SBOM Format | Manual Markdown Catalog aligned with CycloneDX / SPDX structures |
 | Scope | Full Repository (Backend Python Web Service + Frontend React/TypeScript SPA) |
@@ -62,7 +62,7 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 | `Pillow` | Python | 11.1.0 -> **13.0.0** | PYSEC-2026-2249/2250 and later decoder CVEs | Moderate | **Fixed** | Promoted from `-dev` #50 `35a2189`. Magic-byte allowlist, 10 MB per-file / 50 MB body caps, and `Image.MAX_IMAGE_PIXELS = 64_000_000` remain. |
 | `happy-dom` | npm (dev) | 18.0.1 -> **21.0.4** | GHSA-37j7-fg3j-429f, GHSA-w4gp-fjgq-3q4g | Critical (test VM) | **Fixed** | Promoted from `-dev` #51. DevDependency only. |
 | `vitest` | npm (dev) | 3.2.7 -> **5.0.5** | GHSA-82fw-gwwq-j7x9 | Moderate | **Fixed** | Promoted from `-dev` #51 with `vite@8.3.5`. |
-| Transitive npm packages | npm | Various | Minor transitive vulnerabilities | Low | **Fixed** | `zod` override `4.6.7`; lockfile regenerated on `ceb18a8` pins. |
+| Transitive npm packages | npm | Various | Minor transitive vulnerabilities | Low | **Fixed** | `zod` override `4.6.7`; `minimatch` override `11.0.1` (GHSA-g3hv-75wg-m249, eslint/dev only). Full `npm audit` is clean. |
 | `python-dotenv` | Python | 1.0.1 -> **1.2.4** | PYSEC-2026-2270 | Low–Moderate | **Fixed** | Promoted from `-dev` #50. Local `.env` loader only. |
 | Production frontend (`npm audit --omit=dev`) | npm | runtime | none | — | **Clean** | 0 vulnerabilities in production dependencies (React 19). |
 | `vite` / `tinypool` / `zod` | npm (dev) | 8.3.5 / 5.x / 4.6.7 | prior GHSA-9jrq-w75r-8gcw, GHSA-5gmw-xhrv-c9v3, GHSA-mrhx-c7xc-m3w5 | High/Critical (dev) | **Fixed** | Promoted from `-dev` #51 (`vite@8.3.5`, `vitest@5.0.5`, `zod@4.6.7` override). |
@@ -114,3 +114,4 @@ npm audit
 | 2026-10-30 | Promoted `-dev` `ceb18a8` (#50/#51) security pins. Residual: Gradio/Streamlit demo trees are not in the production layout. | Maintainer |
 | 2026-10-30 | Cleared remaining Bandit lows: env-var name composed in code; B311 nosec on non-crypto retry jitter. | Maintainer |
 | 2026-10-30 | CI follow-up after ceb18a8 pins: flaky type-size image_index test; production `tsc -b` excludes Vitest files. | Maintainer |
+| 2026-10-31 | PR #27 review: `minimatch@11.0.1` override; backend image `python:3.11.18-slim-bookworm` + apt upgrade + drop pip/setuptools/wheel. | Maintainer |

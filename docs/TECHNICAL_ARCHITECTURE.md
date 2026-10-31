@@ -185,7 +185,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-10-30 | PR #26 review fixes: chunked body cap, CORS-wrapped 413, docs CSP, type-size image_index, stream retry, advisory header_bold, access-token gate kept wired | Maintainer |
 | 2026-10-30 | Promoted `-dev` `ceb18a8` security pins: FastAPI 0.162.0 / Starlette 1.10.0 / Pillow 13.0.0 / python-dotenv 1.2.4; Vite 8.3.5 / Vitest 5.0.5 | Maintainer |
 | 2026-10-31 | Promoted `-dev` `7b69489` (#49): body cap counts bytes actually read, immediate 413, fail-closed cap lookup; middleware order body-limit → CORS → security headers; frontend structured 413 text | Maintainer |
-| 2026-10-31 | Review fixes: GET/HEAD-only health exemption; no second ASGI response.start; CSV formula neutralization for untrusted vision/LLM text | Maintainer |
+| 2026-10-31 | Review fixes: GET/HEAD-only health exemption; no second ASGI response.start; CSV formula neutralization; SHA-pinned Actions; nginx Host=$proxy_host; image 3.11.18-slim + apt upgrade | Maintainer |
 | 2026-10-30 | CI follow-up: type-size bbox test keyed by filename (gather+threadpool); `tsconfig.app.json` excludes Vitest files from production `tsc -b` | Maintainer |
 
 ## Related Documentation

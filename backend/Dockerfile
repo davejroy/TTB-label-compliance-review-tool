@@ -1,13 +1,15 @@
 # syntax=docker/dockerfile:1
-FROM python:3.11.11-slim-bookworm AS base
+FROM python:3.11.18-slim-bookworm AS base
 
 # Prevent Python from writing .pyc files and enable unbuffered output
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=8000
 
-# Install minimal OS dependencies for Pillow and OpenCV headless
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install minimal OS dependencies for Pillow and OpenCV headless.
+# Upgrade first so Debian security patches (openssl, perl, etc.) land.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgl1 \
     libheif1 \
@@ -19,9 +21,11 @@ RUN groupadd -r appgroup && useradd -r -g appgroup -d /home/appuser -m -s /bin/b
 
 WORKDIR /app
 
-# Copy requirements and install via pip
+# Copy requirements and install via pip. Drop pip/setuptools/wheel afterwards
+# so leftover packaging tools (and their CVEs) are not in the runtime image.
 COPY backend/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt \
+    && pip uninstall -y pip setuptools wheel
 
 # Copy application source code
 COPY backend/app /app/app
