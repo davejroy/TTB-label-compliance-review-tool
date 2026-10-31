@@ -1,9 +1,10 @@
 """Shared upload / request-size guards used by sync, batch, and stream paths.
 
-These checks run before file bytes are decoded or sent to the model. Guard
-failures that are configuration or store errors fail open (log + allow) so
-legitimate reviewers are never locked out by a broken limiter. ``/api/health``
-is never blocked by the body-size middleware.
+These checks run before file bytes are decoded or sent to the model. Count
+and batch validators fail open on internal errors so a broken helper cannot
+lock out a legitimate review. The request-body cap is the exception: if the
+cap cannot be read, the middleware fails closed (HTTP 413) rather than
+accepting an unlimited body. ``/api/health`` is never blocked.
 """
 
 from __future__ import annotations
@@ -264,12 +265,20 @@ async def _send_json_error(
 
 
 class RequestBodyLimitMiddleware:
-    """Reject requests that exceed ``MAX_REQUEST_BODY_BYTES``.
+    """Reject requests whose body exceeds ``MAX_REQUEST_BODY_BYTES``.
 
-    Enforces the cap from ``Content-Length`` when present, and also counts
-    bytes on the raw ASGI receive path so chunked uploads without
-    Content-Length cannot bypass the limit. ``/api/health`` is never blocked.
-    Header/parse failures fail open.
+    Fast path: reject when ``Content-Length`` is already over the cap so
+    oversized declared bodies never reach multipart parsing. Streaming path:
+    wrap the ASGI ``receive`` channel and count body bytes as they arrive so
+    chunked transfers, missing ``Content-Length``, or an understated length
+    cannot bypass the limit. The wrapper does not buffer the body to measure
+    it — it forwards each chunk and stops at the first byte past the cap
+    without waiting to drain the rest of the stream.
+
+    ``/api/health`` is never blocked. If the cap itself cannot be read the
+    middleware fails closed (HTTP 413) so an unlimited body is never
+    accepted. An unparsable ``Content-Length`` skips only the fast precheck
+    and still counts streamed bytes.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -287,6 +296,18 @@ class RequestBodyLimitMiddleware:
 
         try:
             max_bytes = get_max_request_body_bytes()
+        except Exception:  # noqa: BLE001
+            # Fail closed: a broken cap lookup must not accept an unlimited body.
+            _log.exception("Body-size middleware failed; rejecting request (fail-closed)")
+            await _send_json_error(
+                send,
+                status=413,
+                code=FILE_TOO_LARGE,
+                message=FILE_TOO_LARGE_MESSAGE,
+            )
+            return
+
+        try:
             headers = {
                 key.decode("latin-1").lower(): value.decode("latin-1")
                 for key, value in scope.get("headers", [])
@@ -309,48 +330,38 @@ class RequestBodyLimitMiddleware:
                     )
                     return
         except Exception:  # noqa: BLE001
-            _log.exception("Body-size middleware failed; allowing request (fail-open)")
-            await self.app(scope, receive, send)
-            return
+            # A missing or unparsable Content-Length is not a broken limiter.
+            # Continue and enforce the cap on bytes actually received.
+            _log.exception(
+                "Content-Length precheck failed; continuing with streamed byte count"
+            )
 
         received = 0
-        rejected = False
-        response_started = False
-
-        async def send_wrapper(message: Message) -> None:
-            nonlocal response_started
-            if rejected:
-                return
-            if message["type"] == "http.response.start":
-                response_started = True
-            await send(message)
+        exceeded = False
+        error_sent = False
 
         async def limited_receive() -> Message:
-            nonlocal received, rejected
-            if rejected:
+            nonlocal received, exceeded, error_sent
+            if exceeded:
                 return {"type": "http.disconnect"}
             message = await receive()
             if message["type"] != "http.request":
                 return message
-            chunk = message.get("body", b"") or b""
+            chunk = message.get("body") or b""
             received += len(chunk)
             if received <= max_bytes:
                 return message
-            rejected = True
+            exceeded = True
             _log.warning(
-                "Request body rejected: streamed %s bytes exceed MAX_REQUEST_BODY_BYTES=%s path=%s",
+                "Request body rejected: received %s bytes exceeds MAX_REQUEST_BODY_BYTES=%s path=%s",
                 received,
                 max_bytes,
                 path,
             )
-            try:
-                more = bool(message.get("more_body"))
-                while more:
-                    nxt = await receive()
-                    more = bool(nxt.get("more_body"))
-            except Exception:  # noqa: BLE001
-                _log.exception("Draining oversize streamed body failed; continuing")
-            if not response_started:
+            # Send 413 immediately. Do not drain leftover chunks — a chunked
+            # client can leave more_body=True and stall the worker forever.
+            if not error_sent:
+                error_sent = True
                 await _send_json_error(
                     send,
                     status=413,
@@ -359,10 +370,15 @@ class RequestBodyLimitMiddleware:
                 )
             return {"type": "http.disconnect"}
 
-        try:
-            await self.app(scope, limited_receive, send_wrapper)
-        except Exception:  # noqa: BLE001
-            if rejected or response_started:
+        async def limited_send(message: Message) -> None:
+            if error_sent:
                 return
-            _log.exception("Body-size middleware failed; allowing request (fail-open)")
-            await self.app(scope, receive, send)
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, limited_send)
+        except Exception:
+            if error_sent:
+                _log.info("Inner app exited after oversize body rejection")
+                return
+            raise

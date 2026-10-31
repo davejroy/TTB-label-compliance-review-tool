@@ -533,27 +533,55 @@ def get_cors_configuration() -> tuple[list[str], str | None]:
         return _default_cors()
 
 
+# Credentials are off: the frontend sends Authorization, not cookies.
+# Browsers reject Access-Control-Allow-Origin: * when credentials are used.
+CORS_ALLOW_CREDENTIALS = False
+
+
+def cors_middleware_kwargs(
+    origins: list[str],
+    origin_regex: str | None,
+    *,
+    allow_credentials: bool = CORS_ALLOW_CREDENTIALS,
+) -> dict[str, object]:
+    """Build CORSMiddleware kwargs. Never pair credentials with a wildcard origin."""
+    if allow_credentials and (origins == ["*"] or "*" in origins):
+        _log.warning(
+            "CORS wildcard cannot be used with credentials; using the default frontend allowlist."
+        )
+        origins, origin_regex = _default_cors()
+    return {
+        "allow_origins": origins,
+        "allow_origin_regex": origin_regex,
+        "allow_credentials": allow_credentials,
+        "allow_methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Authorization", "Content-Type"],
+        "expose_headers": [REQUEST_ID_HEADER],
+    }
+
+
 # Initialize CORS middleware on the FastAPI app.
-# Starlette runs the last-added middleware first. Body limit is added first
-# (closest to the app) so oversized uploads are rejected before multipart
-# parsing. Security headers wrap that. CORS is outermost so 413s and other
-# short-circuit responses still receive Access-Control-Allow-Origin.
+# add_middleware wraps the app: the last call is the outermost layer.
+# Order (inner -> outer): size limiter, CORS, security headers.
+# CORS sits outside the size limiter so HTTP 413 still carries
+# Access-Control-Allow-Origin for allowed browser origins (and none for
+# disallowed origins). Security headers wrap CORS so preflight OPTIONS
+# (which CORS answers itself) still get CSP/HSTS/etc. The allowlist and the
+# prod method/header lists are unchanged. Wildcard + credentials is refused.
 _cors_origins, _cors_origin_regex = get_cors_configuration()
 if _cors_origins == ["*"]:
     _log.warning(
         "CORS is configured to allow all origins ('*'). This must not be used in production."
     )
+# Size limit inside CORS: reject oversized bodies before multipart parsing.
+# Never blocks /api/health.
 app.add_middleware(RequestBodyLimitMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_origin_regex=_cors_origin_regex,
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
-    expose_headers=[REQUEST_ID_HEADER],
+    **cors_middleware_kwargs(_cors_origins, _cors_origin_regex),
 )
+# Outermost: security headers on preflight, 413s, and streaming bodies alike.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Retry config for transient Claude API errors.
 # One app-level retry with jitter. Anthropic SDK retries are disabled (max_retries=0)

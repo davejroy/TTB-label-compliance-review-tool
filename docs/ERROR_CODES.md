@@ -11,7 +11,7 @@ This document lists all user-facing error messages returned by the API, their ca
 | Photo quality is too low to read. The file could not be decoded as a valid image. Please submit a new, clear photo saved as JPEG or PNG. | The uploaded file is corrupt, truncated, or in an unsupported format. | Re-take the photo and save as JPEG or PNG. Avoid WebP, HEIC, or RAW formats. |
 | Photo quality is too low to read. The image is only WxH pixels, which is too small for reliable text recognition. Please submit a new photo taken closer to the label. | The image resolution is below the minimum threshold (100x100 px). | Move the camera closer to the label and re-take the photo. |
 | File FILENAME exceeds 10 MB limit. | The uploaded file is larger than 10 MB. | Compress the image or reduce its resolution before uploading. |
-| The upload is too large. Please use fewer or smaller photos. (`FILE_TOO_LARGE`, HTTP 413) | Total request body exceeded `MAX_REQUEST_BODY_BYTES` (default 50 MB). Enforced from `Content-Length` when present and by counting streamed / chunked ASGI body bytes when `Content-Length` is absent. `/api/health` is exempt. | Use fewer photos or smaller files. Each photo can be up to 10 MB; a batch must stay under the request-body cap. |
+| The upload is too large. Please use fewer or smaller photos. (`FILE_TOO_LARGE`, HTTP 413) | Total request body exceeded `MAX_REQUEST_BODY_BYTES` (default 50 MB). Enforced from `Content-Length` when present and by counting the body bytes actually received, so chunked, missing, or understated `Content-Length` cannot bypass it. `/api/health` is exempt. The frontend shows this structured message for single, batch, and stream uploads (never a proxy HTML 413 page). | Use fewer photos or smaller files. Each photo can be up to 10 MB; a batch must stay under the request-body cap. |
 | File FILENAME could not be read as a valid image. Please submit a new photo. | An unexpected decode error occurred after passing initial format checks. | Try re-saving the image in a different format and re-uploading. |
 | A maximum of 4 images may be uploaded per label. You submitted N. Please resubmit with 4 or fewer photos. | More than 4 images were submitted for a single label. | Split your submission and upload at most 4 photos per label review. |
 
@@ -72,7 +72,7 @@ This document lists all user-facing error messages returned by the API, their ca
 | 200  | Success |
 | 400  | Bad request - malformed input data |
 | 401  | Unauthorized - missing or invalid demo access token when DEMO_ACCESS_TOKEN gate is active (never returned for rate limits or normal public evaluator access) |
-| 413  | Payload Too Large - per-file >10 MB or total request body > `MAX_REQUEST_BODY_BYTES`. Structured `error_code=FILE_TOO_LARGE`. CORS and security headers still apply (CORS middleware is outermost). |
+| 413  | Payload Too Large - per-file >10 MB or total request body > `MAX_REQUEST_BODY_BYTES`. Structured `error_code=FILE_TOO_LARGE`. CORS wraps the size limiter, so an allowed origin still gets `Access-Control-Allow-Origin` on the 413; disallowed origins get no CORS headers. Security headers are outermost. |
 | 422  | Unprocessable entity - user-fixable input problem (per RFC 9110 Section 15.5.21) |
 | 429  | Too Many Requests - soft inbound IP rate limit exceeded; returns actionable retry message |
 | 500  | Internal server error - unexpected backend failure |
@@ -83,6 +83,7 @@ This document lists all user-facing error messages returned by the API, their ca
 | Date | Change | Author |
 |---|---|---|
 | 2026-10-30 | Documented HTTP 413 `FILE_TOO_LARGE` for Content-Length and chunked bodies (`MAX_REQUEST_BODY_BYTES`) | Maintainer |
+| 2026-10-31 | 413 counts bytes actually read, is sent immediately, and fails closed if the cap cannot be read; frontend shows the structured FILE_TOO_LARGE text | Maintainer |
 | 2026-09-18 | Added fallback `cannot_measure` entry for unhandled CV exceptions during type-size evaluation | Maintainer |
 | 2026-09-16 | Added rate limiting and daily spend guard error codes | Maintainer |
 | 2026-09-09 | Added image quality diagnostics and low confidence error codes | Maintainer |

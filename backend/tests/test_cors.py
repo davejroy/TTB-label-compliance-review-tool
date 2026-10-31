@@ -23,6 +23,7 @@ from app.main import (
     DEFAULT_CORS_ORIGINS,
     _is_valid_cors_origin,
     app as main_app,
+    cors_middleware_kwargs,
     get_cors_configuration,
 )
 
@@ -362,3 +363,25 @@ def test_preview_subdomains_are_not_allowed_without_exact_origin(
     response = default_client.get("/api/health", headers={"Origin": preview})
     assert response.status_code == 200
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_cors_kwargs_never_pair_wildcard_with_credentials() -> None:
+    """Credentials force the explicit frontend allowlist; never ACAO *."""
+    kwargs = cors_middleware_kwargs(["*"], None, allow_credentials=True)
+    assert kwargs["allow_credentials"] is True
+    assert kwargs["allow_origins"] == list(DEFAULT_CORS_ORIGINS)
+    assert "*" not in kwargs["allow_origins"]
+    assert kwargs["allow_origin_regex"] is None
+
+
+def test_live_app_never_uses_wildcard_with_credentials() -> None:
+    """The mounted CORS stack must not advertise credentials with origin *."""
+    cors_specs = [item for item in main_app.user_middleware if item.cls is CORSMiddleware]
+    assert cors_specs
+    for spec in cors_specs:
+        origins = list(spec.kwargs.get("allow_origins") or [])
+        credentials = bool(spec.kwargs.get("allow_credentials"))
+        if credentials:
+            assert "*" not in origins
+        if origins == ["*"]:
+            assert credentials is False

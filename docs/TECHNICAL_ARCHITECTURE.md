@@ -71,8 +71,8 @@ The prototype implements a **fail-open security and abuse prevention architectur
 3. **Concurrency cap for Claude calls**: A process-wide `asyncio.Semaphore` (`MAX_CONCURRENT_CLAUDE_CALLS`, default 5) wraps all Anthropic API extraction calls with timeout `CLAUDE_CONCURRENCY_TIMEOUT` (default 30.0s), preventing batch floods from overwhelming API limits. Sync, batch, and **stream** paths share `_extract_fields_with_retry`.
 4. **Soft spend / abuse tracking**: `DailySpendGuard` (`MAX_REVIEW_REQUESTS_PER_DAY`) monitors process request volume on Render and emits loud warnings upon exceeding thresholds without blocking evaluator access. Multi-instance setups will use Redis in future iterations.
 5. **Image decompression protection**: Pillow `Image.MAX_IMAGE_PIXELS` is explicitly set to 64,000,000 to prevent image bomb DoS attacks.
-6. **Request body cap**: `RequestBodyLimitMiddleware` rejects bodies over `MAX_REQUEST_BODY_BYTES` (default 50 MB) using `Content-Length` **and** a running count of streamed / chunked ASGI receive bytes. `/api/health` is never blocked.
-7. **Middleware order (Starlette LIFO)**: last added is outermost. Production stack is body-limit (innermost) → security headers → CORS (outermost) so 413/401/429 short-circuits still receive CORS and security headers.
+6. **Request body cap**: `RequestBodyLimitMiddleware` rejects bodies over `MAX_REQUEST_BODY_BYTES` (default 50 MB) using `Content-Length` **and** a running count of the body bytes actually received (chunked, missing, or understated `Content-Length` cannot bypass it). The 413 is sent as soon as the cap is crossed, without draining leftover chunks. If the cap cannot be read the limiter fails closed (HTTP 413). `/api/health` is never blocked.
+7. **Middleware order (Starlette LIFO)**: last added is outermost. Production stack is body-limit (innermost) → CORS → security headers (outermost). CORS wraps the size limiter so a 413 to an allowed origin still carries `Access-Control-Allow-Origin` (none for disallowed origins); security headers wrap CORS so preflight OPTIONS, which CORS answers itself, still get CSP/HSTS. A wildcard origin is never paired with credentials.
 8. **Type-size bbox isolation**: `_evaluate_type_size` applies a Government Warning box only when `field_locations.image_index` matches the photo under measurement. `merge_extracted_label_data` remaps each photo's locations onto the merged index so a back-label box is never applied to the front photo.
 
 This is **not** real per-user authentication or authorization: it is designed to keep public demos accessible and safe from abuse. See [REGULATORY_REFERENCES.md](./REGULATORY_REFERENCES.md).
@@ -184,6 +184,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-10-26 | CORS defaults fail-open to local Vite + the render.yaml frontend (not `*`); methods/headers restricted; credentials off (port of -dev 91e88ff) | Maintainer |
 | 2026-10-30 | PR #26 review fixes: chunked body cap, CORS-wrapped 413, docs CSP, type-size image_index, stream retry, advisory header_bold, access-token gate kept wired | Maintainer |
 | 2026-10-30 | Promoted `-dev` `ceb18a8` security pins: FastAPI 0.162.0 / Starlette 1.10.0 / Pillow 13.0.0 / python-dotenv 1.2.4; Vite 8.3.5 / Vitest 5.0.5 | Maintainer |
+| 2026-10-31 | Promoted `-dev` `7b69489` (#49): body cap counts bytes actually read, immediate 413, fail-closed cap lookup; middleware order body-limit → CORS → security headers; frontend structured 413 text | Maintainer |
 | 2026-10-30 | CI follow-up: type-size bbox test keyed by filename (gather+threadpool); `tsconfig.app.json` excludes Vitest files from production `tsc -b` | Maintainer |
 
 ## Related Documentation

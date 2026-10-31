@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 ## [Unreleased]
 
 ### Security
+- Promoted `-dev` `7b69489` (#49): the HTTP 413 request-body cap now counts bytes actually read (chunked, missing, or understated `Content-Length` can no longer bypass `MAX_REQUEST_BODY_BYTES`). The 413 is sent as soon as the cap is crossed (leftover chunks are not drained). If the cap cannot be read the limiter fails closed (413) instead of accepting an unlimited body. CORS wraps the size limiter so a 413 to an allowed origin carries `Access-Control-Allow-Origin` and the structured `{error_code, message}` body; disallowed origins still get no CORS headers. A wildcard origin is never paired with credentials. Security headers wrap CORS so preflight OPTIONS still get CSP/HSTS. The frontend unwraps single, batch, and stream wrappers and shows the structured FILE_TOO_LARGE text (never a proxy HTML 413 page). Demo-token gate (fail-open when unset) and other fail-open limiters are unchanged.
 - CORS no longer defaults to `*`. Unset `CORS_ORIGINS` fails open to local Vite and the Render frontend from `render.yaml`; methods/headers are restricted and credentials stay off (port of -dev 91e88ff).
 - Promoted `-dev` `ceb18a8` security pins (#50/#51): `fastapi==0.162.0`, `starlette==1.10.0`, `Pillow==13.0.0`, `python-dotenv==1.2.4`; frontend `vite@8.3.5`, `vitest@5.0.5`, `happy-dom@21.0.4`, `zod@4.6.7` override.
 
