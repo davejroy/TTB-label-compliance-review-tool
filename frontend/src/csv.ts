@@ -2,10 +2,17 @@ import type { LabelCheckResult, ReviewResult } from "./types";
 
 /** Quote a CSV field if it contains a comma, quote, or newline, per RFC 4180. */
 function escapeCsvField(value: string): string {
-  if (/[",\n\r]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
+  // Neutralize Excel/LibreOffice formula injection. Extracted label text and
+  // application fields are untrusted (including vision/LLM output) and must
+  // not become an active formula when an evaluator opens the CSV.
+  let out = value;
+  if (/^[=+\-@\t\r]/.test(out)) {
+    out = `'${out}`;
   }
-  return value;
+  if (/[",\n\r]/.test(out)) {
+    return `"${out.replace(/"/g, '""')}"`;
+  }
+  return out;
 }
 
 /** Serialize rows of strings into CSV text using CRLF line endings. */

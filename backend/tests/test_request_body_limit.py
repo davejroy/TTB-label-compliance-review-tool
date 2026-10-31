@@ -450,3 +450,168 @@ async def test_health_is_never_blocked_when_cap_cannot_be_read(
     )
     assert status == 200
     assert json.loads(body.decode("utf-8"))["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_post_health_oversize_is_413(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /api/health must not bypass the body cap (GET/HEAD probes still can)."""
+    monkeypatch.setenv("MAX_REQUEST_BODY_BYTES", "50")
+    status, _headers, body = await _asgi_request(
+        app,
+        method="POST",
+        path="/api/health",
+        headers=[
+            (b"content-type", b"application/octet-stream"),
+            (b"content-length", b"80"),
+        ],
+        body_chunks=[b"x" * 80],
+    )
+    _assert_413(status, body)
+
+
+@pytest.mark.asyncio
+async def test_get_health_stays_200_even_with_declared_oversize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAX_REQUEST_BODY_BYTES", "50")
+    status, _headers, body = await _asgi_request(
+        app,
+        method="GET",
+        path="/api/health",
+        headers=[(b"content-length", b"999999")],
+        body_chunks=[],
+    )
+    assert status == 200
+    assert json.loads(body.decode("utf-8"))["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_streamed_413_allowed_origin_has_cors_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chunked 413 (no Content-Length) still gets ACAO for an allowed origin."""
+    monkeypatch.setenv("MAX_REQUEST_BODY_BYTES", "50")
+    headers, chunks = _multipart_chunks(extra_bytes=80)
+    headers.append((b"origin", ALLOWED_ORIGIN.encode("ascii")))
+    status, response_headers, body = await _asgi_request(
+        app,
+        method="POST",
+        path="/api/review",
+        headers=headers,
+        body_chunks=chunks,
+    )
+    _assert_413(status, body)
+    assert response_headers.get("access-control-allow-origin") == ALLOWED_ORIGIN
+    assert response_headers.get("content-security-policy") == API_CSP
+
+
+@pytest.mark.asyncio
+async def test_does_not_send_second_response_if_inner_already_started(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A late oversize chunk must not emit a second http.response.start."""
+    monkeypatch.setenv("MAX_REQUEST_BODY_BYTES", "50")
+    starts = 0
+
+    async def inner(scope: Scope, receive: Receive, send: Send) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"partial", "more_body": True})
+        await receive()  # under-limit chunk
+        await receive()  # oversize — limiter must not start another response
+
+    limited = RequestBodyLimitMiddleware(inner)
+    chunks = [b"a" * 20, b"b" * 40]
+
+    async def receive() -> Message:
+        if chunks:
+            body = chunks.pop(0)
+            return {"type": "http.request", "body": body, "more_body": bool(chunks)}
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    messages: list[Message] = []
+
+    async def send(message: Message) -> None:
+        nonlocal starts
+        if message["type"] == "http.response.start":
+            starts += 1
+        messages.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/review",
+        "raw_path": b"/api/review",
+        "query_string": b"",
+        "headers": [],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+    await limited(scope, receive, send)
+    assert starts == 1
+    start = next(m for m in messages if m["type"] == "http.response.start")
+    assert start["status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_non_bytes_body_chunk_still_counts_toward_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A str body chunk is encoded and counted so it cannot bypass the cap."""
+    monkeypatch.setenv("MAX_REQUEST_BODY_BYTES", "20")
+
+    async def inner(scope: Scope, receive: Receive, send: Send) -> None:
+        await receive()
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    limited = RequestBodyLimitMiddleware(inner)
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": "x" * 40, "more_body": False}
+
+    messages: list[Message] = []
+
+    async def send(message: Message) -> None:
+        messages.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/review",
+        "raw_path": b"/api/review",
+        "query_string": b"",
+        "headers": [],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+    await limited(scope, receive, send)
+    start = next(m for m in messages if m["type"] == "http.response.start")
+    assert start["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_early_413_adopts_incoming_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAX_REQUEST_BODY_BYTES", "50")
+    status, headers, body = await _asgi_request(
+        app,
+        method="POST",
+        path="/api/review",
+        headers=[
+            (b"content-type", b"application/octet-stream"),
+            (b"content-length", b"999"),
+            (b"x-request-id", b"review-req-413-cap"),
+        ],
+        body_chunks=[b"x" * 10],
+    )
+    _assert_413(status, body)
+    payload = json.loads(body.decode("utf-8"))
+    assert payload["request_id"] == "review-req-413-cap"
+    assert headers.get("x-request-id") == "review-req-413-cap"

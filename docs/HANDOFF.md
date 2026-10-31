@@ -137,7 +137,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 ## Security Notes
 
 - **Access-token gate stays wired**: `require_demo_access` remains on review routes. When `DEMO_ACCESS_TOKEN` is unset the dependency fails open (public evaluator demos). When set, missing/invalid Bearer tokens return HTTP 401. Do not remove the dependency and do not commit a token.
-- **Request body cap**: chunked, missing, or understated `Content-Length` cannot bypass `MAX_REQUEST_BODY_BYTES`. The 413 is sent immediately and fails closed if the cap cannot be read. CORS wraps the limiter (allowed origins get `Access-Control-Allow-Origin` on 413) and security headers are outermost.
+- **Request body cap**: chunked, missing, or understated `Content-Length` cannot bypass `MAX_REQUEST_BODY_BYTES`. The 413 is sent immediately and fails closed if the cap cannot be read. `GET`/`HEAD` `/api/health` stay unblocked so probes work; other methods on that path are still capped. CORS wraps the limiter (allowed origins get `Access-Control-Allow-Origin` on 413) and security headers are outermost. CSV downloads prefix `=`/`+`/`-`/`@` fields so vision/LLM text cannot become a spreadsheet formula.
 - Security response headers set on all requests via `setdefault`. API CSP is `default-src 'none'`; docs HTML (only if `ENABLE_API_DOCS=true`) allows the Swagger CDN.
 - Client-facing error messages are sanitized; stack traces logged only on backend. Never log tokens or raw image bytes.
 

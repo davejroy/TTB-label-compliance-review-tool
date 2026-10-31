@@ -80,6 +80,16 @@ describe('toCsv', () => {
           // Should be double-quoted with internal quotes doubled.
           expect(result).toBe('"Differs by 0.4%, exceeding ""0.3%"" tolerance"');
     });
+
+    it.each(['=CMD()', '+1+1', '-2+3', '@SUM(A1)', '\t=1+1'])(
+          'neutralizes spreadsheet formula injection starting with %s',
+          (payload) => {
+            const result = toCsv([[payload, 'pass']]);
+            expect(result.startsWith('=') || result.startsWith('+') || result.startsWith('-') || result.startsWith('@')).toBe(false);
+            expect(result).toContain(`'${payload}`);
+            expect(result).not.toMatch(/^[=+\-@]/);
+          },
+    );
 });
 
 describe('reviewResultCsvRows', () => {
