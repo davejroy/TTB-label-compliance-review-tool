@@ -45,7 +45,29 @@ from typing import Optional
 
 # Module-level logger for compliance checks.
 _log = logging.getLogger(__name__)
-from .models import ApplicationData, ExtractedLabelData, FieldResult, TypeSizeMeasurement
+from .errors import (
+    PHOTO_QUALITY_LOW,
+    PHOTO_UNREADABLE_FIELD,
+    REQUIRED_ELEMENTS,
+    RETAKE_MESSAGE,
+    FieldPresence,
+    ReadabilityAnalysis,
+    RetakeCause,
+    RetakeGuidance,
+    UnreadableField,
+    build_retake,
+    infer_retake_cause,
+)
+from .models import (
+    ApplicationData,
+    ExtractedLabelData,
+    FieldResult,
+    TypeSizeMeasurement,
+    WarningFormatFinding,
+    WarningFormatResult,
+    WarningTextDiff,
+    WarningWordChange,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -53,17 +75,29 @@ from .models import ApplicationData, ExtractedLabelData, FieldResult, TypeSizeMe
 # ---------------------------------------------------------------------------
 
 class LowConfidenceError(ValueError):
-    """Raised when extraction confidence is below the per-class minimum threshold.
+    """Raised when the whole image is too low-quality to evaluate.
 
-    Callers (main.py) should catch this and return the user_message on the
-    result so the agent knows to retake the photo. Do not let this escape as
-    an unhandled HTTP 500.
+    Per-field unreadability no longer raises: callers receive partial
+    findings plus a retake object. Callers (main.py) must catch this and
+    return HTTP 200 with overall_status=retake, never an unhandled 500.
     """
 
-    def __init__(self, user_message: str, confidence: float, threshold: float) -> None:
+    def __init__(
+        self,
+        user_message: str,
+        confidence: float,
+        threshold: float,
+        *,
+        error_code: str = PHOTO_QUALITY_LOW,
+        retake: RetakeGuidance | None = None,
+        field_status: dict | None = None,
+    ) -> None:
         self.user_message = user_message
         self.confidence = confidence
         self.threshold = threshold
+        self.error_code = error_code
+        self.retake = retake
+        self.field_status = field_status or {}
         super().__init__(user_message)
 
 
@@ -148,20 +182,22 @@ CANONICAL_WARNING_BODY = (
     "(2) Consumption of alcoholic beverages impairs your ability to drive a "
     "car or operate machinery, and may cause health problems."
 )
+CANONICAL_WARNING_FULL = CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY
 
-
-# Small-container Government Warning (27 CFR 16.21(c))
-# Containers with capacity <= 100 mL may use an abbreviated warning.
-SMALL_CONTAINER_THRESHOLD_ML = 100.0
-SMALL_CONTAINER_THRESHOLD_FLOZ = 3.381
-
-# Abbreviated warning body for containers <= 100 mL (omits clause numbers).
-CANONICAL_WARNING_BODY_SHORT = (
-    "According to the Surgeon General, women should not drink alcoholic "
-    "beverages during pregnancy because of the risk of birth defects. "
-    "Consumption of alcoholic beverages impairs your ability to drive a "
-    "car or operate machinery, and may cause health problems."
-)
+# OCR punctuation that is equivalent to ASCII quotes / apostrophes (27 CFR 16.21
+# comparison is otherwise exact at the word level).
+_WARNING_QUOTE_TRANSLATION = str.maketrans({
+    "\u2018": "'",
+    "\u2019": "'",
+    "\u201b": "'",
+    "\u2032": "'",
+    "\u0060": "'",
+    "\u00b4": "'",
+    "\u201c": '"',
+    "\u201d": '"',
+    "\u201f": '"',
+    "\u2033": '"',
+})
 
 # ---------------------------------------------------------------------------
 # Wine ABV tolerance helper (27 CFR 4.36(b)(1))
@@ -250,15 +286,6 @@ def _parse_net_contents(text: str) -> tuple:
     return None, None
 
 
-def _is_small_container(net_contents) -> bool:
-    """Return True when the container is <= 100 mL (27 CFR 16.21(c))."""
-    if not net_contents:
-        return False
-    qty, unit = _parse_net_contents(net_contents)
-    if qty is None or unit is None:
-        return False
-    return (unit == "ml" and qty <= SMALL_CONTAINER_THRESHOLD_ML) or (unit == "floz" and qty <= SMALL_CONTAINER_THRESHOLD_FLOZ)
-
 def _is_authorised_fill(qty: float, unit, beverage_type) -> bool:
     """Return True/False if qty/unit is an authorised standard of fill.
 
@@ -343,6 +370,263 @@ def _normalize_whitespace(text) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
 
+def _normalize_warning_ocr(text) -> str:
+    """Normalize OCR noise that 27 CFR 16.21 comparison must tolerate.
+
+    Tolerated: whitespace runs, line breaks (including hyphenated wraps),
+    and curly versus straight quotes or apostrophes. Word identity is preserved.
+    """
+    if not text:
+        return ""
+    text = str(text).translate(_WARNING_QUOTE_TRANSLATION)
+    text = re.sub(r"-\s*[\r\n]+\s*", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def tokenize_warning_words(text) -> list[str]:
+    """Split warning text into words after OCR-tolerant whitespace/quote normalize."""
+    normalized = _normalize_warning_ocr(text)
+    return normalized.split() if normalized else []
+
+
+def _combined_warning_text(header, body) -> str:
+    """Join extracted header and body, avoiding a duplicated header prefix."""
+    header = (header or "").strip()
+    body = (body or "").strip()
+    if not header:
+        return body
+    if not body:
+        return header
+    if _normalize_warning_ocr(body).lower().startswith(_normalize_warning_ocr(header).lower()):
+        return body
+    return f"{header} {body}"
+
+
+def _government_warning_header_is_all_caps(header: str, combined: str) -> bool:
+    """Return True when the first two 16.21 words are GOVERNMENT WARNING in all caps.
+
+    Prefer the dedicated header field so a duplicated title-case prefix in the
+    body cannot discard a valid all-caps heading.
+    """
+    source = header.strip() if header and str(header).strip() else combined
+    words = tokenize_warning_words(source)
+    if len(words) < 2:
+        return False
+    second = words[1][:-1] if words[1].endswith(":") else words[1]
+    return words[0] == "GOVERNMENT" and second == "WARNING"
+
+
+def diff_warning_words(expected: str, observed: str) -> WarningTextDiff:
+    """Word-level diff of observed warning text against the exact 16.21 statement.
+
+    Comparison is case-insensitive so an all-caps body still matches. Dropped,
+    added, or substituted words are never tolerated. Positions are 0-based word
+    indexes in the respective sequences.
+    """
+    expected_words = tokenize_warning_words(expected)
+    observed_words = tokenize_warning_words(observed)
+    matcher = SequenceMatcher(
+        a=[w.lower() for w in expected_words],
+        b=[w.lower() for w in observed_words],
+        autojunk=False,
+    )
+    missing: list[WarningWordChange] = []
+    extra: list[WarningWordChange] = []
+    changed: list[WarningWordChange] = []
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "delete":
+            for idx in range(i1, i2):
+                missing.append(
+                    WarningWordChange(
+                        kind="missing",
+                        expected=expected_words[idx],
+                        expected_index=idx,
+                    )
+                )
+        elif tag == "insert":
+            for idx in range(j1, j2):
+                extra.append(
+                    WarningWordChange(
+                        kind="extra",
+                        observed=observed_words[idx],
+                        observed_index=idx,
+                    )
+                )
+        elif tag == "replace":
+            paired = min(i2 - i1, j2 - j1)
+            for offset in range(paired):
+                changed.append(
+                    WarningWordChange(
+                        kind="changed",
+                        expected=expected_words[i1 + offset],
+                        observed=observed_words[j1 + offset],
+                        expected_index=i1 + offset,
+                        observed_index=j1 + offset,
+                    )
+                )
+            for idx in range(i1 + paired, i2):
+                missing.append(
+                    WarningWordChange(
+                        kind="missing",
+                        expected=expected_words[idx],
+                        expected_index=idx,
+                    )
+                )
+            for idx in range(j1 + paired, j2):
+                extra.append(
+                    WarningWordChange(
+                        kind="extra",
+                        observed=observed_words[idx],
+                        observed_index=idx,
+                    )
+                )
+
+    return WarningTextDiff(
+        exact_match=not (missing or extra or changed),
+        expected_words=expected_words,
+        observed_words=observed_words,
+        missing_words=missing,
+        extra_words=extra,
+        changed_words=changed,
+    )
+
+
+def _type_size_tier(net_contents) -> tuple[float, int]:
+    """Return (min height mm, max characters per inch) for the 16.22 container tier."""
+    from .cv_typesize import get_max_characters_per_inch, get_required_min_height_mm
+
+    return get_required_min_height_mm(net_contents), get_max_characters_per_inch(net_contents)
+
+
+def _build_warning_format(
+    extracted: ExtractedLabelData,
+    type_size_details: Optional[TypeSizeMeasurement],
+) -> WarningFormatResult:
+    """Roll type-size, characters-per-inch, and bold-header checks into one result."""
+    required_min_mm, max_cpi = _type_size_tier(extracted.net_contents)
+    estimated_cpi = None
+    if type_size_details is not None:
+        if type_size_details.required_min_height_mm:
+            required_min_mm = type_size_details.required_min_height_mm
+        if type_size_details.max_characters_per_inch:
+            max_cpi = type_size_details.max_characters_per_inch
+        estimated_cpi = type_size_details.estimated_characters_per_inch
+
+    findings: list[WarningFormatFinding] = []
+
+    if type_size_details is not None:
+        if type_size_details.state == "fail":
+            findings.append(
+                WarningFormatFinding(
+                    code="type_size",
+                    status="fail",
+                    citation="27 CFR 16.22(b)",
+                    message=type_size_details.verification_note,
+                    estimated=False,
+                )
+            )
+        elif type_size_details.state in ("warning", "cannot_measure"):
+            findings.append(
+                WarningFormatFinding(
+                    code="type_size",
+                    status="advisory",
+                    citation="27 CFR 16.22(b)",
+                    message=type_size_details.verification_note,
+                    estimated=type_size_details.state == "warning",
+                )
+            )
+        elif type_size_details.state == "pass":
+            findings.append(
+                WarningFormatFinding(
+                    code="type_size",
+                    status="pass",
+                    citation="27 CFR 16.22(b)",
+                    message=type_size_details.verification_note,
+                    estimated=False,
+                )
+            )
+
+    if estimated_cpi is not None:
+        if estimated_cpi > max_cpi:
+            cpi_message = (
+                f"Estimated {estimated_cpi:.1f} characters per inch exceeds the "
+                f"27 CFR 16.22(a)(4) maximum of {max_cpi} for this container's "
+                f"{required_min_mm:.0f} mm type-size tier. This measurement is an "
+                "estimate from the photo and is advisory only."
+            )
+        else:
+            cpi_message = (
+                f"Estimated {estimated_cpi:.1f} characters per inch is within the "
+                f"27 CFR 16.22(a)(4) maximum of {max_cpi} for this container's "
+                f"{required_min_mm:.0f} mm type-size tier. This measurement is an "
+                "estimate from the photo and is advisory only."
+            )
+        findings.append(
+            WarningFormatFinding(
+                code="characters_per_inch",
+                status="advisory",
+                citation="27 CFR 16.22(a)(4)",
+                message=cpi_message,
+                estimated=True,
+            )
+        )
+
+    if extracted.government_warning_header_appears_bold is False:
+        findings.append(
+            WarningFormatFinding(
+                code="header_bold",
+                status="advisory",
+                citation="27 CFR 16.22(a)(2)",
+                message=(
+                    "The 'GOVERNMENT WARNING' heading does not appear to be in bold type "
+                    "(27 CFR 16.22(a)(2)). This is a vision estimate and is advisory only."
+                ),
+                estimated=True,
+            )
+        )
+
+    if any(f.status == "fail" for f in findings):
+        format_status = "fail"
+    elif any(f.status == "advisory" for f in findings):
+        format_status = "advisory"
+    else:
+        format_status = "pass"
+
+    return WarningFormatResult(
+        status=format_status,
+        required_min_height_mm=required_min_mm,
+        max_characters_per_inch=max_cpi,
+        estimated_characters_per_inch=estimated_cpi,
+        findings=findings,
+    )
+
+
+def _describe_word_diff(diff: WarningTextDiff) -> str:
+    """Plain-language summary of missing, extra, and changed 16.21 words."""
+    parts: list[str] = []
+    if diff.missing_words:
+        words = ", ".join(
+            f"'{item.expected}' (pos {item.expected_index})" for item in diff.missing_words
+        )
+        parts.append(f"missing {words}")
+    if diff.extra_words:
+        words = ", ".join(
+            f"'{item.observed}' (pos {item.observed_index})" for item in diff.extra_words
+        )
+        parts.append(f"extra {words}")
+    if diff.changed_words:
+        words = ", ".join(
+            f"'{item.expected}'→'{item.observed}' (expected pos {item.expected_index}, "
+            f"observed pos {item.observed_index})"
+            for item in diff.changed_words
+        )
+        parts.append(f"changed {words}")
+    return "; ".join(parts)
+
+
 def _similarity(a: str, b: str) -> float:
     """Return a 0-1 similarity ratio between two strings (via difflib)."""
     return SequenceMatcher(None, a, b).ratio()
@@ -358,19 +642,254 @@ def _extract_percent(text) -> float:
     return None
 
 
+def _alcohol_is_proof_only(text) -> bool:
+    """True when alcohol is stated in proof without a percent ABV."""
+    if not text or not str(text).strip():
+        return False
+    if _extract_percent(text) is not None:
+        return False
+    return bool(re.search(r"\bproof\b", str(text), re.I))
+
+
+def warning_looks_like_ocr_noise(diff: WarningTextDiff) -> bool:
+    """True when a 16.21 mismatch looks like a misread, not a wording change.
+
+    Real defects (added/dropped words of three or more letters, or a
+    substitution that is not a close edit) fail immediately. One-or-two
+    character substitutions on otherwise aligned words are treated as
+    borderline OCR so a second look can run before we fail the label.
+    """
+    if diff.exact_match:
+        return False
+    long_tokens = [
+        (item.expected or item.observed or "")
+        for item in list(diff.missing_words) + list(diff.extra_words)
+        if len((item.expected or item.observed or "")) >= 3
+    ]
+    if long_tokens:
+        return False
+    if not diff.changed_words:
+        return False
+    for item in diff.changed_words:
+        expected = (item.expected or "").lower()
+        observed = (item.observed or "").lower()
+        if not expected or not observed:
+            return False
+        if abs(len(expected) - len(observed)) > 2:
+            return False
+        if _similarity(expected, observed) < 0.75:
+            return False
+    return True
+
+
+def warning_needs_second_look(diff: WarningTextDiff, observed: str) -> bool:
+    """True when observed warning text is close enough to retry before failing."""
+    if diff.exact_match or not warning_looks_like_ocr_noise(diff):
+        return False
+    ratio = _similarity(
+        _normalize_warning_ocr(CANONICAL_WARNING_FULL),
+        _normalize_warning_ocr(observed),
+    )
+    return 0.88 <= ratio < 1.0
+
+
 # ---------------------------------------------------------------------------
 # Confidence-gate helper
 # ---------------------------------------------------------------------------
 
-def assert_extraction_confidence(extracted, beverage_type=None):
-    """Raise LowConfidenceError if extraction confidence is below threshold.
+def _canonical_field_name(field_name: str) -> str:
+    """Map header/body warning keys onto the single required-element name."""
+    if field_name in {"government_warning_header", "government_warning_body"}:
+        return "government_warning"
+    return field_name
 
-    Checks two levels:
-    1. Overall confidence (extracted.extraction_confidence) against the
-       per-class minimum in BEVERAGE_TOLERANCE.
-    2. Per-field confidence (extracted.per_field_confidence) against
-       FIELD_CONFIDENCE_THRESHOLDS.  If any key field has a score below its
-       threshold, a LowConfidenceError is raised naming the specific field.
+
+def _field_value(extracted: ExtractedLabelData, field_name: str):
+    if field_name == "government_warning":
+        header = (extracted.government_warning_header or "").strip()
+        body = (extracted.government_warning_body or "").strip()
+        return header or body or None
+    return getattr(extracted, field_name, None)
+
+
+def _has_value(value) -> bool:
+    return bool(value and str(value).strip() and _normalize(value))
+
+
+def _warning_is_absent(extracted: ExtractedLabelData) -> bool:
+    """True only when the warning is confidently not on the label.
+
+    A present=True signal with empty transcribed text is unreadable, not
+    absent — the model thought a warning was there but could not read it.
+    """
+    if extracted.government_warning_present:
+        return False
+    header = (extracted.government_warning_header or "").strip()
+    body = (extracted.government_warning_body or "").strip()
+    return not header and not body
+
+
+def _confidence_threshold(
+    extracted: ExtractedLabelData, beverage_type: str | None = None
+) -> float:
+    """Same class threshold used by assert_extraction_confidence."""
+    cls = str(beverage_type or extracted.beverage_type_guess or "unknown").lower()
+    return BEVERAGE_TOLERANCE.get(cls, BEVERAGE_TOLERANCE["unknown"]).get(
+        "min_confidence", _DEFAULT_MIN_CONFIDENCE
+    )
+
+
+def _is_optional_zero_score(
+    field_name: str,
+    field_score: float,
+    extracted: ExtractedLabelData,
+    beverage_type: str | None = None,
+) -> bool:
+    """True when a 0.0 score means 'not on this label', not 'could not read'.
+
+    The extraction prompt scores an absent printed field as 0.0 with an empty
+    value. On a readable photo (overall confidence at or above the class
+    threshold) that combination is a compliance miss — 'X not found on
+    label' — not a retake. A low-but-nonzero score, or empty text on an
+    unreadable photo, stays unreadable.
+    """
+    if field_name == "country_of_origin" and field_score == 0.0:
+        return True
+    if field_name in {"government_warning_header", "government_warning_body"}:
+        if _warning_is_absent(extracted):
+            return True
+        # present=True with empty text is unreadable, not a confident absence.
+        if not _has_value(_field_value(extracted, "government_warning")):
+            return False
+    if field_score != 0.0:
+        return False
+    canonical = _canonical_field_name(field_name)
+    value = _field_value(extracted, canonical)
+    if _has_value(value):
+        return False
+    overall = extracted.extraction_confidence
+    if overall is None:
+        return True
+    return overall >= _confidence_threshold(extracted, beverage_type)
+
+
+def collect_unreadable_fields(
+    extracted: ExtractedLabelData,
+    quality_cause: RetakeCause | None = None,
+    beverage_type: str | None = None,
+) -> list[UnreadableField]:
+    """Return per-field confidence misses without raising.
+
+    Absent government-warning text and missing country-of-origin on domestic
+    labels are skipped so they stay compliance failures, not retakes.
+    When the pre-gate already named a cause, that value fills the retake
+    object instead of inferring from extraction notes.
+    """
+    if not extracted.per_field_confidence:
+        return []
+
+    cause = quality_cause or infer_retake_cause(getattr(extracted, "notes", None))
+    issues: list[UnreadableField] = []
+    seen: set[str] = set()
+    for field_name, field_score in extracted.per_field_confidence.items():
+        if _is_optional_zero_score(
+            field_name, field_score, extracted, beverage_type=beverage_type
+        ):
+            continue
+        field_threshold = FIELD_CONFIDENCE_THRESHOLDS.get(field_name, _DEFAULT_FIELD_CONFIDENCE)
+        if field_score >= field_threshold:
+            continue
+        canonical = _canonical_field_name(field_name)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        _log.info(
+            "Low per-field confidence for '%s': %.2f < %.2f (unreadable, not absent)",
+            canonical,
+            field_score,
+            field_threshold,
+        )
+        issues.append(
+            UnreadableField(
+                field=canonical,
+                score=field_score,
+                threshold=field_threshold,
+                area=build_retake(canonical, cause).area,
+                cause=cause,
+                tip=build_retake(canonical, cause).tip,
+            )
+        )
+    return issues
+
+
+def analyze_readability(
+    extracted: ExtractedLabelData,
+    quality_cause: RetakeCause | None = None,
+    beverage_type: str | None = None,
+) -> ReadabilityAnalysis:
+    """Build field_status and retake guidance from extraction confidence.
+
+    Unreadable is distinct from absent: a low-confidence empty field is
+    unreadable and must not be reported as a missing-element violation.
+    """
+    unreadable = collect_unreadable_fields(
+        extracted, quality_cause=quality_cause, beverage_type=beverage_type
+    )
+    unreadable_keys = {item.field for item in unreadable}
+    field_status: dict[str, FieldPresence] = {}
+
+    extra_keys = {
+        _canonical_field_name(name)
+        for name in (extracted.per_field_confidence or {})
+        if _canonical_field_name(name) not in REQUIRED_ELEMENTS
+        and not _is_optional_zero_score(
+            name, extracted.per_field_confidence[name], extracted, beverage_type=beverage_type
+        )
+    }
+    for field_name in list(REQUIRED_ELEMENTS) + sorted(extra_keys):
+        if field_name in unreadable_keys:
+            field_status[field_name] = "unreadable"
+            continue
+        if field_name == "government_warning":
+            field_status[field_name] = "absent" if _warning_is_absent(extracted) else "present"
+            continue
+        value = _field_value(extracted, field_name)
+        field_status[field_name] = "present" if _has_value(value) else "absent"
+
+    retake = None
+    error_code = None
+    if unreadable:
+        first = min(unreadable, key=lambda item: item.score)
+        retake = build_retake(first.field, first.cause, area=first.area, tip=first.tip)
+        error_code = PHOTO_UNREADABLE_FIELD
+    return ReadabilityAnalysis(
+        field_status=field_status,
+        unreadable=unreadable,
+        retake=retake,
+        error_code=error_code,
+    )
+
+
+def unreadable_field_names(
+    extracted: ExtractedLabelData,
+    quality_cause: RetakeCause | None = None,
+    beverage_type: str | None = None,
+) -> set[str]:
+    """Canonical field names that must be skipped by compliance checks."""
+    return {
+        item.field
+        for item in collect_unreadable_fields(
+            extracted, quality_cause=quality_cause, beverage_type=beverage_type
+        )
+    }
+
+
+def assert_extraction_confidence(extracted, beverage_type=None, quality_cause=None):
+    """Raise LowConfidenceError only when the whole image is unreadable.
+
+    Per-field confidence misses are collected by ``analyze_readability`` so
+    readable findings can still be returned.  A LowConfidenceError here means
+    overall extraction_confidence is below the per-class threshold.
     """
     if extracted.extraction_confidence is None:
         _log.debug("assert_extraction_confidence: no score emitted, skipping gate.")
@@ -383,68 +902,21 @@ def assert_extraction_confidence(extracted, beverage_type=None):
 
     if conf < threshold:
         _log.info("Low overall extraction confidence %.2f < %.2f (%s)", conf, threshold, cls)
+        cause = quality_cause or infer_retake_cause(getattr(extracted, "notes", None))
+        analysis = analyze_readability(
+            extracted, quality_cause=quality_cause, beverage_type=beverage_type
+        )
+        overall_unreadable = {name: "unreadable" for name in REQUIRED_ELEMENTS}
+        overall_unreadable.update(analysis.field_status)
+        for name in REQUIRED_ELEMENTS:
+            overall_unreadable[name] = "unreadable"
         raise LowConfidenceError(
-            user_message=(
-                f"The label image quality is too low to reliably read the required fields "
-                f"(confidence {conf:.0%}, minimum {threshold:.0%} for {cls}). "
-                "Please retake the photo: ensure the label is flat-on, well-lit, in sharp "
-                "focus, and the entire label is visible within the frame."
-            ),
+            user_message=RETAKE_MESSAGE,
             confidence=conf,
             threshold=threshold,
-        )
-
-    if not extracted.per_field_confidence:
-        return
-
-    field_issues = []
-    for field_name, field_score in extracted.per_field_confidence.items():
-        if field_name == "country_of_origin" and field_score == 0.0:
-            continue  # Absent on domestic labels - not a photo quality issue
-        # Issue #5 W02: Absent government warning is evaluated as a statutory compliance failure,
-        # not an image quality retake error.
-        if (
-            field_name in ("government_warning_header", "government_warning_body")
-            and (
-                not extracted.government_warning_present
-                or (not (extracted.government_warning_header or "").strip() and not (extracted.government_warning_body or "").strip())
-            )
-        ):
-            continue
-        field_threshold = FIELD_CONFIDENCE_THRESHOLDS.get(field_name, _DEFAULT_FIELD_CONFIDENCE)
-        if field_score < field_threshold:
-            _log.info("Low per-field confidence for '%s': %.2f < %.2f", field_name, field_score, field_threshold)
-            field_issues.append((field_name, field_score, field_threshold))
-
-    if field_issues:
-        field_descriptions = {
-            "brand_name": "brand name",
-            "class_type": "class/type designation",
-            "alcohol_content": "alcohol content (ABV)",
-            "net_contents": "net contents / fill quantity",
-            "government_warning_header": "Government Warning header",
-            "government_warning_body": "Government Warning text body",
-            "name_and_address": "bottler/producer name and address",
-            "sulfite_declaration": "sulfite declaration",
-            "allergen_statements": "allergen statements",
-            "age_statement": "age statement",
-            "commodity_statement": "commodity statement",
-        }
-        readable_fields = [field_descriptions.get(fn, fn) for fn, _, _ in field_issues]
-        noun = "fields" if len(readable_fields) > 1 else "field"
-        listed = ", ".join(f'"{f}"' for f in readable_fields)
-        conf_detail = "; ".join(f"{fn} {fs:.0%}" for fn, fs, _ in field_issues)
-        raise LowConfidenceError(
-            user_message=(
-                f"The following label {noun} could not be read clearly enough "
-                f"to produce a reliable compliance result: {listed}. "
-                f"(Confidence scores: {conf_detail}.) "
-                "Please retake the photo focusing on the affected area: ensure "
-                "the label surface is fully visible, not curved into shadow, and "
-                "the text is sharply in focus."
-            ),
-            confidence=min(fs for _, fs, _ in field_issues),
-            threshold=min(ft for _, _, ft in field_issues),
+            error_code=PHOTO_QUALITY_LOW,
+            retake=build_retake("label", cause),
+            field_status=overall_unreadable,
         )
 
 # ---------------------------------------------------------------------------
@@ -498,11 +970,232 @@ _PRODUCER_PREFIXES: tuple[str, ...] = (
 )
 
 
+# Legal-entity suffixes only. Industry words (winery, distillery, brewing)
+# stay part of the company name so a shorter display brand is not treated
+# as "the bottler name" when bounding boxes are missing.
+_LEGAL_ENTITY_SUFFIXES = frozenset({
+    "co", "llc", "inc", "ltd", "corp", "corporation", "company", "lp", "plc",
+})
+
+# First token of a wrapped line that continues the company name rather than
+# starting the city/street (extraction keeps printed line breaks).
+_COMPANY_CONTINUATION_WORDS = frozenset({
+    "winery", "wineries", "distillery", "distilleries", "distilling",
+    "brewing", "brewery", "breweries", "cellars", "cellar", "vineyard",
+    "vineyards", "company", "co", "llc", "inc", "ltd", "corp", "corporation",
+    "partners", "imports", "importing", "trading", "group", "farms",
+    "orchards", "estate", "estates",
+})
+
+_US_STATE_ABBREVS = frozenset({
+    "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id",
+    "il", "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms",
+    "mo", "mt", "ne", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok",
+    "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv",
+    "wi", "wy", "dc",
+})
+
+_US_STATE_NAMES = frozenset({
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "newhampshire", "newjersey", "newmexico", "newyork", "northcarolina",
+    "northdakota", "ohio", "oklahoma", "oregon", "pennsylvania",
+    "rhodeisland", "southcarolina", "southdakota", "tennessee", "texas",
+    "utah", "vermont", "virginia", "washington", "westvirginia",
+    "wisconsin", "wyoming", "districtofcolumbia",
+})
+
+
+def _token_spans(text: str) -> list[tuple[str, int, int]]:
+    """Return (normalized_word, start, end) for each non-whitespace token."""
+    spans: list[tuple[str, int, int]] = []
+    for match in re.finditer(r"\S+", text):
+        norm = re.sub(r"[^a-z0-9&]+", "", match.group().lower())
+        if norm:
+            spans.append((norm, match.start(), match.end()))
+    return spans
+
+
+def _strip_producer_prefix_raw(name_and_address: str) -> str:
+    """Remove a leading bottled-by / produced-by clause from a raw address line.
+
+    Prefix words match across any whitespace, including printed line breaks,
+    so ``Produced and\\nBottled by …`` strips the same as a single-line clause.
+    The remainder keeps its original spelling and punctuation.
+    """
+    text = name_and_address.strip()
+    spans = _token_spans(text)
+    for prefix in _PRODUCER_PREFIXES:
+        prefix_words = [re.sub(r"[^a-z0-9&]+", "", word) for word in prefix.split()]
+        prefix_words = [word for word in prefix_words if word]
+        count = len(prefix_words)
+        if count == 0 or len(spans) < count:
+            continue
+        if [spans[i][0] for i in range(count)] == prefix_words:
+            return text[spans[count - 1][2]:].strip().strip(",;:-")
+    return text
+
+
+def _first_line_token(line: str) -> str:
+    match = re.search(r"[A-Za-z0-9]+", line)
+    return match.group().lower() if match else ""
+
+
+def _is_zip_token(token: str) -> bool:
+    return bool(re.fullmatch(r"\d{5}(?:\d{4})?", token))
+
+
+def _strip_trailing_zip_tokens(tokens: list[str]) -> list[str]:
+    """Drop trailing USPS ZIP tokens, including a hyphen-split ZIP+4 (5 + 4)."""
+    work = list(tokens)
+    if (
+        len(work) >= 2
+        and re.fullmatch(r"\d{5}", work[-2])
+        and re.fullmatch(r"\d{4}", work[-1])
+    ):
+        work = work[:-2]
+    while work and _is_zip_token(work[-1]):
+        work = work[:-1]
+    return work
+
+
+def _tokens_are_state(tokens: list[str]) -> bool:
+    if not tokens:
+        return False
+    if len(tokens) == 1 and len(tokens[0]) == 2 and tokens[0].lower() in _US_STATE_ABBREVS:
+        return True
+    return "".join(token.lower() for token in tokens) in _US_STATE_NAMES
+
+
+def _clause_is_state_or_zip(clause: str) -> bool:
+    tokens = re.findall(r"[A-Za-z0-9]+", clause)
+    if not tokens:
+        return False
+    rest = _strip_trailing_zip_tokens(tokens)
+    if not rest:
+        return True
+    if rest != tokens and all(token.isdigit() for token in rest):
+        return True
+    return _tokens_are_state(rest)
+
+
+def _is_city_state_or_street_line(line: str) -> bool:
+    """True for a city/state/ZIP or street line, not a wrapped company suffix."""
+    tokens = re.findall(r"[A-Za-z0-9]+", line)
+    if not tokens:
+        return False
+    if tokens[0].isdigit():
+        return True
+    clauses = [part.strip() for part in re.split(r"[,;]", line) if part.strip()]
+    if len(clauses) >= 2:
+        return any(_clause_is_state_or_zip(part) for part in clauses[1:])
+    work = _strip_trailing_zip_tokens(tokens)
+    peeled_zip = work != tokens
+    if len(work) >= 2 and _tokens_are_state(work[-1:]):
+        # "CO" is both Colorado and the legal suffix "Co". Treat a trailing
+        # state abbrev as an address unless a company-continuation word
+        # precedes it ("Hopline Brewing Co" vs "Denver CO").
+        last = work[-1].lower()
+        if last in _LEGAL_ENTITY_SUFFIXES and not peeled_zip:
+            prior = [token.lower() for token in work[:-1]]
+            if any(
+                token in _COMPANY_CONTINUATION_WORDS or token in _LEGAL_ENTITY_SUFFIXES
+                for token in prior
+            ):
+                return False
+        return True
+    if len(work) >= 2:
+        for start in range(1, len(work)):
+            if _tokens_are_state(work[start:]):
+                return True
+    return False
+
+
+def _company_clause_from_remainder(remainder: str) -> str:
+    """Take the company name, joining wraps and stopping at the address."""
+    parts: list[str] = []
+    seen_company = False
+    for raw_chunk in re.split(r"[\r\n]+", remainder):
+        chunk = raw_chunk.strip()
+        if not chunk:
+            continue
+        first = _first_line_token(chunk)
+        if seen_company and first not in _COMPANY_CONTINUATION_WORDS:
+            if not first or _is_city_state_or_street_line(chunk):
+                break
+        clause = re.split(r"[,;]", chunk, maxsplit=1)[0].strip()
+        if clause:
+            parts.append(clause)
+            seen_company = True
+        if "," in chunk or ";" in chunk:
+            break
+    return " ".join(parts)
+
+
+def _producer_entity_name(name_and_address: str | None) -> str:
+    """Return the normalized bottler/producer company name, without city/state.
+
+    Uses the clause after a standard producer prefix and before the city or
+    street. Printed wraps inside the company name (``Crescent Ridge\\nWinery``)
+    stay part of the entity; a following city/state line does not.
+    Does not require field_locations.
+    """
+    if not name_and_address or not str(name_and_address).strip():
+        return ""
+    remainder = _strip_producer_prefix_raw(str(name_and_address))
+    if not remainder:
+        return ""
+    return _normalize(_company_clause_from_remainder(remainder))
+
+
+def _drop_legal_suffixes(normalized: str) -> str:
+    words = normalized.split()
+    while words and words[-1] in _LEGAL_ENTITY_SUFFIXES:
+        words.pop()
+    return " ".join(words)
+
+
+def _brand_text_is_derived_from_bottler(
+    brand_name: str | None, name_and_address: str | None
+) -> bool:
+    """True when brand text is the bottler/producer company name itself.
+
+    A shorter display brand that only shares words with the company
+    (Crescent Ridge vs Crescent Ridge Winery) is not derived. Used when
+    brand and address bounding boxes are missing.
+    """
+    brand = _normalize(brand_name)
+    if not brand or not name_and_address:
+        return False
+
+    company = _producer_entity_name(name_and_address)
+    if not company:
+        return False
+
+    stripped = _normalize(_strip_producer_prefix_raw(str(name_and_address)))
+    if brand == company or (stripped and brand == stripped):
+        return True
+    if company in brand:
+        return True
+    if brand in company:
+        leftover = [w for w in company.replace(brand, " ", 1).split() if w]
+        if leftover and all(w in _LEGAL_ENTITY_SUFFIXES for w in leftover):
+            return True
+
+    brand_core = _drop_legal_suffixes(brand)
+    company_core = _drop_legal_suffixes(company)
+    return bool(brand_core and brand_core == company_core)
+
+
 def _is_brand_in_address(brand_name: str | None, name_and_address: str | None) -> bool:
     """Return True if brand_name is equal, near-equal, or a substring of name_and_address.
 
-    Issue #9 P1: Prevents brand names extracted or hallucinated from the bottler /
-    producer address line from clean-passing without distinct brand heading evidence.
+    Advisory overlap detector used when bounding boxes are present. This
+    check must not blank the extracted brand or fail a label solely because
+    the display brand also appears in the bottler/producer line.
     """
     if not brand_name or not name_and_address:
         return False
@@ -545,26 +1238,20 @@ def _is_brand_in_address(brand_name: str | None, name_and_address: str | None) -
     return False
 
 
-def _has_distinct_brand_evidence(extracted: ExtractedLabelData) -> bool:
-    """Check if there is distinct brand heading evidence on the label image.
+def _spatial_brand_vs_address(extracted: ExtractedLabelData) -> bool | None:
+    """Compare brand_name and name_and_address boxes when both are present.
 
-    Evidence includes:
-    1. Spatially separated field_locations for brand_name vs name_and_address (e.g.
-       different panel/image, vertical separation > 15%, or horizontal separation > 20%).
-    2. Explicit mention of distinct brand heading in extraction notes.
+    Returns True when the boxes are on different panels or are vertically
+    (>15%) or horizontally (>20%) separated, False when both boxes exist
+    but overlap, and None when either box is missing. Missing boxes must
+    not be treated as a failed distinct-brand check.
     """
-    if extracted.notes and "distinct brand" in extracted.notes.lower():
-        return True
-
     if not extracted.field_locations:
-        return False
-
+        return None
     brand_locs = [loc for loc in extracted.field_locations if getattr(loc, "field", None) == "brand_name"]
     addr_locs = [loc for loc in extracted.field_locations if getattr(loc, "field", None) == "name_and_address"]
-
     if not brand_locs or not addr_locs:
-        return False
-
+        return None
     for b_loc in brand_locs:
         for a_loc in addr_locs:
             if getattr(b_loc, "image_index", 0) != getattr(a_loc, "image_index", 0):
@@ -573,8 +1260,48 @@ def _has_distinct_brand_evidence(extracted: ExtractedLabelData) -> bool:
                 return True
             if abs(b_loc.x - a_loc.x) > 0.20:
                 return True
-
     return False
+
+
+def _has_distinct_brand_evidence(extracted: ExtractedLabelData) -> bool:
+    """True when notes or spatially separated boxes show a distinct brand heading.
+
+    Bounding boxes refine the decision only when both locations are present.
+    Missing boxes are not evidence against a distinct brand.
+    """
+    if extracted.notes and "distinct brand" in extracted.notes.lower():
+        return True
+    return _spatial_brand_vs_address(extracted) is True
+
+
+def _should_warn_brand_derived_from_bottler(
+    extracted: ExtractedLabelData,
+    application_address: str | None = None,
+) -> bool:
+    """Whether to emit the brand-derived-from-bottler advisory.
+
+    When brand and address boxes are present they refine the decision:
+    separated boxes pass; overlapping boxes still use the address-overlap
+    detector. When boxes are missing, warn only if the brand text really
+    is the bottler/producer company name (match or company-name substring),
+    not merely a display brand that shares words with the producer.
+    """
+    if _has_distinct_brand_evidence(extracted):
+        return False
+
+    spatial = _spatial_brand_vs_address(extracted)
+    if spatial is True:
+        return False
+    if spatial is False:
+        return (
+            _is_brand_in_address(extracted.brand_name, extracted.name_and_address)
+            or _is_brand_in_address(extracted.brand_name, application_address)
+        )
+
+    return (
+        _brand_text_is_derived_from_bottler(extracted.brand_name, extracted.name_and_address)
+        or _brand_text_is_derived_from_bottler(extracted.brand_name, application_address)
+    )
 
 
 def _check_text_field(
@@ -636,11 +1363,13 @@ def _check_text_field(
 def _check_brand_name_match(
     application: ApplicationData, extracted: ExtractedLabelData
 ) -> FieldResult:
-    """Compare application brand name to label brand name with deterministic guard.
+    """Compare application brand name to label brand name with an advisory guard.
 
-    Issue #9 P1: If extracted brand_name is contained in, equal to, or near-equal to
-    the name_and_address block (or producer line) and lacks distinct brand heading evidence,
-    never clean-pass brand — surface as warning (needs_review) or fail.
+    Warn only when the extracted brand is the bottler/producer company name
+    (or, when boxes exist and overlap, when the brand was read from the
+    address block). A distinct display brand that shares words with the
+    producer does not warn when boxes are missing. Do not fail or blank
+    brand solely because the display name also appears in the bottler line.
     """
     base_result = _check_text_field(
         "brand_name", "Brand Name", application.brand_name, extracted.brand_name
@@ -648,11 +1377,7 @@ def _check_brand_name_match(
     if base_result.status != "pass":
         return base_result
 
-    # If base_result is pass, verify that brand_name is not merely hallucinated/extracted from address
-    is_in_label_addr = _is_brand_in_address(extracted.brand_name, extracted.name_and_address)
-    is_in_app_addr = _is_brand_in_address(extracted.brand_name, application.name_and_address)
-
-    if (is_in_label_addr or is_in_app_addr) and not _has_distinct_brand_evidence(extracted):
+    if _should_warn_brand_derived_from_bottler(extracted, application.name_and_address):
         return FieldResult(
             field="brand_name",
             label_name="Brand Name",
@@ -660,7 +1385,7 @@ def _check_brand_name_match(
             application_value=application.brand_name,
             label_value=extracted.brand_name,
             message=(
-                f"Brand name '{extracted.brand_name}' appears to be contained within or derived from "
+                f"Advisory: Brand name '{extracted.brand_name}' appears to be contained within or derived from "
                 "the bottler/producer name and address block without distinct brand heading evidence on the label. "
                 "Requires human review to confirm whether a distinct brand name appears on the label (27 CFR 4.32 / 5.64 / 7.64)."
             ),
@@ -672,8 +1397,10 @@ def _check_brand_name_match(
 def _check_label_brand_name(extracted: ExtractedLabelData) -> FieldResult:
     """Validate mandatory brand name requirement on label (Label-Only Check).
 
-    Issue #9 P1: If extracted brand_name is contained in or derived from name_and_address
-    without distinct brand heading evidence, never clean-pass brand — return warning.
+    Warn only when brand text is the bottler/producer company name, or when
+    overlapping boxes show the brand was read from the address block. Do not
+    fail or blank brand solely because the display name also appears in the
+    bottler/producer line.
     """
     req = "A brand name is required on every label (27 CFR 4.32 / 5.63(a)(1), 5.64 / 7.63(a)(1), 7.64)."
     if not extracted.brand_name or not str(extracted.brand_name).strip() or not _normalize(extracted.brand_name):
@@ -686,7 +1413,7 @@ def _check_label_brand_name(extracted: ExtractedLabelData) -> FieldResult:
             message=f"Brand Name was not found on the label. {req}",
         )
 
-    if _is_brand_in_address(extracted.brand_name, extracted.name_and_address) and not _has_distinct_brand_evidence(extracted):
+    if _should_warn_brand_derived_from_bottler(extracted):
         return FieldResult(
             field="brand_name",
             label_name="Brand Name",
@@ -694,7 +1421,7 @@ def _check_label_brand_name(extracted: ExtractedLabelData) -> FieldResult:
             application_value=req,
             label_value=extracted.brand_name,
             message=(
-                f"Brand name '{extracted.brand_name}' appears to be contained within or derived from "
+                f"Advisory: Brand name '{extracted.brand_name}' appears to be contained within or derived from "
                 "the bottler/producer name and address line without distinct brand heading evidence. "
                 "Requires human review to confirm whether a distinct brand name is present (27 CFR 4.32 / 5.64 / 7.64)."
             ),
@@ -737,6 +1464,17 @@ def _check_alcohol_content(
             message="Alcohol content not found on label.",
         )
 
+    if _alcohol_is_proof_only(label_value):
+        return FieldResult(
+            field=field, label_name=label_name, status="fail",
+            application_value=application.alcohol_content, label_value=label_value,
+            message=(
+                "Alcohol content is stated in proof only. The alcohol content "
+                "must be stated as a percentage of alcohol by volume "
+                "(27 CFR 4.36 / 5.65 / 7.65)."
+            ),
+        )
+
     app_pct = _extract_percent(application.alcohol_content)
     label_pct = _extract_percent(label_value)
 
@@ -775,15 +1513,25 @@ def _check_alcohol_content(
 def _check_government_warning(
     extracted: ExtractedLabelData,
     type_size_details: Optional[TypeSizeMeasurement] = None,
+    second_look=None,
 ) -> FieldResult:
     """Validate the Government Warning statement (27 CFR 16.21 / 16.22).
 
-    Supports the abbreviated short-form body for containers <= 100 mL
-    per 27 CFR 16.21(c): omits clause numbers (1)/(2). Both forms pass.
-    Also applies per-field confidence gate when the warning is present,
-    and incorporates calibrated 27 CFR 16.22 physical type-size results.
+    Every container size is checked against the full statutory 16.21 text.
+    Part 16 does not permit a shortened warning. Small containers receive only
+    the smaller 16.22 type-size minimum (and matching characters-per-inch cap).
+
+    Text comparison is a local word-level diff. OCR whitespace, line breaks,
+    and curly versus straight quotes are tolerated; dropped, added, or
+    substituted words are not. GOVERNMENT WARNING must be all capitals.
+
+    16.22 type size and heading boldness are rolled into ``warning_format``.
+    A heading that does not appear bold is advisory only: vision-estimated
+    boldness is too uncertain to fail an otherwise correct warning
+    (27 CFR 16.22(a)(2)). Estimated characters-per-inch remains advisory.
     """
     field, label_name = "government_warning", "Government Warning"
+    warning_format = _build_warning_format(extracted, type_size_details)
 
     # Issue #5 W02: If government warning is absent (present=False or empty), emit status=fail directly
     # without triggering low-confidence photo retake or error.
@@ -793,10 +1541,11 @@ def _check_government_warning(
     ):
         return FieldResult(
             field=field, label_name=label_name, status="fail",
-            application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
+            application_value=CANONICAL_WARNING_FULL,
             label_value=None,
             message="Government Warning statement not found on label. Required on all alcohol beverage labels (27 CFR Part 16).",
             type_size_details=type_size_details,
+            warning_format=warning_format,
         )
 
     body_conf = extracted.per_field_confidence.get("government_warning_body")
@@ -805,7 +1554,7 @@ def _check_government_warning(
         if body_conf < threshold:
             return FieldResult(
                 field=field, label_name=label_name, status="fail",
-                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
+                application_value=CANONICAL_WARNING_FULL,
                 label_value=None,
                 message=(
                     f"Government Warning text could not be read clearly enough to verify "
@@ -815,102 +1564,140 @@ def _check_government_warning(
                     "visible and sharply in focus, and avoid reflections or shadows."
                 ),
                 type_size_details=type_size_details,
+                warning_format=warning_format,
             )
 
     header = (extracted.government_warning_header or "").strip()
-    body = _normalize_whitespace(extracted.government_warning_body)
-    canonical_body = _normalize_whitespace(CANONICAL_WARNING_BODY)
-    canonical_short = _normalize_whitespace(CANONICAL_WARNING_BODY_SHORT)
-    is_small = _is_small_container(extracted.net_contents)
+    observed = _combined_warning_text(header, extracted.government_warning_body)
+    label_value = _normalize_warning_ocr(observed)
+    text_diff = diff_warning_words(CANONICAL_WARNING_FULL, observed)
+    header_caps_ok = _government_warning_header_is_all_caps(header, observed)
+    normalized_header = _normalize_warning_ocr(header) if header else ""
 
-    issues = []
-    cosmetic_only = True  # becomes False as soon as a substantive issue is found
-
-    # Issue #6 W03: 27 CFR 16.21 / 16.22 strictly requires the heading to appear in capital
-    # letters exactly as 'GOVERNMENT WARNING:'. Any other casing (e.g. 'Government Warning:')
-    # or missing punctuation is a statutory non-compliance and MUST hard fail.
-    if header != CANONICAL_WARNING_HEADER:
-        issues.append(
-            f"header must appear in capital letters exactly as '{CANONICAL_WARNING_HEADER}' "
-            f"(found '{header}') (27 CFR 16.21/16.22)"
-        )
-        cosmetic_only = False
-
-    body_lower = body.lower()
-    if body_lower != canonical_body.lower():
-        if is_small and body_lower == canonical_short.lower():
-            pass  # Short form accepted
-        elif is_small and _similarity(body_lower, canonical_short.lower()) >= 0.88:
-            issues.append("warning text has minor wording differences from the permitted short-form text")
-        elif _similarity(body_lower, canonical_body.lower()) >= 0.88:
-            issues.append("warning text has minor wording differences from the required text")
-        elif is_small:
-            issues.append("warning text does not match either the standard or the permitted short-form text (27 CFR 16.21(c))")
-            cosmetic_only = False
+    header_is_exact = header_caps_ok and (
+        not normalized_header or normalized_header == CANONICAL_WARNING_HEADER
+    )
+    if (
+        header_is_exact
+        and not text_diff.exact_match
+        and warning_needs_second_look(text_diff, observed)
+    ):
+        confirmed = None
+        if callable(second_look):
+            try:
+                confirmed = second_look(observed)
+            except Exception as exc:  # noqa: BLE001
+                _log.debug("Government Warning second look failed: %s", exc)
+                confirmed = None
+        if confirmed:
+            retry_diff = diff_warning_words(CANONICAL_WARNING_FULL, confirmed)
+            if retry_diff.exact_match:
+                text_diff = retry_diff
+                observed = confirmed
+                label_value = _normalize_warning_ocr(confirmed)
         else:
-            issues.append("warning text does not match the required statement")
-            cosmetic_only = False
-
-    if not issues:
-        note = ""
-        if is_small and body_lower == canonical_short.lower():
-            note = " (short-form variant accepted for containers <= 100 mL per 27 CFR 16.21(c))"
-
-        if type_size_details is None:
-            return FieldResult(
-                field=field, label_name=label_name, status="pass",
-                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
-                label_value=header + " " + body,
-                message="Government Warning statement matches the required text exactly." + note + " (Note: Physical type size in mm per 27 CFR 16.22 is not verified from photos and requires physical gauge measurement.)",
-                type_size_details=None,
-            )
-
-        if type_size_details.state == "fail":
-            return FieldResult(
-                field=field, label_name=label_name, status="fail",
-                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
-                label_value=header + " " + body,
-                message="Government Warning statement text is valid, but type size is deficient: " + type_size_details.verification_note,
-                type_size_details=type_size_details,
-            )
-        elif type_size_details.state == "cannot_measure":
             return FieldResult(
                 field=field, label_name=label_name, status="warning",
-                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
-                label_value=header + " " + body,
-                message="Government Warning text matches required wording. Calibrated measurement could not be completed: " + type_size_details.verification_note,
+                application_value=CANONICAL_WARNING_FULL,
+                label_value=label_value,
+                message=(
+                    "Government Warning text is close to the required 27 CFR 16.21 "
+                    "statement but could not be confirmed exactly. Please retake the "
+                    "back-label photo so the warning can be read without glare or blur."
+                ),
                 type_size_details=type_size_details,
-            )
-        elif type_size_details.state == "pass":
-            return FieldResult(
-                field=field, label_name=label_name, status="pass",
-                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
-                label_value=header + " " + body,
-                message="Government Warning statement matches the required text exactly and meets statutory type-size requirements." + note + " (" + type_size_details.verification_note + ")",
-                type_size_details=type_size_details,
-            )
-        else:  # "warning" (e.g. uncalibrated estimate or borderline near threshold)
-            return FieldResult(
-                field=field, label_name=label_name, status="pass",
-                application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
-                label_value=header + " " + body,
-                message="Government Warning statement matches the required text exactly." + note + " (" + type_size_details.verification_note + ")",
-                type_size_details=type_size_details,
+                warning_format=warning_format,
+                warning_text_diff=text_diff,
             )
 
-    status = "warning" if cosmetic_only else "fail"
+    issues: list[str] = []
+    if not header_caps_ok or (normalized_header and normalized_header != CANONICAL_WARNING_HEADER):
+        issues.append(
+            f"header must appear in capital letters exactly as '{CANONICAL_WARNING_HEADER}' "
+            f"(found '{header or ' '.join(tokenize_warning_words(observed)[:2])}') (27 CFR 16.21/16.22)"
+        )
+    if not text_diff.exact_match:
+        issues.append(
+            "warning text does not match the required 27 CFR 16.21 statement ("
+            + _describe_word_diff(text_diff)
+            + ")"
+        )
+    text_ok = not issues
+    cpi_over_limit = (
+        warning_format.estimated_characters_per_inch is not None
+        and warning_format.estimated_characters_per_inch > warning_format.max_characters_per_inch
+    )
+    advisory_only_format = any(
+        f.code == "header_bold" and f.status == "advisory"
+        for f in warning_format.findings
+    ) or cpi_over_limit
+
+    if text_ok:
+        if type_size_details is None:
+            message = (
+                "Government Warning statement matches the required text exactly. "
+                "(Note: Physical type size in mm per 27 CFR 16.22 is not verified from "
+                "photos and requires physical gauge measurement.)"
+            )
+            status = "warning" if advisory_only_format else "pass"
+        elif type_size_details.state == "fail":
+            message = (
+                "Government Warning statement text is valid, but type size is deficient: "
+                + type_size_details.verification_note
+            )
+            status = "fail"
+        elif type_size_details.state == "cannot_measure":
+            message = (
+                "Government Warning text matches required wording. Calibrated measurement "
+                "could not be completed: " + type_size_details.verification_note
+            )
+            status = "warning"
+        elif type_size_details.state == "pass":
+            message = (
+                "Government Warning statement matches the required text exactly and meets "
+                "statutory type-size requirements. (" + type_size_details.verification_note + ")"
+            )
+            status = "warning" if advisory_only_format else "pass"
+        else:
+            message = (
+                "Government Warning statement matches the required text exactly. ("
+                + type_size_details.verification_note + ")"
+            )
+            status = "warning" if advisory_only_format else "pass"
+
+        if advisory_only_format and status != "fail":
+            advisory_notes = [
+                f.message for f in warning_format.findings
+                if f.code in ("header_bold", "characters_per_inch") and f.status == "advisory"
+            ]
+            if advisory_notes:
+                message = message + " Format advisory: " + " ".join(advisory_notes)
+
+        return FieldResult(
+            field=field, label_name=label_name, status=status,
+            application_value=CANONICAL_WARNING_FULL,
+            label_value=label_value,
+            message=message,
+            type_size_details=type_size_details,
+            warning_text_diff=text_diff,
+            warning_format=warning_format,
+        )
+
     return FieldResult(
-        field=field, label_name=label_name, status=status,
-        application_value=CANONICAL_WARNING_HEADER + " " + CANONICAL_WARNING_BODY,
-        label_value=(header + " " + body).strip(),
+        field=field, label_name=label_name, status="fail",
+        application_value=CANONICAL_WARNING_FULL,
+        label_value=label_value,
         message="Government Warning issue(s): " + "; ".join(issues) + ".",
         type_size_details=type_size_details,
+        warning_text_diff=text_diff,
+        warning_format=warning_format,
     )
 
 def run_compliance_checks(
     application: ApplicationData,
     extracted: ExtractedLabelData,
     type_size_details: Optional[TypeSizeMeasurement] = None,
+    quality_cause: Optional[RetakeCause] = None,
 ) -> list[FieldResult]:
     """Compare a label's extracted fields against the COLA application data.
 
@@ -918,25 +1705,33 @@ def run_compliance_checks(
     the image quality is insufficient for reliable evaluation.
     """
     bev_type = application.beverage_type
-    assert_extraction_confidence(extracted, bev_type)
+    assert_extraction_confidence(extracted, bev_type, quality_cause=quality_cause)
+    skip = unreadable_field_names(
+        extracted, quality_cause=quality_cause, beverage_type=bev_type
+    )
 
-    results = [
-        _check_brand_name_match(application, extracted),
-        _check_text_field(
-            "class_type", "Class/Type", application.class_type, extracted.class_type
-        ),
-        _check_alcohol_content(application, extracted),
-        _check_text_field(
-            "net_contents",
-            "Net Contents",
-            application.net_contents,
-            extracted.net_contents,
-            normalizer=_normalize_net_contents,
-        ),
-        _check_government_warning(extracted, type_size_details=type_size_details),
-    ]
+    results = []
+    if "brand_name" not in skip:
+        results.append(_check_brand_name_match(application, extracted))
+    if "class_type" not in skip:
+        results.append(
+            _check_text_field(
+                "class_type", "Class/Type", application.class_type, extracted.class_type
+            )
+        )
+    if "alcohol_content" not in skip:
+        results.append(_check_alcohol_content(application, extracted))
+    if "net_contents" not in skip:
+        results.append(_check_net_contents_review(application, extracted))
+    if "government_warning" not in skip:
+        results.append(_check_government_warning(extracted, type_size_details=type_size_details))
+    if application.beverage_type == "wine" and "sulfite_declaration" not in skip:
+        sulfite_src = extracted
+        if "wine" not in (extracted.beverage_type_guess or "").lower():
+            sulfite_src = extracted.model_copy(update={"beverage_type_guess": "wine"})
+        results.append(_check_sulfite_declaration(sulfite_src))
 
-    if application.name_and_address:
+    if application.name_and_address and "name_and_address" not in skip:
         results.append(
             _check_text_field(
                 "name_and_address",
@@ -946,7 +1741,7 @@ def run_compliance_checks(
             )
         )
 
-    if application.country_of_origin:
+    if application.country_of_origin and "country_of_origin" not in skip:
         results.append(
             _check_text_field(
                 "country_of_origin",
@@ -984,6 +1779,32 @@ def _presence_check(
     )
 
 
+def _check_net_contents_review(
+    application: ApplicationData, extracted: ExtractedLabelData
+) -> FieldResult:
+    """Match net contents to the application, then apply standards of fill."""
+    match = _check_text_field(
+        "net_contents",
+        "Net Contents",
+        application.net_contents,
+        extracted.net_contents,
+        normalizer=_normalize_net_contents,
+    )
+    if not extracted.net_contents or not str(extracted.net_contents).strip():
+        return match
+    sof = _check_label_net_contents(extracted, application.beverage_type)
+    if sof.status == "fail":
+        return FieldResult(
+            field="net_contents",
+            label_name="Net Contents",
+            status="fail",
+            application_value=application.net_contents,
+            label_value=extracted.net_contents,
+            message=sof.message,
+        )
+    return match
+
+
 def _check_label_alcohol_content(
     extracted: ExtractedLabelData, beverage_type
 ) -> FieldResult:
@@ -1002,6 +1823,16 @@ def _check_label_alcohol_content(
     label_value = extracted.alcohol_content
 
     if label_value:
+        if _alcohol_is_proof_only(label_value):
+            return FieldResult(
+                field=field, label_name=label_name, status="fail",
+                application_value=requirement, label_value=label_value,
+                message=(
+                    "Alcohol content is stated in proof only. The alcohol content "
+                    "must be stated as a percentage of alcohol by volume "
+                    "(27 CFR 4.36 / 5.65 / 7.65)."
+                ),
+            )
         if _extract_percent(label_value) is None:
             return FieldResult(
                 field=field, label_name=label_name, status="warning",
@@ -1281,13 +2112,13 @@ def _check_allergen_statements(extracted: ExtractedLabelData) -> FieldResult:
             message="Allergen/additive declaration(s) found on label." + _FORMULA_DEPENDENT,
         )
     return FieldResult(
-        field=field, label_name=label_name, status="warning",
+        field=field, label_name=label_name, status="pass",
         application_value=None, label_value=None,
         message=(
-            "No allergen or additive declarations detected. Verify via "
-            "formula/ingredient records: FD&C Yellow No. 5, aspartame, "
-            "saccharin, and cochineal extract/carmine require mandatory label "
-            "disclosure when present (27 CFR 4.32(f), 5.63(c), 7.63(c))."
+            "No allergen or additive declarations detected. This is informational "
+            "only and is not a label defect: FD&C Yellow No. 5, aspartame, "
+            "saccharin, and cochineal extract/carmine require disclosure only "
+            "when present in the formula (27 CFR 4.32(f), 5.63(c), 7.63(c))."
             + _FORMULA_DEPENDENT
         ),
     )
@@ -1409,6 +2240,7 @@ def check_label_requirements(
     beverage_type=None,
     confirmed_beverage_type=None,
     type_size_details: Optional[TypeSizeMeasurement] = None,
+    quality_cause: Optional[RetakeCause] = None,
 ) -> list[FieldResult]:
     """Validate a label against TTB mandatory label requirements, independent
     of any COLA application data (Label-Only Check).
@@ -1450,32 +2282,51 @@ def check_label_requirements(
     if resolved_type in (None, "", "unknown") and confirmed_beverage_type is None:
         raise ValueError(UNCONFIRMED_BEVERAGE_TYPE)
 
-    # Confidence gate: reject low-quality images before running any checks.
-    assert_extraction_confidence(extracted, resolved_type)
+    # Confidence gate: reject wholly unreadable images before running checks.
+    # Per-field unreadability is skipped so it is never reported as absent.
+    assert_extraction_confidence(extracted, resolved_type, quality_cause=quality_cause)
+    skip = unreadable_field_names(
+        extracted, quality_cause=quality_cause, beverage_type=resolved_type
+    )
 
-    return [
-        _check_label_brand_name(extracted),
-        _presence_check(
-            "class_type",
-            "Class/Type Designation",
-            extracted.class_type,
-            "A class, type, or other required designation must be stated on the label (27 CFR 4.34 / 5.63(a)(2), 5.141 / 7.63(a)(2), 7.141).",
-        ),
-        _check_label_alcohol_content(extracted, resolved_type),
-        _check_label_net_contents(extracted, resolved_type),
-        _presence_check(
-            "name_and_address",
-            "Name and Address",
-            extracted.name_and_address,
-            "The name and address of the bottler, producer, packer, or importer is required (27 CFR 4.35 / 5.66-5.68 / 7.66-7.68).",
-        ),
-        _check_government_warning(extracted, type_size_details=type_size_details),
-        _check_label_country_of_origin(extracted),
-        _check_sulfite_declaration(extracted),
-        _check_allergen_statements(extracted),
-        _check_age_statement(extracted),
-        _check_commodity_statement(extracted),
-    ]
+    checks: list[FieldResult] = []
+    if "brand_name" not in skip:
+        checks.append(_check_label_brand_name(extracted))
+    if "class_type" not in skip:
+        checks.append(
+            _presence_check(
+                "class_type",
+                "Class/Type Designation",
+                extracted.class_type,
+                "A class, type, or other required designation must be stated on the label (27 CFR 4.34 / 5.63(a)(2), 5.141 / 7.63(a)(2), 7.141).",
+            )
+        )
+    if "alcohol_content" not in skip:
+        checks.append(_check_label_alcohol_content(extracted, resolved_type))
+    if "net_contents" not in skip:
+        checks.append(_check_label_net_contents(extracted, resolved_type))
+    if "name_and_address" not in skip:
+        checks.append(
+            _presence_check(
+                "name_and_address",
+                "Name and Address",
+                extracted.name_and_address,
+                "The name and address of the bottler, producer, packer, or importer is required (27 CFR 4.35 / 5.66-5.68 / 7.66-7.68).",
+            )
+        )
+    if "government_warning" not in skip:
+        checks.append(_check_government_warning(extracted, type_size_details=type_size_details))
+    if "country_of_origin" not in skip:
+        checks.append(_check_label_country_of_origin(extracted))
+    if "sulfite_declaration" not in skip:
+        checks.append(_check_sulfite_declaration(extracted))
+    if "allergen_statements" not in skip:
+        checks.append(_check_allergen_statements(extracted))
+    if "age_statement" not in skip:
+        checks.append(_check_age_statement(extracted))
+    if "commodity_statement" not in skip:
+        checks.append(_check_commodity_statement(extracted))
+    return checks
 
 
 # ---------------------------------------------------------------------------
@@ -1566,11 +2417,28 @@ def merge_extracted_label_data(extractions, photo_roles=None):
         merged[field] = best_value
 
     merged["government_warning_present"] = any(e.government_warning_present for e in extractions)
+    bold_vals = [
+        getattr(e, "government_warning_header_appears_bold", None)
+        for e in extractions
+        if e.government_warning_present
+        or (e.government_warning_header or "").strip()
+        or (e.government_warning_body or "").strip()
+    ]
+    if any(v is True for v in bold_vals):
+        merged["government_warning_header_appears_bold"] = True
+    elif any(v is False for v in bold_vals):
+        merged["government_warning_header_appears_bold"] = False
+    else:
+        merged["government_warning_header_appears_bold"] = None
     merged["is_alcohol_beverage_label"] = any(e.is_alcohol_beverage_label for e in extractions)
     confs = [e.extraction_confidence for e in extractions if e.extraction_confidence is not None]
     merged["extraction_confidence"] = max(confs) if confs else None
     merged["per_field_confidence"] = merged_pfc
-    merged["field_locations"] = [loc for e in extractions for loc in e.field_locations]
+    remapped_locations = []
+    for idx, ext in enumerate(extractions):
+        for loc in ext.field_locations:
+            remapped_locations.append(loc.model_copy(update={"image_index": idx}))
+    merged["field_locations"] = remapped_locations
     notes_parts = [e.notes for e in extractions if e.notes]
     merged["notes"] = "\n".join(notes_parts) if notes_parts else None
 

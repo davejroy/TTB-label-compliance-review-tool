@@ -1,0 +1,1229 @@
+[
+ {
+  "id": "G1_W1_good",
+  "file": "G1_W1_good.png",
+  "group": "good",
+  "product": "W1",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "clean compliant label",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G1_W2_good",
+  "file": "G1_W2_good.png",
+  "group": "good",
+  "product": "W2",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "clean compliant label",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Chateau Belvoir",
+   "class_type": "Bordeaux Red Wine",
+   "alcohol_content": "12.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Atlantic Wine Imports, New York, NY",
+   "country_of_origin": "Product of France"
+  }
+ },
+ {
+  "id": "G1_S1_good",
+  "file": "G1_S1_good.png",
+  "group": "good",
+  "product": "S1",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "clean compliant label",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G1_S2_good",
+  "file": "G1_S2_good.png",
+  "group": "good",
+  "product": "S2",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "clean compliant label",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Sierra Azul",
+   "class_type": "Tequila Blanco",
+   "alcohol_content": "40% Alc./Vol. (80 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Agave Trade Partners, San Antonio, TX",
+   "country_of_origin": "Product of Mexico"
+  }
+ },
+ {
+  "id": "G1_B1_good",
+  "file": "G1_B1_good.png",
+  "group": "good",
+  "product": "B1",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "clean compliant label",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Hopline",
+   "class_type": "India Pale Ale",
+   "alcohol_content": "6.8% Alc./Vol.",
+   "net_contents": "12 FL. OZ.",
+   "name_and_address": "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G1_B2_good",
+  "file": "G1_B2_good.png",
+  "group": "good",
+  "product": "B2",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "clean compliant label",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Nordhavn",
+   "class_type": "Lager Beer",
+   "alcohol_content": "5.0% Alc./Vol.",
+   "net_contents": "11.2 FL. OZ.",
+   "name_and_address": "Imported by Northern Brew Imports, Chicago, IL",
+   "country_of_origin": "Product of Denmark"
+  }
+ },
+ {
+  "id": "G2_gblur1_S1",
+  "file": "G2_gblur1_S1.jpg",
+  "group": "degraded",
+  "product": "S1",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "gaussian blur s=1.5",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "degradation": "blur",
+  "level": "low"
+ },
+ {
+  "id": "G2_gblur2_S1",
+  "file": "G2_gblur2_S1.jpg",
+  "group": "degraded",
+  "product": "S1",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "gaussian blur s=3",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "degradation": "blur",
+  "level": "mid"
+ },
+ {
+  "id": "G2_gblur3_W1",
+  "file": "G2_gblur3_W1.jpg",
+  "group": "degraded",
+  "product": "W1",
+  "expected": "retake_ok",
+  "defects": [],
+  "mode": "review",
+  "note": "gaussian blur s=5",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  },
+  "degradation": "blur",
+  "level": "high"
+ },
+ {
+  "id": "G2_gblurX_B1",
+  "file": "G2_gblurX_B1.jpg",
+  "group": "degraded",
+  "product": "B1",
+  "expected": "retake",
+  "defects": [],
+  "mode": "review",
+  "note": "gaussian blur s=10 (extreme)",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Hopline",
+   "class_type": "India Pale Ale",
+   "alcohol_content": "6.8% Alc./Vol.",
+   "net_contents": "12 FL. OZ.",
+   "name_and_address": "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+   "country_of_origin": null
+  },
+  "degradation": "blur",
+  "level": "extreme"
+ },
+ {
+  "id": "G2_mblur1_S2",
+  "file": "G2_mblur1_S2.jpg",
+  "group": "degraded",
+  "product": "S2",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "motion blur 9px",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Sierra Azul",
+   "class_type": "Tequila Blanco",
+   "alcohol_content": "40% Alc./Vol. (80 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Agave Trade Partners, San Antonio, TX",
+   "country_of_origin": "Product of Mexico"
+  },
+  "degradation": "motion_blur",
+  "level": "low"
+ },
+ {
+  "id": "G2_mblur2_W2",
+  "file": "G2_mblur2_W2.jpg",
+  "group": "degraded",
+  "product": "W2",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "motion blur 21px",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Chateau Belvoir",
+   "class_type": "Bordeaux Red Wine",
+   "alcohol_content": "12.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Atlantic Wine Imports, New York, NY",
+   "country_of_origin": "Product of France"
+  },
+  "degradation": "motion_blur",
+  "level": "mid"
+ },
+ {
+  "id": "G2_persp1_S1",
+  "file": "G2_persp1_S1.jpg",
+  "group": "degraded",
+  "product": "S1",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "keystone mild",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "degradation": "perspective",
+  "level": "low"
+ },
+ {
+  "id": "G2_persp2_W1",
+  "file": "G2_persp2_W1.jpg",
+  "group": "degraded",
+  "product": "W1",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "keystone strong",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  },
+  "degradation": "perspective",
+  "level": "high"
+ },
+ {
+  "id": "G2_rot1_B1",
+  "file": "G2_rot1_B1.jpg",
+  "group": "degraded",
+  "product": "B1",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "rotated 8 deg",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Hopline",
+   "class_type": "India Pale Ale",
+   "alcohol_content": "6.8% Alc./Vol.",
+   "net_contents": "12 FL. OZ.",
+   "name_and_address": "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+   "country_of_origin": null
+  },
+  "degradation": "rotation",
+  "level": "low"
+ },
+ {
+  "id": "G2_rot2_S2",
+  "file": "G2_rot2_S2.jpg",
+  "group": "degraded",
+  "product": "S2",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "rotated 90 deg",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Sierra Azul",
+   "class_type": "Tequila Blanco",
+   "alcohol_content": "40% Alc./Vol. (80 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Agave Trade Partners, San Antonio, TX",
+   "country_of_origin": "Product of Mexico"
+  },
+  "degradation": "rotation",
+  "level": "high"
+ },
+ {
+  "id": "G2_rot3_W2",
+  "file": "G2_rot3_W2.jpg",
+  "group": "degraded",
+  "product": "W2",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "upside down",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Chateau Belvoir",
+   "class_type": "Bordeaux Red Wine",
+   "alcohol_content": "12.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Atlantic Wine Imports, New York, NY",
+   "country_of_origin": "Product of France"
+  },
+  "degradation": "rotation",
+  "level": "high"
+ },
+ {
+  "id": "G2_curve1_S1",
+  "file": "G2_curve1_S1.jpg",
+  "group": "degraded",
+  "product": "S1",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "bottle wrap 100 deg",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "degradation": "curvature",
+  "level": "low"
+ },
+ {
+  "id": "G2_curve2_W1",
+  "file": "G2_curve2_W1.jpg",
+  "group": "degraded",
+  "product": "W1",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "bottle wrap 150 deg",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  },
+  "degradation": "curvature",
+  "level": "mid"
+ },
+ {
+  "id": "G2_curve3_B2",
+  "file": "G2_curve3_B2.jpg",
+  "group": "degraded",
+  "product": "B2",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "bottle wrap 175 deg (edges hidden)",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Nordhavn",
+   "class_type": "Lager Beer",
+   "alcohol_content": "5.0% Alc./Vol.",
+   "net_contents": "11.2 FL. OZ.",
+   "name_and_address": "Imported by Northern Brew Imports, Chicago, IL",
+   "country_of_origin": "Product of Denmark"
+  },
+  "degradation": "curvature",
+  "level": "high"
+ },
+ {
+  "id": "G2_dark1_S1",
+  "file": "G2_dark1_S1.jpg",
+  "group": "degraded",
+  "product": "S1",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "dim",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "degradation": "low_light",
+  "level": "mid"
+ },
+ {
+  "id": "G2_darkX_W2",
+  "file": "G2_darkX_W2.jpg",
+  "group": "degraded",
+  "product": "W2",
+  "expected": "retake",
+  "defects": [],
+  "mode": "review",
+  "note": "near black (extreme)",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Chateau Belvoir",
+   "class_type": "Bordeaux Red Wine",
+   "alcohol_content": "12.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Atlantic Wine Imports, New York, NY",
+   "country_of_origin": "Product of France"
+  },
+  "degradation": "low_light",
+  "level": "extreme"
+ },
+ {
+  "id": "G2_shade1_B1",
+  "file": "G2_shade1_B1.jpg",
+  "group": "degraded",
+  "product": "B1",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "gradient shadow",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Hopline",
+   "class_type": "India Pale Ale",
+   "alcohol_content": "6.8% Alc./Vol.",
+   "net_contents": "12 FL. OZ.",
+   "name_and_address": "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+   "country_of_origin": null
+  },
+  "degradation": "uneven_shading",
+  "level": "low"
+ },
+ {
+  "id": "G2_glare1_S2",
+  "file": "G2_glare1_S2.jpg",
+  "group": "degraded",
+  "product": "S2",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "hotspot over warning",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Sierra Azul",
+   "class_type": "Tequila Blanco",
+   "alcohol_content": "40% Alc./Vol. (80 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Agave Trade Partners, San Antonio, TX",
+   "country_of_origin": "Product of Mexico"
+  },
+  "degradation": "glare",
+  "level": "mid"
+ },
+ {
+  "id": "G2_glare2_W1",
+  "file": "G2_glare2_W1.jpg",
+  "group": "degraded",
+  "product": "W1",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "hotspot over brand",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  },
+  "degradation": "glare",
+  "level": "mid"
+ },
+ {
+  "id": "G2_noise1_B2",
+  "file": "G2_noise1_B2.jpg",
+  "group": "degraded",
+  "product": "B2",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "gaussian noise s=25",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Nordhavn",
+   "class_type": "Lager Beer",
+   "alcohol_content": "5.0% Alc./Vol.",
+   "net_contents": "11.2 FL. OZ.",
+   "name_and_address": "Imported by Northern Brew Imports, Chicago, IL",
+   "country_of_origin": "Product of Denmark"
+  },
+  "degradation": "noise",
+  "level": "low"
+ },
+ {
+  "id": "G2_noise2_S1",
+  "file": "G2_noise2_S1.jpg",
+  "group": "degraded",
+  "product": "S1",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "gaussian noise s=60",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "degradation": "noise",
+  "level": "high"
+ },
+ {
+  "id": "G2_lowres1_W2",
+  "file": "G2_lowres1_W2.jpg",
+  "group": "degraded",
+  "product": "W2",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "420 px wide",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Chateau Belvoir",
+   "class_type": "Bordeaux Red Wine",
+   "alcohol_content": "12.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Atlantic Wine Imports, New York, NY",
+   "country_of_origin": "Product of France"
+  },
+  "degradation": "low_resolution",
+  "level": "mid"
+ },
+ {
+  "id": "G2_lowres2_S2",
+  "file": "G2_lowres2_S2.jpg",
+  "group": "degraded",
+  "product": "S2",
+  "expected": "retake_ok",
+  "defects": [],
+  "mode": "review",
+  "note": "260 px wide",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Sierra Azul",
+   "class_type": "Tequila Blanco",
+   "alcohol_content": "40% Alc./Vol. (80 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Agave Trade Partners, San Antonio, TX",
+   "country_of_origin": "Product of Mexico"
+  },
+  "degradation": "low_resolution",
+  "level": "high"
+ },
+ {
+  "id": "G2_combo1_S1",
+  "file": "G2_combo1_S1.jpg",
+  "group": "degraded",
+  "product": "S1",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "curve+blur+dim+noise",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "degradation": "combined",
+  "level": "mid"
+ },
+ {
+  "id": "G2_jpeg_q5_B1",
+  "file": "G2_jpeg_q5_B1.jpg",
+  "group": "degraded",
+  "product": "B1",
+  "expected": "pass_or_retake",
+  "defects": [],
+  "mode": "review",
+  "note": "JPEG quality 5",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Hopline",
+   "class_type": "India Pale Ale",
+   "alcohol_content": "6.8% Alc./Vol.",
+   "net_contents": "12 FL. OZ.",
+   "name_and_address": "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+   "country_of_origin": null
+  },
+  "degradation": "jpeg",
+  "level": "high"
+ },
+ {
+  "id": "G2_jpeg_q15_W1",
+  "file": "G2_jpeg_q15_W1.jpg",
+  "group": "degraded",
+  "product": "W1",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "JPEG quality 15",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  },
+  "degradation": "jpeg",
+  "level": "mid"
+ },
+ {
+  "id": "G2_tiny_S1",
+  "file": "G2_tiny_S1.png",
+  "group": "degraded",
+  "product": "S1",
+  "expected": "retake",
+  "defects": [],
+  "mode": "review",
+  "note": "80 px wide (below 100x100 area floor)",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "degradation": "low_resolution",
+  "level": "extreme"
+ },
+ {
+  "id": "G3_D01_warn_altered",
+  "file": "G3_D01_warn_altered.png",
+  "group": "defect",
+  "product": "S1",
+  "expected": "fail",
+  "defects": [
+   "government_warning"
+  ],
+  "mode": "review",
+  "note": "warning wording altered ('may impair')",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D02_warn_titlecase",
+  "file": "G3_D02_warn_titlecase.png",
+  "group": "defect",
+  "product": "W1",
+  "expected": "fail",
+  "defects": [
+   "government_warning"
+  ],
+  "mode": "review",
+  "note": "header in title case",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D03_warn_notbold",
+  "file": "G3_D03_warn_notbold.png",
+  "group": "defect",
+  "product": "B1",
+  "expected": "fail",
+  "defects": [
+   "government_warning"
+  ],
+  "mode": "review",
+  "note": "header caps but not bold",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Hopline",
+   "class_type": "India Pale Ale",
+   "alcohol_content": "6.8% Alc./Vol.",
+   "net_contents": "12 FL. OZ.",
+   "name_and_address": "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D04_warn_missing",
+  "file": "G3_D04_warn_missing.png",
+  "group": "defect",
+  "product": "S2",
+  "expected": "fail",
+  "defects": [
+   "government_warning"
+  ],
+  "mode": "review",
+  "note": "no warning at all",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Sierra Azul",
+   "class_type": "Tequila Blanco",
+   "alcohol_content": "40% Alc./Vol. (80 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Agave Trade Partners, San Antonio, TX",
+   "country_of_origin": "Product of Mexico"
+  }
+ },
+ {
+  "id": "G3_D05_abv_missing",
+  "file": "G3_D05_abv_missing.png",
+  "group": "defect",
+  "product": "S1",
+  "expected": "fail",
+  "defects": [
+   "alcohol_content"
+  ],
+  "mode": "review",
+  "note": "ABV statement absent",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D06_abv_proof_only",
+  "file": "G3_D06_abv_proof_only.png",
+  "group": "defect",
+  "product": "S1",
+  "expected": "fail",
+  "defects": [
+   "alcohol_content"
+  ],
+  "mode": "review",
+  "note": "spirits ABV given only as proof (no % alc/vol)",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "90 Proof",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D07_abv_mismatch",
+  "file": "G3_D07_abv_mismatch.png",
+  "group": "defect",
+  "product": "S1",
+  "expected": "fail",
+  "defects": [
+   "alcohol_content"
+  ],
+  "mode": "review",
+  "note": "label 40% vs application 45%",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D08_net_missing",
+  "file": "G3_D08_net_missing.png",
+  "group": "defect",
+  "product": "W1",
+  "expected": "fail",
+  "defects": [
+   "net_contents"
+  ],
+  "mode": "review",
+  "note": "net contents absent",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D09_net_nonstandard",
+  "file": "G3_D09_net_nonstandard.png",
+  "group": "defect",
+  "product": "S2",
+  "expected": "fail",
+  "defects": [
+   "net_contents"
+  ],
+  "mode": "review",
+  "note": "650 mL is not an authorized spirits fill (app also says 650 mL)",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Sierra Azul",
+   "class_type": "Tequila Blanco",
+   "alcohol_content": "40% Alc./Vol. (80 Proof)",
+   "net_contents": "650 mL",
+   "name_and_address": "Imported by Agave Trade Partners, San Antonio, TX",
+   "country_of_origin": "Product of Mexico"
+  }
+ },
+ {
+  "id": "G3_D10_addr_missing",
+  "file": "G3_D10_addr_missing.png",
+  "group": "defect",
+  "product": "S1",
+  "expected": "fail",
+  "defects": [
+   "name_and_address"
+  ],
+  "mode": "review",
+  "note": "bottler name/address absent",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D11_class_missing",
+  "file": "G3_D11_class_missing.png",
+  "group": "defect",
+  "product": "W2",
+  "expected": "fail",
+  "defects": [
+   "class_type"
+  ],
+  "mode": "review",
+  "note": "class/type absent",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Chateau Belvoir",
+   "class_type": "Bordeaux Red Wine",
+   "alcohol_content": "12.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Atlantic Wine Imports, New York, NY",
+   "country_of_origin": "Product of France"
+  }
+ },
+ {
+  "id": "G3_D12_warn_tiny_nomarker",
+  "file": "G3_D12_warn_tiny_nomarker.png",
+  "group": "defect",
+  "product": "W1",
+  "expected": "fail",
+  "defects": [
+   "government_warning_type_size"
+  ],
+  "mode": "review",
+  "note": "warning cap height 0.9 mm on 750 mL (needs 2 mm), no scale marker",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D13_sulfite_missing",
+  "file": "G3_D13_sulfite_missing.png",
+  "group": "defect",
+  "product": "W1",
+  "expected": "fail",
+  "defects": [
+   "sulfite_declaration"
+  ],
+  "mode": "review",
+  "note": "wine without sulfite statement",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Crescent Ridge",
+   "class_type": "Cabernet Sauvignon",
+   "alcohol_content": "13.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Produced and Bottled by Crescent Ridge Winery, Paso Robles, CA",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D14_beer_abv_proof",
+  "file": "G3_D14_beer_abv_proof.png",
+  "group": "defect",
+  "product": "B1",
+  "expected": "fail",
+  "defects": [
+   "alcohol_content"
+  ],
+  "mode": "review",
+  "note": "malt beverage alcohol stated in proof only",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Hopline",
+   "class_type": "India Pale Ale",
+   "alcohol_content": "13.6 Proof",
+   "net_contents": "12 FL. OZ.",
+   "name_and_address": "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D15_origin_missing",
+  "file": "G3_D15_origin_missing.png",
+  "group": "defect",
+  "product": "W2",
+  "expected": "fail",
+  "defects": [
+   "country_of_origin"
+  ],
+  "mode": "review",
+  "note": "import without country of origin",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Chateau Belvoir",
+   "class_type": "Bordeaux Red Wine",
+   "alcohol_content": "12.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Atlantic Wine Imports, New York, NY",
+   "country_of_origin": "Product of France"
+  }
+ },
+ {
+  "id": "G3_D16_brand_mismatch",
+  "file": "G3_D16_brand_mismatch.png",
+  "group": "defect",
+  "product": "B1",
+  "expected": "fail",
+  "defects": [
+   "brand_name"
+  ],
+  "mode": "review",
+  "note": "label brand differs from application",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Hopline",
+   "class_type": "India Pale Ale",
+   "alcohol_content": "6.8% Alc./Vol.",
+   "net_contents": "12 FL. OZ.",
+   "name_and_address": "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "G3_D17_warn_truncated",
+  "file": "G3_D17_warn_truncated.png",
+  "group": "defect",
+  "product": "B2",
+  "expected": "fail",
+  "defects": [
+   "government_warning"
+  ],
+  "mode": "review",
+  "note": "warning clause (2) omitted",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Nordhavn",
+   "class_type": "Lager Beer",
+   "alcohol_content": "5.0% Alc./Vol.",
+   "net_contents": "11.2 FL. OZ.",
+   "name_and_address": "Imported by Northern Brew Imports, Chicago, IL",
+   "country_of_origin": "Product of Denmark"
+  }
+ },
+ {
+  "id": "G3_D18_net_mismatch",
+  "file": "G3_D18_net_mismatch.png",
+  "group": "defect",
+  "product": "B2",
+  "expected": "fail",
+  "defects": [
+   "net_contents"
+  ],
+  "mode": "review",
+  "note": "label 16 fl oz vs application 11.2 fl oz",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Nordhavn",
+   "class_type": "Lager Beer",
+   "alcohol_content": "5.0% Alc./Vol.",
+   "net_contents": "11.2 FL. OZ.",
+   "name_and_address": "Imported by Northern Brew Imports, Chicago, IL",
+   "country_of_origin": "Product of Denmark"
+  }
+ },
+ {
+  "id": "G3_C1_titlecase_noabv",
+  "file": "G3_C1_titlecase_noabv.png",
+  "group": "defect",
+  "product": "W2",
+  "expected": "fail",
+  "defects": [
+   "government_warning",
+   "alcohol_content"
+  ],
+  "mode": "review",
+  "note": "combo: title-case header + no ABV",
+  "application": {
+   "beverage_type": "wine",
+   "brand_name": "Chateau Belvoir",
+   "class_type": "Bordeaux Red Wine",
+   "alcohol_content": "12.5% Alc./Vol.",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Atlantic Wine Imports, New York, NY",
+   "country_of_origin": "Product of France"
+  }
+ },
+ {
+  "id": "G3_C2_net_addr_warn",
+  "file": "G3_C2_net_addr_warn.png",
+  "group": "defect",
+  "product": "S2",
+  "expected": "fail",
+  "defects": [
+   "net_contents",
+   "name_and_address",
+   "government_warning"
+  ],
+  "mode": "review",
+  "note": "combo: no net, no address, altered warning",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Sierra Azul",
+   "class_type": "Tequila Blanco",
+   "alcohol_content": "40% Alc./Vol. (80 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Imported by Agave Trade Partners, San Antonio, TX",
+   "country_of_origin": "Product of Mexico"
+  }
+ },
+ {
+  "id": "G3_C3_bare_beer",
+  "file": "G3_C3_bare_beer.png",
+  "group": "defect",
+  "product": "B1",
+  "expected": "fail",
+  "defects": [
+   "government_warning",
+   "alcohol_content",
+   "class_type"
+  ],
+  "mode": "review",
+  "note": "combo: only brand/net/address",
+  "application": {
+   "beverage_type": "beer",
+   "brand_name": "Hopline",
+   "class_type": "India Pale Ale",
+   "alcohol_content": "6.8% Alc./Vol.",
+   "net_contents": "12 FL. OZ.",
+   "name_and_address": "Brewed and Canned by Hopline Brewing Co., Portland, OR",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "TS1_marker_ok_S1",
+  "file": "TS1_marker_ok_S1.png",
+  "group": "typesize",
+  "product": "S1",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "ArUco 50mm marker, warning caps 2.6 mm, 750 mL (min 2.0)",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "ts_expected": "pass"
+ },
+ {
+  "id": "TS2_marker_small_S1",
+  "file": "TS2_marker_small_S1.png",
+  "group": "typesize",
+  "product": "S1",
+  "expected": "fail",
+  "defects": [
+   "government_warning_type_size"
+  ],
+  "mode": "review",
+  "note": "ArUco marker, warning caps 1.2 mm, 750 mL (min 2.0)",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  },
+  "ts_expected": "fail"
+ },
+ {
+  "id": "TS3_marker_minis_S2",
+  "file": "TS3_marker_minis_S2.png",
+  "group": "typesize",
+  "product": "S2",
+  "expected": "pass",
+  "defects": [],
+  "mode": "review",
+  "note": "ArUco marker, caps 1.3 mm, 50 mL (min 1.0)",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Sierra Azul",
+   "class_type": "Tequila Blanco",
+   "alcohol_content": "40% Alc./Vol. (80 Proof)",
+   "net_contents": "50 mL",
+   "name_and_address": "Imported by Agave Trade Partners, San Antonio, TX",
+   "country_of_origin": "Product of Mexico"
+  },
+  "ts_expected": "pass"
+ },
+ {
+  "id": "E1_nonlabel",
+  "file": "E1_nonlabel.png",
+  "group": "edge",
+  "product": "S1",
+  "expected": "reject",
+  "defects": [],
+  "mode": "review",
+  "note": "landscape photo, not a label",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  }
+ },
+ {
+  "id": "E2_blank",
+  "file": "E2_blank.png",
+  "group": "edge",
+  "product": "S1",
+  "expected": "reject",
+  "defects": [],
+  "mode": "review",
+  "note": "blank white image",
+  "application": {
+   "beverage_type": "distilled_spirits",
+   "brand_name": "Iron Hollow",
+   "class_type": "Kentucky Straight Bourbon Whiskey",
+   "alcohol_content": "45% Alc./Vol. (90 Proof)",
+   "net_contents": "750 mL",
+   "name_and_address": "Distilled and Bottled by Iron Hollow Distilling Co., Bardstown, KY",
+   "country_of_origin": null
+  }
+ }
+]

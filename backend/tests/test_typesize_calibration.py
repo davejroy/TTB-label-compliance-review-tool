@@ -35,6 +35,7 @@ from app.cv_typesize import (
     detect_aruco_marker,
     detect_id1_marker_contour,
     evaluate_type_size_from_image_bytes,
+    get_max_characters_per_inch,
     get_required_min_height_mm,
     measure_capital_letter_height_px,
 )
@@ -58,12 +59,14 @@ def _create_synthetic_label_image(
 ) -> bytes:
     """Helper to synthesize a photorealistic test label with optional ID-1 card / ArUco marker."""
     px_per_mm = 10.0  # 10 px/mm scale
-    w, h = 1200, 900
+    # Canvas is large enough that a true ID-1 card stays under 30% of the
+    # frame (the production detector rejects label-sized "cards").
+    w, h = 1800, 1400
     img = Image.new("RGB", (w, h), color=(240, 240, 240))
     draw = ImageDraw.Draw(img)
 
     if include_card:
-        # Standard ID-1 card: 85.60 mm x 53.98 mm -> 856 x 540 px
+        # Standard ID-1 card: 85.60 mm x 53.98 mm -> 856 x 540 px (~18% of frame)
         card_w = int(85.60 * px_per_mm)
         card_h = int(53.98 * px_per_mm)
         card_x, card_y = 50, 100
@@ -86,9 +89,9 @@ def _create_synthetic_label_image(
             marker_pil = Image.fromarray(marker_img).convert("RGB")
             img.paste(marker_pil, (50, 100))
 
-    # Government Warning text panel
-    gw_x, gw_y = 50, 680
-    gw_w, gw_h = int(85.60 * px_per_mm), 180
+    # Government Warning text panel (below the card, not inside it)
+    gw_x, gw_y = 50, 1100
+    gw_w, gw_h = int(85.60 * px_per_mm), 200
     draw.rectangle([gw_x, gw_y, gw_x + gw_w, gw_y + gw_h], fill=(255, 255, 255), outline=(0, 0, 0), width=2)
 
     try:
@@ -141,6 +144,13 @@ class TestTypeSizeThresholds:
         assert get_required_min_height_mm(None) == 2.0
         assert get_required_min_height_mm("") == 2.0
 
+    def test_characters_per_inch_caps_match_16_22(self) -> None:
+        assert get_max_characters_per_inch("50 mL") == 40
+        assert get_max_characters_per_inch("237 mL") == 40
+        assert get_max_characters_per_inch("750 mL") == 25
+        assert get_max_characters_per_inch("3 L") == 25
+        assert get_max_characters_per_inch("3.75 L") == 12
+
 
 class TestOptionAScaleMarkerDetection:
     """Verify Option A computer vision detection and evaluation pipeline."""
@@ -151,7 +161,7 @@ class TestOptionAScaleMarkerDetection:
         res = evaluate_type_size_from_image_bytes(
             img_bytes,
             net_contents="750 mL",
-            gw_bbox=(50 / 1200, 680 / 900, 856 / 1200, 180 / 900),
+            gw_bbox=(50 / 1800, 1100 / 1400, 856 / 1800, 200 / 1400),
         )
         assert res.method == CalibrationMethod.SCALE_MARKER_CARD_ID1
         assert res.state == "pass"
@@ -165,7 +175,7 @@ class TestOptionAScaleMarkerDetection:
         res = evaluate_type_size_from_image_bytes(
             img_bytes,
             net_contents="750 mL",
-            gw_bbox=(50 / 1200, 680 / 900, 856 / 1200, 180 / 900),
+            gw_bbox=(50 / 1800, 1100 / 1400, 856 / 1800, 200 / 1400),
         )
         assert res.method == CalibrationMethod.SCALE_MARKER_CARD_ID1
         assert res.state == "fail"
@@ -179,7 +189,7 @@ class TestOptionAScaleMarkerDetection:
         res = evaluate_type_size_from_image_bytes(
             img_bytes,
             net_contents="187 mL",
-            gw_bbox=(50 / 1200, 680 / 900, 856 / 1200, 180 / 900),
+            gw_bbox=(50 / 1800, 1100 / 1400, 856 / 1800, 200 / 1400),
         )
         if res.method == CalibrationMethod.SCALE_MARKER_ARUCO:
             assert res.required_min_height_mm == 1.0

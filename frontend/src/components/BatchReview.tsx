@@ -1,10 +1,11 @@
 import { useRef, useState } from "react";
 import { reviewLabelsBatchStream } from "../api";
-import { downloadCsv } from "../csv";
-import { EMPTY_APPLICATION, type ApplicationData, type ReviewResult } from "../types";
+import { downloadCsv, reviewResultCsvRows } from "../csv";
+import { isErrorResult, isRetakeResult } from "../errorContract";
+import { EMPTY_APPLICATION, type ApplicationData, type RetakeArea, type ReviewResult } from "../types";
 import ApplicationForm from "./ApplicationForm";
 import ColaImportModal from "./ColaImportModal";
-import ImageDropzone from "./ImageDropzone";
+import ImageDropzone, { type ImageDropzoneHandle } from "./ImageDropzone";
 import ResultsPanel from "./ResultsPanel";
 import StatusBadge from "./StatusBadge";
 
@@ -26,6 +27,7 @@ function newItem(): BatchItem {
 type LabelStatus = "pending" | "processing" | "done" | "error";
 
 interface LabelState {
+  itemId: string;
   status: LabelStatus;
   result?: ReviewResult;
 }
@@ -48,6 +50,7 @@ export default function BatchReview() {
   const stepTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   // Ref for auto-scroll
   const resultsRef = useRef<HTMLDivElement>(null);
+  const dropzoneRefs = useRef<Record<string, ImageDropzoneHandle | null>>({});
 
   function clearTimers() {
     stepTimers.current.forEach(clearTimeout);
@@ -130,22 +133,7 @@ export default function BatchReview() {
       ["Files", "Overall Status", "Field", "Field Status", "Application Value", "Label Value", "Message"],
     ];
     completedResults.forEach((result) => {
-      const files = result.filenames.join(", ");
-      if (result.error) {
-        rows.push([files, "fail", "", "", "", "", result.error]);
-        return;
-      }
-      result.fields.forEach((field) => {
-        rows.push([
-          files,
-          result.overall_status,
-          field.label_name,
-          field.status,
-          field.application_value ?? "",
-          field.label_value ?? "",
-          field.message,
-        ]);
-      });
+      rows.push(...reviewResultCsvRows(result));
     });
     downloadCsv("batch-review-results.csv", rows);
   }
@@ -159,8 +147,9 @@ export default function BatchReview() {
     setExpanded(null);
     startProgressTimers();
 
-    // Initialise all labels as "pending"
-    const initial: LabelState[] = items.map(() => ({ status: "pending" }));
+    // Initialise all labels as "pending", keyed by the submitted item id so
+    // later add/remove of form rows cannot retarget retakes by index.
+    const initial: LabelState[] = items.map((item) => ({ itemId: item.id, status: "pending" }));
     setLabelStates(initial);
 
     // Scroll to results panel after a brief delay
@@ -175,8 +164,11 @@ export default function BatchReview() {
           setLabelStates((prev) => {
             if (!prev) return prev;
             const next = [...prev];
+            const existing = next[index];
+            if (!existing) return prev;
             next[index] = {
-              status: result.error ? "error" : "done",
+              ...existing,
+              status: isErrorResult(result) ? "error" : "done",
               result,
             };
             return next;
@@ -255,6 +247,9 @@ export default function BatchReview() {
                 idPrefix={`batch-${item.id}`}
               />
               <ImageDropzone
+                ref={(handle) => {
+                  dropzoneRefs.current[item.id] = handle;
+                }}
                 files={item.files}
                 onChange={(files) => updateItem(item.id, { files })}
                 idPrefix={`batch-${item.id}`}
@@ -332,11 +327,12 @@ export default function BatchReview() {
               {labelStates.map((state, index) => {
                 const result = state.result;
                 const isPending = state.status === "pending";
+                const resultItem = items.find((item) => item.id === state.itemId);
 
                 // Pending label — show a spinner row
                 if (isPending || !result) {
                   return (
-                    <div key={index} className="p-4 flex items-center gap-3 text-slate-400">
+                    <div key={state.itemId} className="p-4 flex items-center gap-3 text-slate-400">
                       {isPending ? (
                         <>
                           <svg className="animate-spin h-4 w-4 text-[#15396a]" viewBox="0 0 24 24" fill="none">
@@ -353,7 +349,9 @@ export default function BatchReview() {
                 }
 
                 const issues = result.fields?.filter((f) => f.status !== "pass") ?? [];
-                const issueText = result.error ? (
+                const issueText = isRetakeResult(result) ? (
+                  <span className="text-amber-800">{result.error || "Retake required"}</span>
+                ) : isErrorResult(result) ? (
                   <span className="text-red-600">{result.error}</span>
                 ) : issues.length === 0 ? (
                   "No issues found"
@@ -362,7 +360,7 @@ export default function BatchReview() {
                 );
 
                 return (
-                  <div key={index}>
+                  <div key={state.itemId}>
                     {/* Mobile card */}
                     <div className="sm:hidden p-4 space-y-2">
                       <p className="font-medium text-slate-800 text-sm break-all">
@@ -377,15 +375,13 @@ export default function BatchReview() {
                         )}
                       </div>
                       <p className="text-sm text-slate-600">{issueText}</p>
-                      {!result.error && (
-                        <button
-                          type="button"
-                          className="text-sm font-semibold text-[#15396a] underline"
-                          onClick={() => setExpanded(expanded === index ? null : index)}
-                        >
-                          {expanded === index ? "Hide details" : "View details"}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="text-sm font-semibold text-[#15396a] underline"
+                        onClick={() => setExpanded(expanded === index ? null : index)}
+                      >
+                        {expanded === index ? "Hide details" : "View details"}
+                      </button>
                     </div>
 
                     {/* Desktop row */}
@@ -405,21 +401,25 @@ export default function BatchReview() {
                         )}
                       </div>
                       <div className="px-4 py-3">
-                        {!result.error && (
-                          <button
-                            type="button"
-                            className="text-sm font-semibold text-[#15396a] underline"
-                            onClick={() => setExpanded(expanded === index ? null : index)}
-                          >
-                            {expanded === index ? "Hide" : "Details"}
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="text-sm font-semibold text-[#15396a] underline"
+                          onClick={() => setExpanded(expanded === index ? null : index)}
+                        >
+                          {expanded === index ? "Hide" : "Details"}
+                        </button>
                       </div>
                     </div>
 
-                    {expanded === index && !result.error && (
+                    {expanded === index && (
                       <div className="px-4 pb-4">
-                        <ResultsPanel result={result} files={items[index]?.files ?? []} />
+                        <ResultsPanel
+                          result={result}
+                          files={resultItem?.files ?? []}
+                          onRetake={(area: RetakeArea) => {
+                            if (state.itemId) dropzoneRefs.current[state.itemId]?.openCapture(area);
+                          }}
+                        />
                       </div>
                     )}
                   </div>

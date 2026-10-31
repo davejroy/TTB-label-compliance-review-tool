@@ -1,0 +1,82 @@
+{
+  "compliant/all_elements_present.jpg": {
+    "expectation": "PASS - every mandatory element present & correct",
+    "laplacian_variance": 2145.3,
+    "mean_luminance": 193.9
+  },
+  "compliant/small_container_50ml.jpg": {
+    "expectation": "PASS - 50mL small container (full 27 CFR 16.21 warning; 16.22 1 mm type size)",
+    "laplacian_variance": 2141.3,
+    "mean_luminance": 193.9
+  },
+  "non_compliant/altered_warning_text.jpg": {
+    "expectation": "FAIL - warning body text materially altered",
+    "laplacian_variance": 1317.9,
+    "mean_luminance": 196.3
+  },
+  "non_compliant/missing_alcohol_content.jpg": {
+    "expectation": "FAIL - alcohol content / ABV missing",
+    "laplacian_variance": 2029.1,
+    "mean_luminance": 194.3
+  },
+  "non_compliant/missing_brand_name.jpg": {
+    "expectation": "FAIL - brand name missing",
+    "laplacian_variance": 1951.8,
+    "mean_luminance": 195.3
+  },
+  "non_compliant/missing_government_warning.jpg": {
+    "expectation": "FAIL - government warning entirely absent",
+    "laplacian_variance": 1088.0,
+    "mean_luminance": 197.0
+  },
+  "non_compliant/missing_net_contents.jpg": {
+    "expectation": "FAIL - net contents missing",
+    "laplacian_variance": 2119.1,
+    "mean_luminance": 194.0
+  },
+  "non_compliant/wrong_warning_header.jpg": {
+    "expectation": "FAIL - warning header not the exact 'GOVERNMENT WARNING:' text",
+    "laplacian_variance": 2074.6,
+    "mean_luminance": 194.2
+  },
+  "quality/blur_mild.jpg": {
+    "expectation": "ENHANCE - mildly out of focus, should recover after sharpening",
+    "laplacian_variance": 49.5,
+    "mean_luminance": 193.9
+  },
+  "quality/blur_severe.jpg": {
+    "expectation": "RETAKE(focus) - severely out of focus, below readability floor",
+    "laplacian_variance": 18.8,
+    "mean_luminance": 193.9
+  },
+  "quality/bright.jpg": {
+    "expectation": "ENHANCE/RETAKE(lighting) - overexposed / washed out",
+    "laplacian_variance": 2102.5,
+    "mean_luminance": 220.4
+  },
+  "quality/curved.jpg": {
+    "expectation": "ENHANCE - simulated bottle curvature, still human-readable",
+    "laplacian_variance": 1866.1,
+    "mean_luminance": 167.7
+  },
+  "quality/dark.jpg": {
+    "expectation": "ENHANCE/RETAKE(lighting) - underexposed",
+    "laplacian_variance": 503.3,
+    "mean_luminance": 53.6
+  },
+  "quality/glare.jpg": {
+    "expectation": "RETAKE(glare) - specular flash hotspot obscures text",
+    "laplacian_variance": 1323.5,
+    "mean_luminance": 200.3
+  },
+  "quality/low_coverage.jpg": {
+    "expectation": "RETAKE(coverage) - label too small in frame / too far away",
+    "laplacian_variance": 826.6,
+    "mean_luminance": 84.4
+  },
+  "quality/sharp_welllit.jpg": {
+    "expectation": "READABLE - reference sharp, well-lit capture",
+    "laplacian_variance": 2145.3,
+    "mean_luminance": 193.9
+  }
+}

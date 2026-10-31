@@ -56,7 +56,10 @@ describe('wakeServerIfNeeded', () => {
 
 // safeFetch retry logic
 describe('safeFetch retry', () => {
-    afterEach(() => vi.restoreAllMocks());
+    afterEach(() => {
+        vi.restoreAllMocks();
+        sessionStorage.clear();
+    });
 
            it('retries once on 429 and returns second response on success', async () => {
                  const fetchMock = vi
@@ -70,6 +73,52 @@ describe('safeFetch retry', () => {
                                         class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
                  await reviewLabelsBatch([{ files: [mockFile], application: mockApp }]);
                  expect(fetchMock).toHaveBeenCalledTimes(2);
+           });
+
+           it('uploads the original File without client-side resize', async () => {
+                 const fetchMock = vi.fn().mockResolvedValue(makeResponse(200, {}));
+                 vi.stubGlobal('fetch', fetchMock);
+                 const { reviewLabel } = await import('../api');
+                 const original = new File(['twelve-megapixel'], 'label.jpg', { type: 'image/jpeg' });
+                 const mockApp = { beverage_type: 'distilled_spirits' as const, brand_name: 'Test',
+                                        class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
+                 await reviewLabel([original], mockApp);
+                 const body = fetchMock.mock.calls[0][1]?.body as FormData;
+                 const uploaded = body.get('files') as File;
+                 expect(uploaded.name).toBe('label.jpg');
+                 expect(uploaded.size).toBe(original.size);
+           });
+
+           it('surfaces a clear 413 payload-too-large message without retrying', async () => {
+                 vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+                         makeResponse(413, { error_code: 'FILE_TOO_LARGE', message: 'The upload is too large.' })));
+                 const { reviewLabel } = await import('../api');
+                 const mockFile = new File(['img'], 'label.jpg', { type: 'image/jpeg' });
+                 const mockApp = { beverage_type: 'distilled_spirits' as const, brand_name: 'Test',
+                                        class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
+                 await expect(reviewLabel([mockFile], mockApp)).rejects.toThrow(/too large/i);
+           });
+
+           it('surfaces a clear 401 unauthorized message', async () => {
+                 vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+                         makeResponse(401, { error_code: 'AUTH_REQUIRED', message: 'Invalid or missing access token.' })));
+                 const { reviewLabel } = await import('../api');
+                 const mockFile = new File(['img'], 'label.jpg', { type: 'image/jpeg' });
+                 const mockApp = { beverage_type: 'distilled_spirits' as const, brand_name: 'Test',
+                                        class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
+                 await expect(reviewLabel([mockFile], mockApp)).rejects.toThrow(/not authorized/i);
+           });
+
+           it('clears the stored demo token on 401', async () => {
+                 sessionStorage.setItem('ttb_demo_token', 'stale-token');
+                 vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+                         makeResponse(401, { error_code: 'AUTH_REQUIRED', message: 'Invalid or missing access token.' })));
+                 const { reviewLabel } = await import('../api');
+                 const mockFile = new File(['img'], 'label.jpg', { type: 'image/jpeg' });
+                 const mockApp = { beverage_type: 'distilled_spirits' as const, brand_name: 'Test',
+                                        class_type: 'Bourbon', alcohol_content: '45%', net_contents: '750 mL' };
+                 await expect(reviewLabel([mockFile], mockApp)).rejects.toMatchObject({ status: 401 });
+                 expect(sessionStorage.getItem('ttb_demo_token')).toBeNull();
            });
 
            it('does NOT retry on 404', async () => {
@@ -214,3 +263,5 @@ describe('COLA Presets and Template Import API', () => {
         await expect(parseColaTemplate(file)).rejects.toThrow('Missing required application field(s): brand_name');
     });
 });
+
+

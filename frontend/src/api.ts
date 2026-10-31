@@ -1,6 +1,20 @@
-import { authHeader } from "./authStore";
-import { ensureImagesResized } from "./imageUtils";
-import type { ApplicationData, ColaPreset, LabelCheckResult, ReviewResult } from "./types";
+import { authHeader, handleUnauthorized } from "./authStore";
+import { httpStatusUserMessage } from "./errorContract";
+import type { ApplicationData, ColaPreset, ErrorCode, LabelCheckResult, ReviewResult } from "./types";
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly error_code?: ErrorCode;
+  readonly request_id?: string;
+
+  constructor(message: string, status: number, errorCode?: ErrorCode, requestId?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.error_code = errorCode;
+    this.request_id = requestId;
+  }
+}
 
 // In production the frontend and backend are deployed as separate Render
 // services, so the backend's hostname is baked in at build time via
@@ -25,19 +39,49 @@ function sleep(ms: number): Promise<void> {
  * FastAPI returns JSON `{"detail": "..."}` for validation errors;
  * other errors may be plain text. Falls back to the HTTP status line.
  */
-async function parseErrorBody(response: Response): Promise<string> {
+async function parseErrorPayload(response: Response): Promise<{
+  message: string;
+  error_code?: ErrorCode;
+  request_id?: string;
+}> {
   const text = await response.text().catch(() => "");
-  if (!text) return `HTTP ${response.status} ${response.statusText}`;
-  try {
-    const body = JSON.parse(text) as unknown;
-    if (body && typeof body === "object" && "detail" in body) {
-      const detail = (body as { detail: unknown }).detail;
-      return typeof detail === "string" ? detail : JSON.stringify(detail);
-    }
-  } catch {
-    // not JSON - fall through to raw text
+  if (!text) {
+    return { message: `HTTP ${response.status} ${response.statusText}` };
   }
-  return text;
+  try {
+    const body = JSON.parse(text) as {
+      detail?: unknown;
+      message?: unknown;
+      error_code?: ErrorCode;
+      request_id?: string;
+    };
+    const detail = body.message ?? body.detail;
+    const message =
+      typeof detail === "string" ? detail : detail ? JSON.stringify(detail) : text;
+    return {
+      message,
+      error_code: body.error_code,
+      request_id: body.request_id ?? response.headers.get("X-Request-ID") ?? undefined,
+    };
+  } catch {
+    return { message: text };
+  }
+}
+
+function throwApiError(status: number, payload: { message: string; error_code?: ErrorCode; request_id?: string }): never {
+  if (status === 401) {
+    try {
+      handleUnauthorized();
+    } catch {
+      // Clearing the token must not hide the 401 from the caller.
+    }
+  }
+  throw new ApiError(
+    httpStatusUserMessage(status, payload.message),
+    status,
+    payload.error_code,
+    payload.request_id,
+  );
 }
 
 /**
@@ -82,8 +126,11 @@ export async function getColaPresets(): Promise<ColaPreset[]> {
     headers: { ...authHeader() },
   });
   if (!response.ok) {
-    const detail = await parseErrorBody(response);
-    throw new Error(`Failed to load presets (${response.status}): ${detail}`);
+    const payload = await parseErrorPayload(response);
+    throwApiError(response.status, {
+      ...payload,
+      message: `Failed to load presets (${response.status}): ${payload.message}`,
+    });
   }
   return response.json() as Promise<ColaPreset[]>;
 }
@@ -100,8 +147,11 @@ export async function parseColaTemplate(file: File): Promise<ApplicationData[]> 
   });
 
   if (!response.ok) {
-    const detail = await parseErrorBody(response);
-    throw new Error(`Template import failed (${response.status}): ${detail}`);
+    const payload = await parseErrorPayload(response);
+    throwApiError(response.status, {
+      ...payload,
+      message: `Template import failed (${response.status}): ${payload.message}`,
+    });
   }
   return response.json() as Promise<ApplicationData[]>;
 }
@@ -111,9 +161,8 @@ export async function reviewLabel(
   files: File[],
   application: ApplicationData
 ): Promise<ReviewResult> {
-  const resizedFiles = await ensureImagesResized(files);
   const formData = new FormData();
-  resizedFiles.forEach((file) => formData.append("files", file));
+  files.forEach((file) => formData.append("files", file));
   formData.append("application", JSON.stringify(application));
 
   const response = await safeFetch(`${API_BASE}/api/review`, {
@@ -123,8 +172,11 @@ export async function reviewLabel(
   });
 
   if (!response.ok) {
-    const detail = await parseErrorBody(response);
-    throw new Error(`Review failed (${response.status}): ${detail}`);
+    const payload = await parseErrorPayload(response);
+    throwApiError(response.status, {
+      ...payload,
+      message: `Review failed (${response.status}): ${payload.message}`,
+    });
   }
   return response.json() as Promise<ReviewResult>;
 }
@@ -133,17 +185,10 @@ export async function reviewLabel(
 export async function reviewLabelsBatch(
   items: { files: File[]; application: ApplicationData }[]
 ): Promise<ReviewResult[]> {
-  const processedItems = await Promise.all(
-    items.map(async (item) => ({
-      ...item,
-      files: await ensureImagesResized(item.files),
-    }))
-  );
-
   const formData = new FormData();
-  processedItems.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
-  formData.append("image_counts", JSON.stringify(processedItems.map((item) => item.files.length)));
-  formData.append("applications", JSON.stringify(processedItems.map((item) => item.application)));
+  items.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
+  formData.append("image_counts", JSON.stringify(items.map((item) => item.files.length)));
+  formData.append("applications", JSON.stringify(items.map((item) => item.application)));
 
   const response = await safeFetch(`${API_BASE}/api/review/batch`, {
     method: "POST",
@@ -152,8 +197,11 @@ export async function reviewLabelsBatch(
   });
 
   if (!response.ok) {
-    const detail = await parseErrorBody(response);
-    throw new Error(`Batch review failed (${response.status}): ${detail}`);
+    const payload = await parseErrorPayload(response);
+    throwApiError(response.status, {
+      ...payload,
+      message: `Batch review failed (${response.status}): ${payload.message}`,
+    });
   }
   return response.json() as Promise<ReviewResult[]>;
 }
@@ -173,17 +221,10 @@ export async function reviewLabelsBatchStream(
   items: { files: File[]; application: ApplicationData }[],
   onResult: (index: number, result: ReviewResult) => void,
 ): Promise<void> {
-  const processedItems = await Promise.all(
-    items.map(async (item) => ({
-      ...item,
-      files: await ensureImagesResized(item.files),
-    }))
-  );
-
   const formData = new FormData();
-  processedItems.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
-  formData.append("image_counts", JSON.stringify(processedItems.map((item) => item.files.length)));
-  formData.append("applications", JSON.stringify(processedItems.map((item) => item.application)));
+  items.forEach((item) => item.files.forEach((file) => formData.append("files", file)));
+  formData.append("image_counts", JSON.stringify(items.map((item) => item.files.length)));
+  formData.append("applications", JSON.stringify(items.map((item) => item.application)));
 
   let response: Response;
   try {
@@ -200,8 +241,11 @@ export async function reviewLabelsBatchStream(
   }
 
   if (!response.ok) {
-    const detail = await parseErrorBody(response);
-    throw new Error(`Batch stream failed (${response.status}): ${detail}`);
+    const payload = await parseErrorPayload(response);
+    throwApiError(response.status, {
+      ...payload,
+      message: `Batch stream failed (${response.status}): ${payload.message}`,
+    });
   }
 
   if (!response.body) {
@@ -248,19 +292,12 @@ export async function checkLabelsBatch(
   items: { files: File[]; photoRoles?: string[] }[],
   confirmedBeverageType?: string
 ): Promise<LabelCheckResult[]> {
-  const processedItems = await Promise.all(
-    items.map(async (item) => ({
-      ...item,
-      files: await ensureImagesResized(item.files),
-    }))
-  );
-
   const formData = new FormData();
   const counts: number[] = [];
   const allRoles: string[] = [];
   let hasRoles = false;
 
-  processedItems.forEach((item) => {
+  items.forEach((item) => {
     counts.push(item.files.length);
     item.files.forEach((file) => formData.append("files", file));
     if (item.photoRoles && item.photoRoles.length === item.files.length) {
@@ -285,8 +322,8 @@ export async function checkLabelsBatch(
     body: formData,
   });
   if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(detail.detail ?? `HTTP ${res.status}`);
+    const payload = await parseErrorPayload(res);
+    throwApiError(res.status, payload);
   }
   return res.json();
 }

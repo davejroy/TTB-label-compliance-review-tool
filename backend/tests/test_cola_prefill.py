@@ -243,7 +243,9 @@ def test_api_parse_cola_template_bad_csv_returns_422(client: TestClient):
     resp = client.post("/api/cola/parse-template", files=files)
     assert resp.status_code == 422
     data = resp.json()
-    assert "Missing required application field" in data["detail"]
+    dumped = json.dumps(data).lower()
+    assert "the template file could not be parsed" in dumped
+    assert "missing required" not in dumped
 
 
 def test_api_parse_cola_template_bad_json_returns_422(client: TestClient):
@@ -252,7 +254,9 @@ def test_api_parse_cola_template_bad_json_returns_422(client: TestClient):
     resp = client.post("/api/cola/parse-template", files=files)
     assert resp.status_code == 422
     data = resp.json()
-    assert "Malformed JSON" in data["detail"]
+    dumped = json.dumps(data).lower()
+    assert "the template file could not be parsed" in dumped
+    assert "malformed json" not in dumped
 
 
 def test_api_parse_cola_template_invalid_beverage_type_returns_422(client: TestClient):
@@ -264,24 +268,29 @@ def test_api_parse_cola_template_invalid_beverage_type_returns_422(client: TestC
     resp = client.post("/api/cola/parse-template", files=files)
     assert resp.status_code == 422
     data = resp.json()
-    assert "Invalid beverage type 'kombucha'" in data["detail"]
+    dumped = json.dumps(data).lower()
+    assert "the template file could not be parsed" in dumped
+    assert "kombucha" not in dumped
 
 
-def test_api_parse_cola_template_never_returns_401(client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    # Even if DEMO_ACCESS_TOKEN is configured in the environment, the template parse endpoint
-    # must remain fail-open / zero-login for evaluators (never return 401).
+def test_api_parse_cola_template_requires_auth_when_configured(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setenv("DEMO_ACCESS_TOKEN", "active-secret-gate-token")
     csv_content = (
         "beverage_type,brand_name,class_type,alcohol_content,net_contents\n"
         "beer,Test Brewery,Pale Ale,5.5% ABV,12 FL OZ\n"
     )
     files = {"file": ("application.csv", csv_content.encode("utf-8"), "text/csv")}
-    # No Authorization header provided
     resp = client.post("/api/cola/parse-template", files=files)
-    assert resp.status_code == 200
-    assert resp.json()[0]["brand_name"] == "Test Brewery"
+    assert resp.status_code == 401
+    assert resp.json()["error_code"] == "AUTH_REQUIRED"
+    assert "username" not in json.dumps(resp.json()).lower() or "auth_required" in resp.json()["error_code"].lower()
 
-    # And for bad csv, it should return 422, never 401
-    bad_files = {"file": ("bad.csv", b"junk\nfoo\n", "text/csv")}
-    bad_resp = client.post("/api/cola/parse-template", files=bad_files)
-    assert bad_resp.status_code == 422
+    ok = client.post(
+        "/api/cola/parse-template",
+        files=files,
+        headers={"Authorization": "Bearer active-secret-gate-token"},
+    )
+    assert ok.status_code == 200
+    assert ok.json()[0]["brand_name"] == "Test Brewery"

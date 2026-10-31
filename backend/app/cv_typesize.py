@@ -37,51 +37,211 @@ ID1_ASPECT_RATIO = ID1_WIDTH_MM / ID1_HEIGHT_MM  # ~1.5858
 # Maximum allowable perspective tilt angle in degrees before triggering cannot_measure / retake prompt
 MAX_SKEW_ANGLE_DEG = 25.0
 
+# ID-1 card detector: a real calibration card sits *beside* the label and is a
+# modest fraction of the frame. An 18% aspect window plus a 70% area cap was
+# treating the label rectangle itself as an 85.60 mm card (10 false cards on
+# 33 card-less photos in the 2026-10-27 regression). Keep the card small,
+# close to 1.5858, and never a quad that contains the Government Warning.
+ID1_ASPECT_TOLERANCE = 0.06
+ID1_MIN_AREA_FRACTION = 0.01
+ID1_MAX_AREA_FRACTION = 0.30
 
-def get_required_min_height_mm(net_contents: Optional[str]) -> float:
-    """Determine statutory 27 CFR 16.22 minimum capital letter height based on container capacity.
+# Capital-letter height: lowercase x-height glyphs dominate the median and
+# under-read type size by ~23%. The 80th percentile tracks the cap-height
+# cluster (prototype error about ±6%).
+CAP_HEIGHT_PERCENTILE = 80.0
 
-    Thresholds:
-    - Containers <= 237 mL (8 fl. oz.): >= 1.0 mm
-    - Containers > 237 mL to 3 L (101.4 fl. oz.): >= 2.0 mm
-    - Containers > 3 L (101.4 fl. oz.): >= 3.0 mm
-    - Unknown volume: default baseline 2.0 mm (standard retail container assumption)
+# Marker detection (bilateral + Canny + ArUco) is O(pixels). Full-resolution
+# phone photos made the compliance stage seconds-long; 1280 px keeps ID-1
+# cards and ArUco markers detectable and leaves millimetre ratios unchanged.
+TYPESIZE_WORKING_MAX_EDGE = 1280
+
+# Full-resolution glyph / crop gates. These are pixel counts, so they must
+# be scaled when the working copy is smaller than the source photo.
+GLYPH_MIN_HEIGHT_PX = 6
+GLYPH_MIN_WIDTH_PX = 2
+CROP_MIN_SIDE_PX = 10
+IMAGE_MIN_SIDE_PX = 10
+
+
+def _working_px_floor(base_px: int, scale: float) -> int:
+    """Scale a full-res pixel gate when the working copy is smaller.
+
+    After a 4000→1280 downscale a 2 mm capital can fall under 6 px and
+    be dropped even though px/mm scaled by the same factor.
     """
-    if not net_contents:
-        return 2.0
+    if scale >= 0.999:
+        return base_px
+    return max(1, int(math.floor(base_px * scale + 1e-9)))
 
-    # Import parser from compliance to share single source of truth
+
+def _working_copy_bgr(
+    image_bgr: np.ndarray,
+    max_edge: int = TYPESIZE_WORKING_MAX_EDGE,
+) -> np.ndarray:
+    """Area-resize so the long edge is at most ``max_edge`` pixels."""
+    height, width = image_bgr.shape[:2]
+    longest = max(height, width)
+    if longest <= max_edge:
+        return image_bgr
+    scale = max_edge / longest
+    new_w = max(1, int(width * scale))
+    new_h = max(1, int(height * scale))
+    return cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
+def _decode_working_bgr(image_bytes: bytes) -> Tuple[Optional[np.ndarray], float]:
+    """Decode toward TYPESIZE_WORKING_MAX_EDGE without a full-res bitmap.
+
+    JPEG ``Image.draft`` uses MCU 1/2, 1/4, 1/8 scaling so a 12 MP phone
+    photo never materializes at native size. OpenCV is the fallback for
+    PNG/HEIC-reencoded bytes. Returns ``(bgr, scale)`` where ``scale`` is
+    working-long-edge / original-long-edge (1.0 when not downscaled).
+    px/mm ratios stay scale-invariant after ``_working_copy_bgr``.
+    """
+    if len(image_bytes) >= 3 and image_bytes[:2] == b"\xff\xd8":
+        try:
+            img = Image.open(io.BytesIO(image_bytes))
+            orig_long = max(img.size) or 1
+            if img.format == "JPEG":
+                img.draft("RGB", (TYPESIZE_WORKING_MAX_EDGE, TYPESIZE_WORKING_MAX_EDGE))
+            rgb = img.convert("RGB")
+            rgb.load()
+            working = _working_copy_bgr(cv2.cvtColor(np.asarray(rgb), cv2.COLOR_RGB2BGR))
+            work_long = max(working.shape[:2])
+            return working, min(1.0, work_long / orig_long)
+        except Exception:  # noqa: BLE001
+            _log.debug("JPEG draft decode failed; falling back to OpenCV", exc_info=True)
+
+    np_arr = np.frombuffer(image_bytes, np.uint8)
+    if np_arr.size == 0:
+        return None, 1.0
+    image_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    if image_bgr is None or image_bgr.size == 0:
+        return None, 1.0
+    orig_long = max(image_bgr.shape[:2]) or 1
+    working = _working_copy_bgr(image_bgr)
+    work_long = max(working.shape[:2])
+    return working, min(1.0, work_long / orig_long)
+
+
+def _container_volume_ml(net_contents: Optional[str]) -> Optional[float]:
+    """Parse net contents into millilitres, or None when volume cannot be determined."""
+    if not net_contents:
+        return None
+
     from .compliance import _parse_net_contents
 
     qty, unit = _parse_net_contents(net_contents)
     if qty is None:
-        return 2.0
+        return None
 
-    # Normalize to mL
-    qty_ml: float
     if unit == "ml":
-        qty_ml = qty
-    elif unit == "floz":
-        qty_ml = qty * 29.573535
-    else:
-        # Ambiguous unit: treat numbers >= 50 as mL, <= 10 as L
-        if qty <= 10:
-            qty_ml = qty * 1000.0
-        else:
-            qty_ml = qty
+        return qty
+    if unit == "floz":
+        return qty * 29.573535
+    if qty <= 10:
+        return qty * 1000.0
+    return qty
 
+
+def get_required_min_height_mm(net_contents: Optional[str]) -> float:
+    """Determine statutory 27 CFR 16.22(b) minimum capital letter height.
+
+    Thresholds from eCFR 27 CFR 16.22(b):
+    - Containers of 237 mL (8 fl. oz.) or less: not smaller than 1 mm
+    - Containers of more than 237 mL up to 3 L: not smaller than 2 mm
+    - Containers of more than 3 L: not smaller than 3 mm
+    - Unknown volume: default baseline 2.0 mm (standard retail container assumption)
+    """
+    qty_ml = _container_volume_ml(net_contents)
+    if qty_ml is None:
+        return 2.0
     if qty_ml <= 237.0:
         return 1.0
-    elif qty_ml <= 3000.0:
+    if qty_ml <= 3000.0:
         return 2.0
+    return 3.0
+
+
+def get_max_characters_per_inch(net_contents: Optional[str]) -> int:
+    """Return the 27 CFR 16.22(a)(4) maximum characters per inch for the type-size tier.
+
+    eCFR table (keyed to the minimum required type size):
+    - 1 mm (237 mL or less): 40 characters per inch
+    - 2 mm (more than 237 mL up to 3 L): 25 characters per inch
+    - 3 mm (more than 3 L): 12 characters per inch
+    """
+    min_mm = get_required_min_height_mm(net_contents)
+    if min_mm <= 1.0:
+        return 40
+    if min_mm <= 2.0:
+        return 25
+    return 12
+
+
+def estimate_characters_per_inch(
+    warning_text: Optional[str],
+    bbox_width_px: float,
+    bbox_height_px: float,
+    pixels_per_mm: float,
+    capital_height_mm: Optional[float] = None,
+) -> Optional[float]:
+    """Estimate 16.22(a)(4) characters per inch from a calibrated warning bbox.
+
+    Counts letters, numbers, and marks (non-whitespace). Line count is inferred
+    from bbox height versus capital height when available. Always an estimate.
+    """
+    if not warning_text or pixels_per_mm <= 0 or bbox_width_px <= 0:
+        return None
+    width_inches = (bbox_width_px / pixels_per_mm) / 25.4
+    if width_inches < 0.05:
+        return None
+    import re as _re
+
+    char_count = len(_re.sub(r"\s+", "", warning_text))
+    if char_count == 0:
+        return None
+    if capital_height_mm and capital_height_mm > 0:
+        cap_px = capital_height_mm * pixels_per_mm
+        n_lines = max(1, int(round(bbox_height_px / max(cap_px * 1.35, 1.0))))
     else:
-        return 3.0
+        n_lines = max(1, warning_text.count("\n") + 1)
+    return (char_count / n_lines) / width_inches
+
+
+def _warning_center_in_quad(
+    ordered: np.ndarray,
+    gw_bbox: Optional[Tuple[float, float, float, float]],
+    image_width: int,
+    image_height: int,
+) -> bool:
+    """True when the Government Warning centre lies inside the candidate card.
+
+    A real ID-1 card is placed beside the label. The label rectangle itself
+    often has a similar aspect ratio and would otherwise be accepted as a
+    card, inventing a false millimetre scale.
+    """
+    if gw_bbox is None:
+        return False
+    gx, gy, gw, gh = gw_bbox
+    cx = float((gx + gw / 2.0) * image_width)
+    cy = float((gy + gh / 2.0) * image_height)
+    contour = ordered.reshape(-1, 1, 2).astype(np.float32)
+    return cv2.pointPolygonTest(contour, (cx, cy), False) >= 0
 
 
 def detect_id1_marker_contour(
     image_bgr: np.ndarray,
+    gw_bbox: Optional[Tuple[float, float, float, float]] = None,
+    aspect_tolerance: float = ID1_ASPECT_TOLERANCE,
+    max_area_fraction: float = ID1_MAX_AREA_FRACTION,
 ) -> Optional[Tuple[np.ndarray, float, float]]:
     """Detect an ISO/IEC 7810 ID-1 rectangular card in the image.
+
+    The card must be a modest fraction of the frame, close to the statutory
+    85.60 × 53.98 mm aspect, and must not contain the Government Warning
+    text (the card sits beside the label, not around it).
 
     Returns:
         (ordered_quad_pts, pixels_per_mm, skew_angle_deg) or None if no valid marker detected.
@@ -110,8 +270,7 @@ def detect_id1_marker_contour(
 
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            # Card should occupy a reasonable fraction of image area (1% to 60%)
-            if area < total_area * 0.01 or area > total_area * 0.70:
+            if area < total_area * ID1_MIN_AREA_FRACTION or area > total_area * max_area_fraction:
                 continue
 
             peri = cv2.arcLength(cnt, True)
@@ -140,8 +299,10 @@ def detect_id1_marker_contour(
                 aspect = max(width_avg, height_avg) / min(width_avg, height_avg)
                 aspect_diff = abs(aspect - ID1_ASPECT_RATIO) / ID1_ASPECT_RATIO
 
-                # Allow up to 18% aspect ratio deviation for camera perspective
-                if aspect_diff > 0.18:
+                if aspect_diff > aspect_tolerance:
+                    continue
+
+                if _warning_center_in_quad(ordered, gw_bbox, w, h):
                     continue
 
                 # Estimate skew / tilt angle from quadrilateral divergence
@@ -265,19 +426,26 @@ def _estimate_quad_skew_angle(ordered_pts: np.ndarray) -> float:
 def measure_capital_letter_height_px(
     image_bgr: np.ndarray,
     gw_bbox: Optional[Tuple[float, float, float, float]] = None,
+    scale: float = 1.0,
 ) -> Optional[Tuple[float, float]]:
-    """Locate Government Warning uppercase glyphs and calculate median capital letter height in pixels.
+    """Locate Government Warning uppercase glyphs and calculate capital letter height in pixels.
 
     Args:
         image_bgr: Full label image.
         gw_bbox: Optional normalized bounding box (x, y, width, height) in 0-1 relative coordinates.
+        scale: working-copy / original long-edge ratio. Pixel gates shrink with it.
 
     Returns:
-        (median_cap_height_px, uncertainty_px) or None if glyphs cannot be segmented cleanly.
+        (cap_height_px, uncertainty_px) or None if glyphs cannot be segmented cleanly.
+        ``cap_height_px`` is the 80th percentile of candidate glyph heights.
     """
+    min_image = _working_px_floor(IMAGE_MIN_SIDE_PX, scale)
+    min_crop = _working_px_floor(CROP_MIN_SIDE_PX, scale)
+    min_height = _working_px_floor(GLYPH_MIN_HEIGHT_PX, scale)
+    min_width = _working_px_floor(GLYPH_MIN_WIDTH_PX, scale)
     try:
         h_img, w_img = image_bgr.shape[:2]
-        if h_img < 10 or w_img < 10:
+        if h_img < min_image or w_img < min_image:
             return None
 
         if gw_bbox is not None:
@@ -300,7 +468,7 @@ def measure_capital_letter_height_px(
                 return None
             crop = image_bgr[y1:y2, x1:x2]
 
-        if crop.size == 0 or crop.shape[0] < 10 or crop.shape[1] < 10:
+        if crop.size == 0 or crop.shape[0] < min_crop or crop.shape[1] < min_crop:
             return None
 
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -331,9 +499,9 @@ def measure_capital_letter_height_px(
                 h = stats[i, cv2.CC_STAT_HEIGHT]
                 area = stats[i, cv2.CC_STAT_AREA]
 
-                if h < 6 or h > crop_h * 0.40:
+                if h < min_height or h > crop_h * 0.40:
                     continue
-                if w < 2 or w > crop_w * 0.30:
+                if w < min_width or w > crop_w * 0.30:
                     continue
 
                 aspect = w / float(h)
@@ -361,14 +529,119 @@ def measure_capital_letter_height_px(
         if len(filtered) < 3:
             filtered = best_glyphs
 
-        median_h = float(np.median(filtered))
-        std_h = float(np.std(filtered)) if len(filtered) > 1 else median_h * 0.10
+        # 80th percentile tracks capital / ascender height; the median is
+        # pulled down by lowercase x-height glyphs on mixed-case warnings.
+        cap_h = float(np.percentile(filtered, CAP_HEIGHT_PERCENTILE))
+        std_h = float(np.std(filtered)) if len(filtered) > 1 else cap_h * 0.10
         uncertainty_px = float(1.96 * (std_h / math.sqrt(len(filtered))))
 
-        return (median_h, max(uncertainty_px, median_h * 0.05))
+        return (cap_h, max(uncertainty_px, cap_h * 0.05))
     except Exception as exc:  # noqa: BLE001
         _log.debug("Glyph measurement exception: %s", exc)
         return None
+
+
+def _upscale_small(image_bgr: np.ndarray, min_long_edge: int = 1000) -> np.ndarray:
+    """Cubic-upscale small photos so glyph segmentation has enough pixels."""
+    height, width = image_bgr.shape[:2]
+    longest = max(height, width)
+    if longest >= min_long_edge:
+        return image_bgr
+    scale = min_long_edge / max(longest, 1)
+    return cv2.resize(
+        image_bgr,
+        (max(1, int(width * scale)), max(1, int(height * scale))),
+        interpolation=cv2.INTER_CUBIC,
+    )
+
+
+def _flatten_label_quad(image_bgr: np.ndarray) -> np.ndarray:
+    """Warp the largest bright convex quad flat when it looks like a label.
+
+    Skips the transform when the contour is almost the whole frame, too
+    small, or not a stable quad — flattening hurt one shaded and one blurred
+    photo in the 2026-10-27 prototype ablation.
+    """
+    height, width = image_bgr.shape[:2]
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return image_bgr
+    contour = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(contour)
+    total = float(width * height)
+    if area < 0.20 * total or area > 0.97 * total:
+        return image_bgr
+    hull = cv2.convexHull(contour)
+    approx = cv2.approxPolyDP(hull, 0.02 * cv2.arcLength(hull, True), True)
+    if len(approx) != 4:
+        return image_bgr
+    pts = approx.reshape(4, 2).astype(np.float32)
+    ordered = _order_quad_points(pts)
+    dest_w = int(max(np.linalg.norm(ordered[0] - ordered[1]), np.linalg.norm(ordered[2] - ordered[3])))
+    dest_h = int(max(np.linalg.norm(ordered[1] - ordered[2]), np.linalg.norm(ordered[3] - ordered[0])))
+    if dest_w < 40 or dest_h < 40:
+        return image_bgr
+    destination = np.float32([[0, 0], [dest_w, 0], [dest_w, dest_h], [0, dest_h]])
+    matrix = cv2.getPerspectiveTransform(ordered, destination)
+    return cv2.warpPerspective(image_bgr, matrix, (dest_w, dest_h))
+
+
+def _dewarp_cylinder(image_bgr: np.ndarray) -> np.ndarray:
+    """Undo mild bottle-wrap fall-off when the brightness profile looks cylindrical."""
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    height, width = gray.shape
+    if width < 40:
+        return image_bgr
+    profile = np.percentile(gray, 90, axis=0)
+    centre = float(profile[int(width * 0.45) : int(width * 0.55)].mean())
+    edge = float(
+        (
+            profile[int(width * 0.06) : int(width * 0.10)].mean()
+            + profile[int(width * 0.90) : int(width * 0.94)].mean()
+        )
+        / 2.0
+    )
+    ratio = edge / max(centre, 1.0)
+    # Flat labels and non-fall-off patterns stay untouched.
+    if ratio > 0.93 or ratio < 0.30:
+        return image_bgr
+    theta_e = math.acos(min(max(ratio, 0.0), 1.0))
+    half = theta_e / 0.92 if theta_e < 1.4 else 1.5
+    half = min(half, 1.5)
+    radius = (width / 2.0) / math.sin(half)
+    out_w = int(2 * radius * half)
+    if out_w < 40:
+        return image_bgr
+    xs = (np.arange(out_w) - out_w / 2.0) / radius
+    src = (np.sin(np.clip(xs, -half, half)) * radius + width / 2.0).astype(np.float32)
+    map_x = np.tile(src, (height, 1))
+    map_y = np.tile(np.arange(height, dtype=np.float32)[:, None], (1, out_w))
+    out = cv2.remap(image_bgr, map_x, map_y, cv2.INTER_CUBIC)
+    shade = np.cos(np.clip(xs, -half, half))[None, :, None]
+    return np.clip(out / np.maximum(shade, 0.35), 0, 255).astype(np.uint8)
+
+
+def apply_guarded_geometry(image_bgr: np.ndarray) -> np.ndarray:
+    """Upscale, flatten, and dewarp when those steps look safe.
+
+    Global CLAHE is intentionally omitted: it destroyed OCR recall on noisy
+    and JPEG-compressed photos in the 2026-10-27 ablation. Each step fails
+    open and returns the previous image on error.
+    """
+    working = image_bgr
+    for step in (_upscale_small, _flatten_label_quad, _dewarp_cylinder):
+        try:
+            next_img = step(working)
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("Guarded geometry step %s skipped: %s", step.__name__, exc)
+            continue
+        if next_img is None or next_img.size == 0:
+            continue
+        working = next_img
+    return working
 
 
 def evaluate_type_size_from_image_bytes(
@@ -377,6 +650,7 @@ def evaluate_type_size_from_image_bytes(
     net_contents: Optional[str] = None,
     gw_bbox: Optional[Tuple[float, float, float, float]] = None,
     calibration_hint: Optional[str] = None,
+    warning_text: Optional[str] = None,
 ) -> TypeSizeMeasurement:
     """Main entry point for 27 CFR 16.22 Type-Size Verification.
 
@@ -391,46 +665,44 @@ def evaluate_type_size_from_image_bytes(
         TypeSizeMeasurement model with calibrated dimensions, uncertainty bounds, state, and audit notes.
     """
     required_min_mm = get_required_min_height_mm(net_contents)
+    max_cpi = get_max_characters_per_inch(net_contents)
 
     try:
-        if isinstance(image_bytes, (tuple, list)) and len(image_bytes) > 0:
-            if len(image_bytes) > 1 and not filename and isinstance(image_bytes[1], str):
-                filename = image_bytes[1]
-            image_bytes = image_bytes[0]
-
-        if not isinstance(image_bytes, (bytes, bytearray, memoryview)):
+        if not image_bytes:
             return TypeSizeMeasurement(
                 method=CalibrationMethod.NONE,
                 required_min_height_mm=required_min_mm,
-                state="cannot_measure",
-                verification_note="Invalid image data received for type-size measurement.",
-            )
-
-        # Decode image to OpenCV BGR array
-        np_arr = np.frombuffer(image_bytes, np.uint8)
-        if np_arr.size == 0:
-            return TypeSizeMeasurement(
-                method=CalibrationMethod.NONE,
-                required_min_height_mm=required_min_mm,
+                max_characters_per_inch=max_cpi,
                 state="cannot_measure",
                 verification_note="Empty image data received for type-size measurement.",
             )
-        image_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        # Draft-decode JPEGs toward the working max edge. px/mm and glyph
+        # height scale together, so millimetre results stay the same.
+        image_bgr, working_scale = _decode_working_bgr(image_bytes)
 
         if image_bgr is None or image_bgr.size == 0:
             return TypeSizeMeasurement(
                 method=CalibrationMethod.NONE,
                 required_min_height_mm=required_min_mm,
+                max_characters_per_inch=max_cpi,
                 state="cannot_measure",
                 verification_note="Image could not be decoded for type-size measurement.",
             )
 
-        # Step 1: Detect scale marker
+        # Uniform upscale only on the full frame. Flatten/dewarp crop away a
+        # card placed beside the label and invalidate gw_bbox coordinates.
+        try:
+            image_bgr = _upscale_small(image_bgr)
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("Type-size upscale skipped: %s", exc)
+
+        # Step 1: Detect scale marker in the original (upscaled) frame so
+        # gw_bbox still matches the pixels used for warning-in-quad rejection.
         marker_res = detect_aruco_marker(image_bgr)
         method = CalibrationMethod.SCALE_MARKER_ARUCO
 
         if marker_res is None:
-            marker_res = detect_id1_marker_contour(image_bgr)
+            marker_res = detect_id1_marker_contour(image_bgr, gw_bbox=gw_bbox)
             method = CalibrationMethod.SCALE_MARKER_CARD_ID1
 
         # If no physical marker is detected
@@ -440,6 +712,7 @@ def evaluate_type_size_from_image_bytes(
                 return TypeSizeMeasurement(
                     method=CalibrationMethod.SCALE_MARKER_CARD_ID1,
                     required_min_height_mm=required_min_mm,
+                max_characters_per_inch=max_cpi,
                     state="cannot_measure",
                     verification_note=(
                         "Scale marker not detected in photo. Please place a standard ISO/IEC 7810 ID-1 card "
@@ -450,6 +723,7 @@ def evaluate_type_size_from_image_bytes(
             return TypeSizeMeasurement(
                 method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
                 required_min_height_mm=required_min_mm,
+                max_characters_per_inch=max_cpi,
                 state="warning",
                 verification_note=(
                     f"Uncalibrated photo without physical scale marker. Statutory threshold is >={required_min_mm:.1f} mm "
@@ -466,6 +740,7 @@ def evaluate_type_size_from_image_bytes(
                 pixels_per_mm=round(px_per_mm, 2),
                 skew_angle_deg=round(skew_angle, 1),
                 required_min_height_mm=required_min_mm,
+                max_characters_per_inch=max_cpi,
                 state="cannot_measure",
                 verification_note=(
                     f"Scale marker perspective tilt ({skew_angle:.1f}°) exceeds maximum 25.0° threshold. "
@@ -473,14 +748,21 @@ def evaluate_type_size_from_image_bytes(
                 ),
             )
 
-        # Step 2: Segment capital letters in Government Warning
-        glyph_res = measure_capital_letter_height_px(image_bgr, gw_bbox=gw_bbox)
+        # Step 2: Segment capital letters in Government Warning.
+        # Measure on the same frame used for marker detection. Flattening the
+        # full image first would crop a card beside the label and invalidate
+        # gw_bbox. Flattening or upscaling a warning crop would change pixel
+        # scale versus the px/mm computed from the marker.
+        glyph_res = measure_capital_letter_height_px(
+            image_bgr, gw_bbox=gw_bbox, scale=working_scale
+        )
         if glyph_res is None:
             return TypeSizeMeasurement(
                 method=method,
                 pixels_per_mm=round(px_per_mm, 2),
                 skew_angle_deg=round(skew_angle, 1),
                 required_min_height_mm=required_min_mm,
+                max_characters_per_inch=max_cpi,
                 state="cannot_measure",
                 verification_note=(
                     "Scale marker detected, but Government Warning text glyphs could not be segmented cleanly. "
@@ -493,6 +775,7 @@ def evaluate_type_size_from_image_bytes(
             return TypeSizeMeasurement(
                 method=method,
                 required_min_height_mm=required_min_mm,
+                max_characters_per_inch=max_cpi,
                 state="cannot_measure",
                 verification_note="Invalid spatial resolution calculated from scale marker.",
             )
@@ -526,11 +809,28 @@ def evaluate_type_size_from_image_bytes(
                 f"is borderline near the {required_min_mm:.1f} mm threshold. Physical gauge verification recommended."
             )
 
+        estimated_cpi = None
+        if warning_text and gw_bbox is not None:
+            h_img, w_img = image_bgr.shape[:2]
+            bbox_w_px = gw_bbox[2] * w_img
+            bbox_h_px = gw_bbox[3] * h_img
+            estimated_cpi = estimate_characters_per_inch(
+                warning_text,
+                bbox_w_px,
+                bbox_h_px,
+                px_per_mm,
+                measured_cap_mm,
+            )
+
         return TypeSizeMeasurement(
             method=method,
             pixels_per_mm=round(px_per_mm, 2),
             measured_capital_height_mm=round(measured_cap_mm, 2),
             required_min_height_mm=required_min_mm,
+            max_characters_per_inch=max_cpi,
+            estimated_characters_per_inch=(
+                round(estimated_cpi, 1) if estimated_cpi is not None else None
+            ),
             uncertainty_mm=round(uncertainty_mm, 2),
             skew_angle_deg=round(skew_angle, 1),
             state=state,
@@ -541,6 +841,7 @@ def evaluate_type_size_from_image_bytes(
         return TypeSizeMeasurement(
             method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
             required_min_height_mm=required_min_mm,
+            max_characters_per_inch=max_cpi,
             state="cannot_measure",
             verification_note=f"Type-size evaluation encountered an unexpected condition ({type(exc).__name__}). Physical gauge measurement recommended.",
         )

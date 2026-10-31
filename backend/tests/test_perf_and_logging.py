@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import time
 import pytest
 from unittest.mock import AsyncMock, patch
 from PIL import Image
@@ -23,7 +24,13 @@ from app.main import (
     _log_request_timing,
     app,
 )
-from app.models import ApplicationData, ExtractedLabelData, FieldLocation
+from app.models import (
+    ApplicationData,
+    CalibrationMethod,
+    ExtractedLabelData,
+    FieldLocation,
+    TypeSizeMeasurement,
+)
 from fastapi.testclient import TestClient
 
 
@@ -59,6 +66,7 @@ def test_log_request_timing_structure_and_safety(caplog: pytest.LogCaptureFixtur
     assert data["image_count"] == 2
     assert data["status"] == "pass"
     assert data["test_field"] == "val"
+    assert data.get("request_id")
     # Ensure no secrets or raw byte objects are present in log record
     assert "token" not in data
     assert "api_key" not in data
@@ -164,6 +172,61 @@ def test_review_endpoint_logs_request_timing(caplog: pytest.LogCaptureFixture) -
     assert "wall_time_ms" in log_data
     assert "claude_time_ms" in log_data
     assert "claude_calls" in log_data
+
+
+def test_review_wall_time_includes_typesize_and_compliance(caplog: pytest.LogCaptureFixture) -> None:
+    """wall_time_ms must include type-size evaluation and compliance, not just extraction."""
+    client = TestClient(app)
+    app_json = json.dumps({
+        "beverage_type": "distilled_spirits",
+        "brand_name": "Test Brand",
+        "class_type": "Whiskey",
+        "alcohol_content": "40% ABV",
+        "net_contents": "750 mL",
+    })
+    fake_ext = ExtractedLabelData(
+        brand_name="Test Brand",
+        class_type="Whiskey",
+        alcohol_content="40% ABV",
+        net_contents="750 mL",
+        government_warning_present=True,
+        government_warning_header=CANONICAL_WARNING_HEADER,
+        government_warning_body=CANONICAL_WARNING_BODY,
+        extraction_confidence=0.95,
+    )
+
+    def _slow_typesize(*args, **kwargs):
+        time.sleep(0.06)
+        return TypeSizeMeasurement(
+            method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+            required_min_height_mm=2.0,
+            state="cannot_measure",
+            verification_note="test delay",
+        )
+
+    def _slow_compliance(*args, **kwargs):
+        time.sleep(0.06)
+        from app.compliance import run_compliance_checks as real_checks
+        return real_checks(*args, **kwargs)
+
+    with caplog.at_level(logging.INFO):
+        with patch("app.main._extract_fields_with_retry", AsyncMock(return_value=(fake_ext, None))):
+            with patch("app.main.evaluate_type_size_from_image_bytes", side_effect=_slow_typesize):
+                with patch("app.main.run_compliance_checks", side_effect=_slow_compliance):
+                    resp = client.post(
+                        "/api/review",
+                        files=[("files", ("label.png", _sample_png(), "image/png"))],
+                        data={"application": app_json},
+                    )
+                    assert resp.status_code == 200
+
+    body_ms = resp.json()["processing_time_ms"]
+    timing_logs = [r.message for r in caplog.records if "RequestTiming:" in r.message]
+    assert timing_logs
+    log_data = json.loads(timing_logs[0].replace("RequestTiming: ", ""))
+    # Extraction is mocked (near-instant). Type-size + compliance sleep 120ms total.
+    assert log_data["wall_time_ms"] >= 100
+    assert body_ms >= 100
 
 
 def test_label_check_batch_logs_request_timing(caplog: pytest.LogCaptureFixture) -> None:

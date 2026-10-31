@@ -15,11 +15,29 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **Re-promote to `-dev` `ceb18a8` (security PRs #50 / #51, October 2026)**:
+  - Backend pins from `#50` `35a2189` + `#51` `ceb18a8`: `Pillow==13.0.0`, `python-dotenv==1.2.4`, `fastapi==0.162.0`, `starlette==1.10.0`.
+  - Frontend pins from `#51`: `vite@8.3.5`, `vitest@5.0.5`, `happy-dom@21.0.4`, `zod@4.6.7` override. Production layout has no Gradio/Streamlit demo trees, so those `#50` demo pins were skipped.
+  - Access-token gate stays wired. No secrets committed.
+  - GitHub CI on the pin commit failed two jobs: the type-size `image_index` test raced `asyncio.gather` + threadpool call order (production pairing was already correct), and `tsc -b` typechecked Vitest files after Vitest 5 matcher types changed. Production typecheck now excludes `src/__tests__` and `src/test`.
+
+- **PR #26 review-thread hardening (October 2026)**:
+  - **Access-token gate stays ON**: `require_demo_access` remains a dependency on `/api/review`, `/api/review/batch`, `/api/review/batch/stream`, `/api/label-check/batch`, and `/api/cola/parse-template`. `/api/health` stays ungated. The gate still **fails open when `DEMO_ACCESS_TOKEN` is unset** (do not commit a token). Do not remove the dependency.
+  - **Request size**: `RequestBodyLimitMiddleware` counts streamed / chunked ASGI body bytes as well as `Content-Length`. Oversize requests return HTTP 413 `FILE_TOO_LARGE`. `/api/health` is skipped.
+  - **CORS on 413**: middleware order is body-limit → security headers → CORS (CORS outermost) so browsers still see `Access-Control-Allow-Origin` on short-circuit 413s.
+  - **Docs CSP**: `/docs` and `/redoc` use a Swagger-CDN-capable CSP; JSON API routes keep `default-src 'none'`.
+  - **Type-size bbox**: Government Warning boxes are applied only to the matching `field_locations.image_index`. Multi-photo merge remaps each extraction's locations to the merged photo index.
+  - **Address parse**: trailing `CO` after a city (`Denver CO`) is Colorado, not the legal suffix `Co.`; `Brewing Co` remains a company name.
+  - **Stream retry**: `/api/review/batch/stream` uses the same `_extract_fields_with_retry` path as sync/batch (semaphore + transient timeout retry).
+  - **Bold heading**: `header_bold` is advisory only (vision estimate). Statutory GW wording/casing remains a hard fail.
+  - **Frontend**: batch/label-only retakes bind by submitted item id; `ImageDropzone` assigns the next unused panel role after a remove; Vite CSP `connect-src` reads `VITE_API_HOST` via `loadEnv`.
+  - **Regression scorer**: empty `results` mappings are refused; `typesize` and `edge` groups are graded (HTTP 500 fails those targets).
+
 - **CORS tightening ported from `-dev` 91e88ff (October 2026)**:
   - Replaced the `*` default allowlist with local Vite origins plus `https://ttb-label-frontend.onrender.com` (the `render.yaml` frontend service).
   - Restricted CORS methods to GET/POST/OPTIONS and headers to Authorization/Content-Type; credentials remain disabled.
-  - Review endpoints stay fail-open (no auth gate). Operators can still set `CORS_ORIGINS=*`.
-  - Added `backend/tests/test_cors.py`. `USE_FAST_EXTRACTION` defaults and the demo-access gate were not changed.
+  - The demo access-token **dependency stays wired**; it fails open only when `DEMO_ACCESS_TOKEN` is unset. Operators can still set `CORS_ORIGINS=*`.
+  - Added `backend/tests/test_cors.py`. `USE_FAST_EXTRACTION` defaults were not changed.
 
 - **Promotion of Features from `-dev` (September 2026)**:
   - **27 CFR 16.22 Option A (Scale-Marker) Type-Size Verification MVP**: Integrated deterministic Computer Vision (OpenCV/Pillow) calibration supporting ISO/IEC 7810 ID-1 cards and printable ArUco fiducials. Measures capital letter heights in mm against statutory volume tiers (1.0 mm / 2.0 mm / 3.0 mm) with confidence margins. Uncalibrated photos retain an honest statutory advisory with zero invented mm.
@@ -96,8 +114,10 @@ Deployed on Render.com via `render.yaml` Blueprint:
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude vision extraction | Yes | `sk-ant-...` | Yes |
 | `CLAUDE_MODEL` | Claude model override | No | `claude-sonnet-4-6` | No |
 | `CORS_ORIGINS` | Allowed CORS origins (defaults to local Vite + Render frontend, not `*`) | No | `https://ttb-label-frontend.onrender.com` | No |
-| `DEMO_ACCESS_TOKEN` | Optional demo access gate token (defaults to open) | No | `secret-token` | Yes |
+| `DEMO_ACCESS_TOKEN` | Optional demo access gate token. Dependency stays on review routes; unset = fail-open | No | *(leave unset in public demo)* | Yes |
 | `DEMO_USERNAME` | Display username in demo modal | No | `ttb-demo` | No |
+| `MAX_REQUEST_BODY_BYTES` | Total HTTP body cap (Content-Length and chunked) | No | `52428800` | No |
+| `ENABLE_API_DOCS` | Serve `/docs` `/redoc` `/openapi.json` with a docs-only CSP | No | unset | No |
 
 ## External Dependencies
 
@@ -107,6 +127,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 - Standards of fill check validates against modernized T.D. TTB-200 authorized size lists (§4.72 / §5.203); custom authorized sizes require manual formula verification.
 - Exact physical type-size verification (27 CFR 16.22) is automated via Option A (scale marker) when an ID-1 card or ArUco target is co-planar; uncalibrated photos retain the honest statutory physical gauge advisory with zero invented mm.
+- Gradio (`6.31.0`) / Streamlit (`1.66.1`) demo pins from `-dev` `#50` are not in this production layout (`tools/gradio_demo`, `tools/eval_dashboard` are excluded on promote). See [SBOM.md](./SBOM.md).
 
 ## Operational Notes
 
@@ -115,9 +136,10 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## Security Notes
 
-- **Fail-Open / Zero-Login Sacred Constraint**: Anonymous access is guaranteed; no 401/403 gates block evaluators on public API routes.
-- Security response headers set on all requests via `setdefault`.
-- Client-facing error messages are sanitized; stack traces logged only on backend.
+- **Access-token gate stays wired**: `require_demo_access` remains on review routes. When `DEMO_ACCESS_TOKEN` is unset the dependency fails open (public evaluator demos). When set, missing/invalid Bearer tokens return HTTP 401. Do not remove the dependency and do not commit a token.
+- **Request body cap**: chunked uploads cannot bypass `MAX_REQUEST_BODY_BYTES`. 413 responses still get CORS + security headers.
+- Security response headers set on all requests via `setdefault`. API CSP is `default-src 'none'`; docs HTML (only if `ENABLE_API_DOCS=true`) allows the Swagger CDN.
+- Client-facing error messages are sanitized; stack traces logged only on backend. Never log tokens or raw image bytes.
 
 ## Next Recommended Actions
 
@@ -130,7 +152,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 
 ## Handoff Checklist
 - [x] Code builds
-- [x] Tests pass (all 154 backend pytest tests + 77 frontend vitest tests pass)
+- [x] Tests pass (476+ backend pytest + 115 frontend vitest + ESLint + `tsc -b` / `vite build`, Oct 30 2026; pins from `-dev` `ceb18a8`)
 - [x] Required docs updated (/docs/ERROR_CODES.md, HANDOFF.md, PDR.md, REGULATORY_REFRENCES.md, SBOM.md, TECHNICAL_ARCHITECTURE.md)
 - [x] Secrets removed / verified no secrets committed
 - [x] Dependencies reviewed

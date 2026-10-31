@@ -1,3 +1,5 @@
+import type { LabelCheckResult, ReviewResult } from "./types";
+
 /** Quote a CSV field if it contains a comma, quote, or newline, per RFC 4180. */
 function escapeCsvField(value: string): string {
   if (/[",\n\r]/.test(value)) {
@@ -83,3 +85,44 @@ export function downloadColaTemplateCsv(): void {
   ];
   downloadCsv("cola-application-template.csv", templateRows);
 }
+
+/** One or more CSV data rows for a batch-review result. Never remaps retake/error to fail. */
+export function reviewResultCsvRows(result: ReviewResult): string[][] {
+  const files = result.filenames.join(", ");
+  const findings = result.fields ?? [];
+  if (findings.length === 0) {
+    return [[files, result.overall_status, "", "", "", "", result.error ?? ""]];
+  }
+  return findings.map((field) => [
+    files,
+    result.overall_status,
+    field.label_name,
+    field.status,
+    field.application_value ?? "",
+    field.label_value ?? "",
+    field.message,
+  ]);
+}
+
+/** One or more CSV data rows for a label-check result. Never remaps retake/error to fail. */
+export function labelCheckResultCsvRows(
+  result: LabelCheckResult,
+  beverageType: string,
+): string[][] {
+  const files = result.filenames.join("; ");
+  const findings = result.checks ?? [];
+  if (findings.length === 0) {
+    return [[files, beverageType, result.overall_status, "", "", "", "", result.error ?? ""]];
+  }
+  return findings.map((check) => [
+    files,
+    beverageType,
+    result.overall_status,
+    check.label_name,
+    check.status,
+    check.application_value ?? "",
+    check.label_value ?? "",
+    check.message,
+  ]);
+}
+

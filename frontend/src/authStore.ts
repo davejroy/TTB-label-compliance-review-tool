@@ -40,6 +40,35 @@ export function clearToken(): void {
 /** Log out helper alias. */
 export const logout = clearToken;
 
+type UnauthorizedListener = () => void;
+const unauthorizedListeners = new Set<UnauthorizedListener>();
+
+/**
+ * Subscribe to session invalidation (HTTP 401 on an authenticated API call).
+ * Returns an unsubscribe function.
+ */
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener);
+  return () => {
+    unauthorizedListeners.delete(listener);
+  };
+}
+
+/**
+ * Clear the stored demo token and notify listeners so the login card can
+ * be shown again. Safe to call when no token is stored.
+ */
+export function handleUnauthorized(): void {
+  clearToken();
+  for (const listener of unauthorizedListeners) {
+    try {
+      listener();
+    } catch {
+      // A listener failure must not break the 401 error path.
+    }
+  }
+}
+
 /**
  * Return an Authorization header object for fetch(), or an empty object when
  * no token is stored. Spread this into a request's headers:

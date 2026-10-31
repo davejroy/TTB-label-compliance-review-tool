@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 
 ### Security
 - CORS no longer defaults to `*`. Unset `CORS_ORIGINS` fails open to local Vite and the Render frontend from `render.yaml`; methods/headers are restricted and credentials stay off (port of -dev 91e88ff).
+- Promoted `-dev` `ceb18a8` security pins (#50/#51): `fastapi==0.162.0`, `starlette==1.10.0`, `Pillow==13.0.0`, `python-dotenv==1.2.4`; frontend `vite@8.3.5`, `vitest@5.0.5`, `happy-dom@21.0.4`, `zod@4.6.7` override.
 
 ### Added
 - SECURITY.md: vulnerability disclosure policy
@@ -25,6 +26,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 - backend/app/compliance.py: Fix _normalize_whitespace to rejoin hyphenated line breaks
 
 ### Fixed
+- Type-size image-index regression no longer asserts threadpool call order; bbox is keyed by filename.
+- Production `tsc -b` excludes Vitest files so Vite 8 / Vitest 5 matcher types do not fail the frontend bundle; Vite config imports `cspPolicy.ts` with an extension.
 - OCR mis-reading of hyphenated line breaks (e.g., CON-SUMPTION misread as DO NOT)
 - Low-quality images now return user-friendly error instead of internal exception
 

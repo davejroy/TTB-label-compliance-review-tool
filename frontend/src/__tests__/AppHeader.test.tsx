@@ -15,7 +15,7 @@ describe("App Header Instructions Button", () => {
           return Promise.resolve({
             ok: true,
             status: 200,
-            json: () => Promise.resolve({ auth_enabled: false, username: "evaluator" }),
+            json: () => Promise.resolve({ auth_enabled: false }),
           });
         }
         return Promise.resolve({
