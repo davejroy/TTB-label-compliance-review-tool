@@ -1115,6 +1115,10 @@ _NUMBERED_STREET_RE = re.compile(
     r"hwy|highway|suite|ste|apt|unit|fl|floor)\s+\d+",
     re.IGNORECASE,
 )
+_STREET_COMPASS = frozenset({
+    "n", "s", "e", "w", "ne", "nw", "se", "sw",
+    "north", "south", "east", "west",
+})
 
 
 def _clause_is_state_or_zip(clause: str) -> bool:
@@ -1160,12 +1164,13 @@ def _clause_looks_like_street(clause: str) -> bool:
         return False
     if any(token.lower() in _LEGAL_ENTITY_SUFFIXES for token in tokens) and len(tokens) >= 2:
         return False
-    last = tokens[-1].lower()
-    if last in _STREET_SUFFIXES:
-        return True
-    # "Main St" is a street. "St George Spirits" / "Dr McGillicuddy" are not:
-    # a leading saint/doctor abbrev is not a suffix.
-    return last in _STREET_SUFFIX_ABBREVS and tokens[0].lower() not in {"st", "dr"}
+    work = list(tokens)
+    if len(work) >= 2 and work[-1].lower() in _STREET_COMPASS:
+        work = work[:-1]
+    last = work[-1].lower()
+    # Suffix must be the last non-compass token. "St George Spirits" and
+    # "Box Creek" fail that; "St Charles Ave" / "Main Street North" pass.
+    return last in _STREET_SUFFIXES or last in _STREET_SUFFIX_ABBREVS
 
 
 def _is_colorado_city_before_co(city_tokens: list[str]) -> bool:

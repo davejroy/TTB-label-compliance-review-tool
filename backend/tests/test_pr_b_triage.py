@@ -219,6 +219,10 @@ def test_denver_co_is_city_state_not_company():
         "Produced and Bottled by Crescent Ridge Winery\nMain Street, Paso Robles, CA"
     ) == "crescent ridge winery"
     assert _is_city_state_or_street_line("Main St, Louisville, KY") is True
+    assert _is_city_state_or_street_line("Main Street North, Louisville, KY") is True
+    assert _is_city_state_or_street_line("Main St NW, Louisville, KY") is True
+    assert _is_city_state_or_street_line("St Charles Ave, New Orleans, LA") is True
+    assert _is_city_state_or_street_line("St Helena Hwy, Rutherford, CA") is True
     # Designator tokens inside a name are not enough to drop the bottler.
     assert _is_city_state_or_street_line("Box Creek, Frankfort, KY") is False
     assert _is_city_state_or_street_line("St George Spirits, Alameda, CA") is False
