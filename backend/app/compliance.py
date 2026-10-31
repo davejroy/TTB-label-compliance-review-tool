@@ -1008,6 +1008,36 @@ _US_STATE_NAMES = frozenset({
     "wisconsin", "wyoming", "districtofcolumbia",
 })
 
+# CO is both Colorado and the legal suffix "Co". Multi-word Colorado cities
+# without a comma ("Colorado Springs CO") must stay address lines, while
+# "Hopline Brewing Co" and "Colorado Gold Co" stay companies. Only an
+# explicit city list is used so a prefix like "Colorado" cannot swallow
+# a company name.
+_MULTIWORD_CITIES_BEFORE_CO = frozenset({
+    "colorado springs",
+    "fort collins",
+    "grand junction",
+    "castle rock",
+    "pueblo west",
+    "greenwood village",
+    "wheat ridge",
+    "commerce city",
+    "federal heights",
+    "glenwood springs",
+    "steamboat springs",
+    "estes park",
+    "pagosa springs",
+    "canon city",
+    "canyon city",
+    "cherry hills village",
+    "highlands ranch",
+    "fort morgan",
+    "manitou springs",
+    "woodland park",
+    "castle pines",
+    "colorado city",
+})
+
 
 def _token_spans(text: str) -> list[tuple[str, int, int]]:
     """Return (normalized_word, start, end) for each non-whitespace token."""
@@ -1082,6 +1112,20 @@ def _clause_is_state_or_zip(clause: str) -> bool:
     return _tokens_are_state(rest)
 
 
+def _is_colorado_city_before_co(city_tokens: list[str]) -> bool:
+    """True for a listed Colorado city in front of the CO abbreviation.
+
+    ``Colorado Springs CO`` and ``Fort Collins CO`` are cities. ``Hopline
+    Brewing Co``, ``Fort Collins Brewing Co``, and ``Colorado Gold Co`` stay
+    companies (industry word, or not in the city list).
+    """
+    if not city_tokens:
+        return False
+    if any(token.lower() in _COMPANY_CONTINUATION_WORDS for token in city_tokens):
+        return False
+    return " ".join(token.lower() for token in city_tokens) in _MULTIWORD_CITIES_BEFORE_CO
+
+
 def _is_city_state_or_street_line(line: str) -> bool:
     """True for a city/state/ZIP or street line, not a wrapped company suffix."""
     tokens = re.findall(r"[A-Za-z0-9]+", line)
@@ -1091,21 +1135,25 @@ def _is_city_state_or_street_line(line: str) -> bool:
         return True
     clauses = [part.strip() for part in re.split(r"[,;]", line) if part.strip()]
     if len(clauses) >= 2:
-        return any(_clause_is_state_or_zip(part) for part in clauses[1:])
+        # "Frankfort, KY" / "Paso Robles, CA, 93446" are address-only.
+        # "Buffalo Trace Distillery, Frankfort, KY" is a company plus a city —
+        # later clauses are not all state/ZIP, so this is not an address line.
+        return all(_clause_is_state_or_zip(part) for part in clauses[1:])
     work = _strip_trailing_zip_tokens(tokens)
     peeled_zip = work != tokens
     if len(work) >= 2 and _tokens_are_state(work[-1:]):
-        # "CO" is both Colorado and the legal suffix "Co". Treat a trailing
-        # state abbrev as an address unless a company-continuation word
-        # precedes it ("Hopline Brewing Co" vs "Denver CO").
-        last = work[-1].lower()
-        if last in _LEGAL_ENTITY_SUFFIXES and not peeled_zip:
-            prior = [token.lower() for token in work[:-1]]
-            if any(
-                token in _COMPANY_CONTINUATION_WORDS or token in _LEGAL_ENTITY_SUFFIXES
-                for token in prior
-            ):
-                return False
+        # "Hopline Brewing Co" is a company (3+ tokens + legal suffix, no ZIP).
+        # "Denver CO" is city + state even though CO is also an entity suffix.
+        # "Colorado Springs CO" is a multi-word Colorado city, not a company.
+        if (
+            work[-1].lower() in _LEGAL_ENTITY_SUFFIXES
+            and not peeled_zip
+            and len(work) >= 3
+            and not (
+                work[-1].lower() == "co" and _is_colorado_city_before_co(work[:-1])
+            )
+        ):
+            return False
         return True
     if len(work) >= 2:
         for start in range(1, len(work)):
@@ -1123,8 +1171,14 @@ def _company_clause_from_remainder(remainder: str) -> str:
         if not chunk:
             continue
         first = _first_line_token(chunk)
+        if _is_city_state_or_street_line(chunk) and first not in _COMPANY_CONTINUATION_WORDS:
+            # City/state (e.g. "Denver CO") is never the company, even as the
+            # first remaining line after a producer prefix is stripped.
+            if seen_company:
+                break
+            continue
         if seen_company and first not in _COMPANY_CONTINUATION_WORDS:
-            if not first or _is_city_state_or_street_line(chunk):
+            if not first:
                 break
         clause = re.split(r"[,;]", chunk, maxsplit=1)[0].strip()
         if clause:
@@ -2434,6 +2488,9 @@ def merge_extracted_label_data(extractions, photo_roles=None):
     confs = [e.extraction_confidence for e in extractions if e.extraction_confidence is not None]
     merged["extraction_confidence"] = max(confs) if confs else None
     merged["per_field_confidence"] = merged_pfc
+    # Each per-photo extraction is a single-image call, so Claude returns
+    # image_index=0 on every box. Re-bind boxes to the photo they came from
+    # so a retake of image N cannot paint that image's findings on slot 0.
     remapped_locations = []
     for idx, ext in enumerate(extractions):
         for loc in ext.field_locations:

@@ -9,7 +9,14 @@
         * multi-row output, empty inputs, and the UTF-8 BOM stub check.
          */
 import { describe, it, expect } from 'vitest';
-import { toCsv } from '../csv';
+import {
+  CSV_RESULT_HEADER,
+  exportComment,
+  exportStatus,
+  labelCheckResultCsvRows,
+  reviewResultCsvRows,
+  toCsv,
+} from '../csv';
 
 describe('toCsv', () => {
     it('serialises a single row of plain strings', () => {
@@ -92,15 +99,35 @@ describe('toCsv', () => {
     );
 });
 
+describe('CSV result header', () => {
+    it('is Files, Beverage Type, Status, Comments, Request ID — no Excel columns', () => {
+        expect(CSV_RESULT_HEADER).toEqual([
+            'Files',
+            'Beverage Type',
+            'Status',
+            'Comments',
+            'Request ID',
+        ]);
+        expect(CSV_RESULT_HEADER).not.toContain('Sheet');
+        expect(CSV_RESULT_HEADER.join(',')).not.toMatch(/xlsx|excel/i);
+    });
+});
+
 describe('reviewResultCsvRows', () => {
-    it('writes overall_status retake and keeps partial fields', async () => {
-        const { reviewResultCsvRows } = await import('../csv');
+    it('exports one row per label with Status and Comments', () => {
         const rows = reviewResultCsvRows({
             filenames: ['front.jpg', 'back.jpg'],
             overall_status: 'retake',
             processing_time_ms: 100,
             error: 'Photo quality is too low, please retake.',
             error_code: 'PHOTO_UNREADABLE_FIELD',
+            request_id: 'req-retake',
+            retake: {
+                field: 'brand',
+                area: 'front',
+                cause: 'blur',
+                tip: 'Hold the phone still and tap the label to focus before you take the photo.',
+            },
             fields: [
                 {
                     field: 'brand_name',
@@ -112,38 +139,94 @@ describe('reviewResultCsvRows', () => {
                 },
             ],
             extracted: { government_warning_present: true, field_locations: [] },
-        });
+        }, 'distilled_spirits');
         expect(rows).toHaveLength(1);
-        expect(rows[0][1]).toBe('retake');
-        expect(rows[0][2]).toBe('Brand Name');
+        expect(rows[0][2]).toBe('NEEDS VERIFICATION');
+        expect(rows[0][3]).toMatch(/reviewer must confirm/i);
+        expect(rows[0][3]).toMatch(/front/i);
         expect(rows[0]).not.toContain('fail');
+        expect(rows[0]).not.toContain('PASS');
     });
 
-    it('writes overall_status error when there are no fields', async () => {
-        const { reviewResultCsvRows } = await import('../csv');
-        const rows = reviewResultCsvRows({
+    it('exports errored items as NOT REVIEWED with the code, never pass or fail', () => {
+        const result = {
             filenames: ['bad.jpg'],
-            overall_status: 'error',
+            overall_status: 'error' as const,
             processing_time_ms: 40,
-            error: 'The review service timed out. Please try again.',
-            error_code: 'UPSTREAM_TIMEOUT',
+            error: 'The label reader timed out — your photo is fine. Try again shortly.',
+            error_code: 'UPSTREAM_TIMEOUT' as const,
+            request_id: 'req-timeout',
             fields: [],
             extracted: { government_warning_present: false, field_locations: [] },
-        });
+        };
+        expect(exportStatus(result)).toBe('NOT REVIEWED');
+        expect(exportComment(result)).toBe('UPSTREAM_TIMEOUT: The label was not checked.');
+        const rows = reviewResultCsvRows(result);
         expect(rows).toEqual([
-            ['bad.jpg', 'error', '', '', '', '', 'The review service timed out. Please try again.'],
+            ['bad.jpg', '', 'NOT REVIEWED', 'UPSTREAM_TIMEOUT: The label was not checked.', 'req-timeout'],
         ]);
+        expect(rows[0][2]).not.toBe('PASS');
+        expect(rows[0][2]).not.toBe('FAIL');
+        expect(exportComment({
+            filenames: ['missing-key.jpg'],
+            overall_status: 'error',
+            error_code: 'VISION_UNAVAILABLE',
+            processing_time_ms: 10,
+            fields: [],
+            extracted: { government_warning_present: false, field_locations: [] },
+        })).toBe('VISION_UNAVAILABLE: The label was not checked.');
+    });
+
+    it('writes PASS comments that describe what was verified', () => {
+        const rows = reviewResultCsvRows({
+            filenames: ['ok.jpg'],
+            overall_status: 'pass',
+            processing_time_ms: 80,
+            request_id: 'req-pass',
+            fields: [],
+            extracted: { government_warning_present: true, field_locations: [] },
+        });
+        expect(rows[0][2]).toBe('PASS');
+        expect(rows[0][3]).toMatch(/all required elements present/i);
+        expect(rows[0][3]).toMatch(/warning text and type size/i);
+    });
+
+    it('writes NEEDS VERIFICATION comments that say what the reviewer must confirm', () => {
+        const result = {
+            filenames: ['maybe.jpg'],
+            overall_status: 'warning' as const,
+            processing_time_ms: 70,
+            request_id: 'req-warn',
+            fields: [
+                {
+                    field: 'alcohol_content',
+                    label_name: 'Alcohol Content',
+                    status: 'warning' as const,
+                    application_value: '45% Alc./Vol.',
+                    label_value: '45% Alc/Vol',
+                    message: 'Punctuation differs from the application; confirm the statement is equivalent.',
+                },
+            ],
+            extracted: { government_warning_present: true, field_locations: [] },
+        };
+        expect(exportStatus(result)).toBe('NEEDS VERIFICATION');
+        expect(exportComment(result)).toMatch(/reviewer must confirm/i);
+        expect(exportComment(result)).toMatch(/Alcohol Content/);
+        expect(exportComment(result)).toMatch(/equivalent/i);
+        const rows = reviewResultCsvRows(result, 'distilled_spirits');
+        expect(rows[0][2]).toBe('NEEDS VERIFICATION');
+        expect(rows[0][3]).toBe(exportComment(result));
     });
 });
 
 describe('labelCheckResultCsvRows', () => {
-    it('writes overall_status fail only for a real compliance fail', async () => {
-        const { labelCheckResultCsvRows } = await import('../csv');
+    it('writes FAIL with the item and CFR citation in Comments', () => {
         const rows = labelCheckResultCsvRows({
             filenames: ['label.jpg'],
             overall_status: 'fail',
             beverage_type: 'distilled_spirits',
             processing_time_ms: 90,
+            request_id: 'req-fail',
             checks: [
                 {
                     field: 'government_warning',
@@ -151,13 +234,95 @@ describe('labelCheckResultCsvRows', () => {
                     status: 'fail',
                     application_value: 'Required',
                     label_value: '',
-                    message: 'Government Warning statement not found on label.',
+                    message: 'Government Warning statement not found on label. Required on all alcohol beverage labels (27 CFR Part 16).',
                 },
             ],
             extracted: { government_warning_present: false, field_locations: [] },
         }, 'Distilled Spirits');
-        expect(rows[0][2]).toBe('fail');
-        expect(rows[0][3]).toBe('Government Warning');
+        expect(rows[0][2]).toBe('FAIL');
+        expect(rows[0][3]).toMatch(/Government Warning failed/i);
+        expect(rows[0][3]).toMatch(/27 CFR Part 16/);
+        expect(rows[0][1]).toBe('Distilled Spirits');
+    });
+
+    it('appends the CFR citation when it lives on the warning-format finding', () => {
+        const rows = labelCheckResultCsvRows({
+            filenames: ['type.jpg'],
+            overall_status: 'fail',
+            beverage_type: 'distilled_spirits',
+            processing_time_ms: 90,
+            request_id: 'req-typesize',
+            checks: [
+                {
+                    field: 'government_warning_type_size',
+                    label_name: 'Government Warning type size',
+                    status: 'fail',
+                    application_value: 'Required',
+                    label_value: '0.8 mm',
+                    message: 'Measured type size is below the 1.0 mm minimum.',
+                    warning_format: {
+                        status: 'fail',
+                        required_min_height_mm: 1.0,
+                        max_characters_per_inch: 25,
+                        findings: [
+                            {
+                                code: 'type_size',
+                                status: 'fail',
+                                message: 'Below 1.0 mm',
+                                citation: '27 CFR 16.22',
+                                estimated: false,
+                            },
+                        ],
+                    },
+                },
+            ],
+            extracted: { government_warning_present: true, field_locations: [] },
+        }, 'Distilled Spirits');
+        expect(rows[0][2]).toBe('FAIL');
+        expect(rows[0][3]).toMatch(/Government Warning type size failed/i);
+        expect(rows[0][3]).toMatch(/below the 1\.0 mm minimum/i);
+        expect(rows[0][3]).toMatch(/27 CFR 16\.22/);
+    });
+
+    it('keeps every completed row, including NOT REVIEWED errors', () => {
+        const pass = reviewResultCsvRows({
+            filenames: ['a.jpg'],
+            overall_status: 'pass',
+            processing_time_ms: 10,
+            fields: [],
+            extracted: { government_warning_present: true, field_locations: [] },
+        });
+        const error = labelCheckResultCsvRows({
+            filenames: ['b.jpg'],
+            overall_status: 'error',
+            error_code: 'RATE_LIMITED',
+            processing_time_ms: 10,
+            checks: [],
+            extracted: { government_warning_present: false, field_locations: [] },
+        }, 'Wine');
+        const combined = [...pass, ...error];
+        expect(combined).toHaveLength(2);
+        expect(combined[0][2]).toBe('PASS');
+        expect(combined[1][2]).toBe('NOT REVIEWED');
+        expect(combined[1][3]).toBe('RATE_LIMITED: The label was not checked.');
+    });
+});
+
+describe('formula injection escaping', () => {
+    it('prefixes cells that start with = + - @ tab or CR', async () => {
+        const { escapeFormulaInjection, toCsv } = await import('../csv');
+        expect(escapeFormulaInjection('=cmd|calc')).toBe("'=cmd|calc");
+        expect(escapeFormulaInjection('+1+1')).toBe("'+1+1");
+        expect(escapeFormulaInjection('-2+3')).toBe("'-2+3");
+        expect(escapeFormulaInjection('@SUM(A1)')).toBe("'@SUM(A1)");
+        expect(escapeFormulaInjection('\tHYPERLINK')).toBe("'\tHYPERLINK");
+        expect(escapeFormulaInjection('\r=1+1')).toBe("'\r=1+1");
+        expect(escapeFormulaInjection('All required elements present')).toBe(
+            'All required elements present',
+        );
+        const csv = toCsv([['=HYPERLINK("http://evil")', 'PASS']]);
+        expect(csv).toContain("'=HYPERLINK");
+        expect(csv.startsWith("=")).toBe(false);
     });
 });
 

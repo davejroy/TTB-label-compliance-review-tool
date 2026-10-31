@@ -334,14 +334,18 @@ def test_disallowed_origin_gets_no_acao_but_is_not_blocked(default_client: TestC
     response = default_client.get("/api/health", headers={"Origin": disallowed_origin})
     assert response.status_code == 200
     assert "access-control-allow-origin" not in response.headers
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert "vision_configured" in body
 
 
 def test_no_origin_header_client_unaffected(default_client: TestClient) -> None:
     """Non-browser client (curl, no Origin header) works normally with 200 (never 401/403)."""
     response = default_client.get("/api/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert "vision_configured" in body
     assert "access-control-allow-origin" not in response.headers
 
 
@@ -359,7 +363,7 @@ def test_preview_subdomains_are_not_allowed_without_exact_origin(
     default_client: TestClient,
 ) -> None:
     """Host-wildcard preview origins are no longer accepted (F13)."""
-    preview = "https://ttb-label-frontend-pr-42.onrender.com"
+    preview = "https://frontend-preview.example.test"
     response = default_client.get("/api/health", headers={"Origin": preview})
     assert response.status_code == 200
     assert "access-control-allow-origin" not in response.headers

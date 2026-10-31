@@ -1,4 +1,5 @@
-import type { LabelCheckResult, ReviewResult } from "./types";
+import { isErrorResult, isRetakeResult } from "./errorContract";
+import type { FieldResult, LabelCheckResult, ReviewResult } from "./types";
 
 /** Quote a CSV field if it contains a comma, quote, or newline, per RFC 4180. */
 function escapeCsvField(value: string): string {
@@ -15,9 +16,32 @@ function escapeCsvField(value: string): string {
   return out;
 }
 
+/**
+ * Neutralize spreadsheet formula injection. Excel, Sheets, and LibreOffice
+ * treat a leading ``=``, ``+``, ``-``, ``@``, tab, or CR as a formula.
+ * Prefix those cells with a single quote so they stay plain text.
+ */
+export function escapeFormulaInjection(value: string): string {
+  if (!value) return value;
+  const first = value[0];
+  if (
+    first === "=" ||
+    first === "+" ||
+    first === "-" ||
+    first === "@" ||
+    first === "\t" ||
+    first === "\r"
+  ) {
+    return `'${value}`;
+  }
+  return value;
+}
+
 /** Serialize rows of strings into CSV text using CRLF line endings. */
 export function toCsv(rows: string[][]): string {
-  return rows.map((row) => row.map(escapeCsvField).join(",")).join("\r\n");
+  return rows
+    .map((row) => row.map((cell) => escapeCsvField(escapeFormulaInjection(cell))).join(","))
+    .join("\r\n");
 }
 
 /**
@@ -93,43 +117,128 @@ export function downloadColaTemplateCsv(): void {
   downloadCsv("cola-application-template.csv", templateRows);
 }
 
-/** One or more CSV data rows for a batch-review result. Never remaps retake/error to fail. */
-export function reviewResultCsvRows(result: ReviewResult): string[][] {
-  const files = result.filenames.join(", ");
-  const findings = result.fields ?? [];
-  if (findings.length === 0) {
-    return [[files, result.overall_status, "", "", "", "", result.error ?? ""]];
+export const CSV_RESULT_HEADER = [
+  "Files",
+  "Beverage Type",
+  "Status",
+  "Comments",
+  "Request ID",
+] as const;
+
+export type ExportStatus = "PASS" | "FAIL" | "NEEDS VERIFICATION" | "NOT REVIEWED";
+
+export function exportStatus(
+  result: Pick<ReviewResult, "overall_status" | "error_code" | "retake">,
+): ExportStatus {
+  if (isRetakeResult(result) || result.overall_status === "warning") {
+    return "NEEDS VERIFICATION";
   }
-  return findings.map((field) => [
-    files,
-    result.overall_status,
-    field.label_name,
-    field.status,
-    field.application_value ?? "",
-    field.label_value ?? "",
-    field.message,
-  ]);
+  if (isErrorResult(result)) {
+    return "NOT REVIEWED";
+  }
+  if (result.overall_status === "fail") {
+    return "FAIL";
+  }
+  if (result.overall_status === "pass") {
+    return "PASS";
+  }
+  return "NEEDS VERIFICATION";
 }
 
-/** One or more CSV data rows for a label-check result. Never remaps retake/error to fail. */
+function findingsOf(result: ReviewResult | LabelCheckResult): FieldResult[] {
+  if ("fields" in result && Array.isArray(result.fields)) {
+    return result.fields;
+  }
+  if ("checks" in result && Array.isArray(result.checks)) {
+    return result.checks;
+  }
+  return [];
+}
+
+function citationFor(field: FieldResult): string | null {
+  const fromFormat = field.warning_format?.findings.find((item) => item.citation)?.citation;
+  return fromFormat || null;
+}
+
+function failComment(field: FieldResult): string {
+  const citation = citationFor(field);
+  const why = field.message.trim();
+  if (citation && !why.includes(citation)) {
+    return `${field.label_name} failed: ${why} (${citation}).`;
+  }
+  return `${field.label_name} failed: ${why}`;
+}
+
+/** Short plain-text explanation for the CSV Comments column. */
+export function exportComment(result: ReviewResult | LabelCheckResult): string {
+  const status = exportStatus(result);
+  if (status === "NOT REVIEWED") {
+    const code = result.error_code || "INTERNAL_ERROR";
+    return `${code}: The label was not checked.`;
+  }
+  if (status === "PASS") {
+    return "All required elements present; warning text and type size OK";
+  }
+
+  const findings = findingsOf(result);
+  if (status === "FAIL") {
+    const failed = findings.filter((field) => field.status === "fail");
+    if (failed.length === 0) {
+      return result.error || "A required label element failed compliance review.";
+    }
+    return failed.map(failComment).join(" ");
+  }
+
+  if (isRetakeResult(result)) {
+    const parts = ["Reviewer must confirm the photo can be read."];
+    if (result.retake?.field) {
+      parts.push(`Unread field: ${result.retake.field}.`);
+    }
+    if (result.retake?.area) {
+      parts.push(`Retake the ${result.retake.area} panel.`);
+    }
+    if (result.retake?.tip) {
+      parts.push(result.retake.tip);
+    } else if (result.error) {
+      parts.push(result.error);
+    }
+    return parts.join(" ");
+  }
+
+  const warnings = findings.filter((field) => field.status === "warning");
+  if (warnings.length > 0) {
+    return `Reviewer must confirm: ${warnings
+      .map((field) => `${field.label_name} — ${field.message}`)
+      .join(" ")}`;
+  }
+  return result.error || "Reviewer must confirm this label before accepting the result.";
+}
+
+function resultCsvRow(
+  result: ReviewResult | LabelCheckResult,
+  beverageType: string,
+): string[] {
+  return [
+    result.filenames.join("; "),
+    beverageType,
+    exportStatus(result),
+    exportComment(result),
+    result.request_id || "",
+  ];
+}
+
+/** One CSV data row per reviewed label. Errors stay NOT REVIEWED, never pass/fail. */
+export function reviewResultCsvRows(
+  result: ReviewResult,
+  beverageType = "",
+): string[][] {
+  return [resultCsvRow(result, beverageType)];
+}
+
+/** One CSV data row per label-check result. Errors stay NOT REVIEWED, never pass/fail. */
 export function labelCheckResultCsvRows(
   result: LabelCheckResult,
   beverageType: string,
 ): string[][] {
-  const files = result.filenames.join("; ");
-  const findings = result.checks ?? [];
-  if (findings.length === 0) {
-    return [[files, beverageType, result.overall_status, "", "", "", "", result.error ?? ""]];
-  }
-  return findings.map((check) => [
-    files,
-    beverageType,
-    result.overall_status,
-    check.label_name,
-    check.status,
-    check.application_value ?? "",
-    check.label_value ?? "",
-    check.message,
-  ]);
+  return [resultCsvRow(result, beverageType)];
 }
-

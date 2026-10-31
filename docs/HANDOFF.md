@@ -15,6 +15,21 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **Vision error contract + CSV Comments (October 2026)**:
+  - Missing, invalid, or revoked model keys return HTTP 503 `VISION_UNAVAILABLE`. Upstream 5xx/connection → 502 `UPSTREAM_ERROR`; timeout → 504 `UPSTREAM_TIMEOUT`; 429/529 → 429 `RATE_LIMITED`. None of these paths return 200 pass/fail or a pre-fill success.
+  - `/api/health` adds `vision_configured` (boolean only).
+  - Pre-fill, single review, label-only, and batch show a Failed rail (never green Complete) and do not write form fields on these codes.
+  - CSV export keeps every completed row. Status is `PASS` / `FAIL` / `NEEDS VERIFICATION` / `NOT REVIEWED`. A Comments column explains the outcome. Cells starting with `= + - @` tab or CR are prefixed with `'` (formula-injection guard). No Excel export.
+  - Stream starts all label tasks and awaits index 0 for HTTP 502/503/504/429. After HTTP 200 NDJSON is committed, later vision failures become per-item `overall_status=error` rows and the `done` sentinel is still sent.
+  - Client dropzone allowlist is JPEG / PNG / WEBP / HEIC. `application/octet-stream` HEIC is accepted when magic bytes match.
+
+- **Type-size index, stream retry, address parse (October 2026)**:
+  - Type-size measurement uses the Government Warning bbox from the same `image_index` as the photo being measured.
+  - Streaming batch review uses `_extract_fields_with_retry` (one jittered retry) and still fails cleanly per item.
+  - City + state abbreviations such as `Denver CO`, `Colorado Springs CO`, and `Fort Collins CO` are address tokens, not the bottler company name. `Hopline Brewing Co` / `Fort Collins Brewing Co` stay companies.
+  - Per-photo merge remaps `field_locations.image_index` to the source photo so a retake cannot paint one image's boxes on another slot.
+  - Offline regression scorer refuses an empty/failed "pass" report and scores the `typesize` group / `government_warning_type_size` defects.
+
 - **Re-promote to `-dev` `ceb18a8` (security PRs #50 / #51, October 2026)**:
   - Backend pins from `#50` `35a2189` + `#51` `ceb18a8`: `Pillow==13.0.0`, `python-dotenv==1.2.4`, `fastapi==0.162.0`, `starlette==1.10.0`.
   - Frontend pins from `#51`: `vite@8.3.5`, `vitest@5.0.5`, `happy-dom@21.0.4`, `zod@4.6.7` override. Production layout has no Gradio/Streamlit demo trees, so those `#50` demo pins were skipped.

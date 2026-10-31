@@ -7,7 +7,7 @@ interface Props {
 }
 
 const FIELD_CLASSES =
-  "w-full rounded-lg border border-slate-300 px-4 py-3 text-lg focus:border-[#15396a] focus:ring-2 focus:ring-blue-200 focus:outline-none";
+  "w-full min-w-0 rounded-lg border border-slate-300 px-4 py-3 text-lg focus:border-[#15396a] focus:ring-2 focus:ring-blue-200 focus:outline-none";
 
 const LABEL_CLASSES = "block text-base font-semibold text-slate-700 mb-1";
 
@@ -17,8 +17,8 @@ export default function ApplicationForm({ value, onChange, idPrefix }: Props) {
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <div className="sm:col-span-2">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 min-w-0">
+      <div className="sm:col-span-2 min-w-0">
         <label className={LABEL_CLASSES} htmlFor={`${idPrefix}-beverage`}>
           Beverage Type
         </label>
@@ -34,7 +34,7 @@ export default function ApplicationForm({ value, onChange, idPrefix }: Props) {
         </select>
       </div>
 
-      <div>
+      <div className="min-w-0">
         <label className={LABEL_CLASSES} htmlFor={`${idPrefix}-brand`}>
           Brand Name
         </label>
@@ -48,7 +48,7 @@ export default function ApplicationForm({ value, onChange, idPrefix }: Props) {
         />
       </div>
 
-      <div>
+      <div className="min-w-0">
         <label className={LABEL_CLASSES} htmlFor={`${idPrefix}-class`}>
           Class / Type
         </label>
@@ -62,7 +62,7 @@ export default function ApplicationForm({ value, onChange, idPrefix }: Props) {
         />
       </div>
 
-      <div>
+      <div className="min-w-0">
         <label className={LABEL_CLASSES} htmlFor={`${idPrefix}-abv`}>
           Alcohol Content
         </label>
@@ -76,7 +76,7 @@ export default function ApplicationForm({ value, onChange, idPrefix }: Props) {
         />
       </div>
 
-      <div>
+      <div className="min-w-0">
         <label className={LABEL_CLASSES} htmlFor={`${idPrefix}-net`}>
           Net Contents
         </label>
@@ -90,7 +90,7 @@ export default function ApplicationForm({ value, onChange, idPrefix }: Props) {
         />
       </div>
 
-      <div className="sm:col-span-2">
+      <div className="sm:col-span-2 min-w-0">
         <label className={LABEL_CLASSES} htmlFor={`${idPrefix}-address`}>
           Name and Address (optional)
         </label>
@@ -104,7 +104,7 @@ export default function ApplicationForm({ value, onChange, idPrefix }: Props) {
         />
       </div>
 
-      <div className="sm:col-span-2">
+      <div className="sm:col-span-2 min-w-0">
         <label className={LABEL_CLASSES} htmlFor={`${idPrefix}-origin`}>
           Country of Origin (imports only, optional)
         </label>

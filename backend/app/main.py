@@ -77,14 +77,25 @@ from .errors import (
     AUTH_REQUIRED,
     BLANK_IMAGE_MESSAGE,
     BLANK_IMAGE_TIP,
+    CONFIG_ERROR,
+    CONFIG_ERROR_MESSAGE,
     FILE_TOO_LARGE,
     INTERNAL_ERROR,
     INVALID_REQUEST,
+    MODEL_UNAVAILABLE,
+    MODEL_UNAVAILABLE_MESSAGE,
     PHOTO_QUALITY_LOW,
     RATE_LIMITED,
+    RATE_LIMITED_UPSTREAM_MESSAGE,
+    UPSTREAM_ERROR_MESSAGE,
+    UPSTREAM_TIMEOUT_MESSAGE,
+    VISION_HTTP_CODES,
+    VISION_UNAVAILABLE,
+    VISION_UNAVAILABLE_MESSAGE,
     REQUEST_ID_HEADER,
     RETAKE_CODES,
     RETAKE_MESSAGE,
+    SERVICE_UNAVAILABLE_CODES,
     UNSUPPORTED_FILE,
     UPSTREAM_ERROR,
     UPSTREAM_TIMEOUT,
@@ -229,6 +240,28 @@ app.add_exception_handler(DailyCapExceeded, daily_cap_exceeded_handler)
 install_request_id_logging()
 
 
+def _anthropic_api_key() -> str:
+    """Return the configured model key, or empty when unset. Never logged."""
+    return (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+
+
+def _vision_configured() -> bool:
+    """True when a model API key is present. Never returns the key."""
+    return bool(_anthropic_api_key())
+
+
+def _warn_if_vision_unconfigured() -> None:
+    """Log one startup warning when vision cannot run. No key material."""
+    if not _vision_configured():
+        _log.warning(
+            "Vision is not configured: reviews will return HTTP 503 "
+            "VISION_UNAVAILABLE until an API key is set."
+        )
+
+
+_warn_if_vision_unconfigured()
+
+
 # Curated, user-safe HTTP messages. Parser/exception text is never used.
 _FIXED_HTTP_MESSAGES: dict[int, str] = {
     400: "The request could not be processed.",
@@ -237,8 +270,9 @@ _FIXED_HTTP_MESSAGES: dict[int, str] = {
     422: "The request could not be processed.",
     429: "Too many requests. Please wait a moment and try again.",
     500: "An unexpected error occurred. Please try again.",
-    503: "The review service is temporarily unavailable. Please try again.",
-    504: "The review service timed out. Please try again.",
+    502: UPSTREAM_ERROR_MESSAGE,
+    503: VISION_UNAVAILABLE_MESSAGE,
+    504: UPSTREAM_TIMEOUT_MESSAGE,
 }
 
 # Messages we raise ourselves (never interpolated exception text).
@@ -266,11 +300,34 @@ _SAFE_HTTP_DETAILS: frozenset[str] = frozenset(
             f"A maximum of {MAX_IMAGES_PER_LABEL} images may be uploaded per label. "
             "Please resubmit with 4 or fewer photos."
         ),
+        CONFIG_ERROR_MESSAGE,
+        MODEL_UNAVAILABLE_MESSAGE,
+        VISION_UNAVAILABLE_MESSAGE,
+        UPSTREAM_TIMEOUT_MESSAGE,
+        UPSTREAM_ERROR_MESSAGE,
+        RATE_LIMITED_UPSTREAM_MESSAGE,
     }
 )
 
 
-def _http_error_code(status_code: int) -> str:
+class StructuredHTTPException(StarletteHTTPException):
+    """HTTPException that carries a stable ``error_code`` for the JSON contract."""
+
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        detail: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(status_code=status_code, detail=detail, headers=headers)
+        self.error_code = code
+
+
+def _http_error_code(status_code: int, exc: StarletteHTTPException | None = None) -> str:
+    explicit = getattr(exc, "error_code", None) if exc is not None else None
+    if isinstance(explicit, str) and explicit:
+        return explicit
     if status_code == 401:
         return AUTH_REQUIRED
     if status_code == 413:
@@ -279,8 +336,12 @@ def _http_error_code(status_code: int) -> str:
         return RATE_LIMITED
     if status_code in (400, 409, 422):
         return INVALID_REQUEST
-    if status_code in (503, 504):
+    if status_code == 502:
         return UPSTREAM_ERROR
+    if status_code == 503:
+        return VISION_UNAVAILABLE
+    if status_code == 504:
+        return UPSTREAM_TIMEOUT
     if status_code >= 500:
         return INTERNAL_ERROR
     return INVALID_REQUEST
@@ -351,7 +412,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     return JSONResponse(
         status_code=exc.status_code,
         content=error_payload(
-            _http_error_code(exc.status_code),
+            _http_error_code(exc.status_code, exc),
             message,
             request_id=request_id,
             extra=extra or None,
@@ -599,7 +660,8 @@ def _retry_delay_seconds() -> float:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok"}
+    """Liveness plus a boolean vision-configured flag. Never includes key material."""
+    return {"status": "ok", "vision_configured": _vision_configured()}
 
 
 @app.get("/api/demo-info")
@@ -794,6 +856,66 @@ class _StructuredUploadError(Exception):
         super().__init__(error.message)
 
 
+# Markers that mean the model key is missing or rejected. Matched against
+# exception text only to choose a code; the user never sees this text.
+_MODEL_CONFIG_MARKERS: tuple[str, ...] = (
+    "could not resolve authentication",
+    "api_key client option must be set",
+    "invalid api key",
+    "invalid x-api-key",
+    "authentication_error",
+    "x-api-key header is required",
+)
+
+
+def _model_config_error() -> ClientError | None:
+    """Return VISION_UNAVAILABLE when the model key is missing; else None.
+
+    Used as a preflight so a local run without a key cannot look like a
+    finished review. Unit tests that patch ``extract_label_fields`` skip this.
+    """
+    if _vision_configured():
+        return None
+    _log.error("Review model is not configured (API key missing)")
+    return ClientError(VISION_UNAVAILABLE, VISION_UNAVAILABLE_MESSAGE)
+
+
+def _is_model_config_error(exc: Exception) -> bool:
+    """True when the exception is a missing or rejected model API key."""
+    if isinstance(exc, AuthenticationError):
+        return True
+    if isinstance(exc, APIStatusError) and getattr(exc, "status_code", None) == 401:
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _MODEL_CONFIG_MARKERS)
+
+
+def _http_status_for_vision_code(code: str) -> int:
+    if code == VISION_UNAVAILABLE:
+        return 503
+    if code == UPSTREAM_TIMEOUT:
+        return 504
+    if code == UPSTREAM_ERROR:
+        return 502
+    if code == RATE_LIMITED:
+        return 429
+    return 503
+
+
+def _raise_vision_http(error: ClientError, status: int | None = None) -> None:
+    """Abort the request with a non-2xx structured, key-safe body."""
+    raise StructuredHTTPException(
+        status or _http_status_for_vision_code(error.code),
+        error.code,
+        error.message,
+    )
+
+
+def _raise_service_unavailable(error: ClientError) -> None:
+    """Abort the request with a typed non-2xx vision/upstream error."""
+    _raise_vision_http(error)
+
+
 def _client_error_from_exception(exc: Exception) -> ClientError:
     """Map an extraction/validation exception to a scrubbed ClientError."""
     if isinstance(exc, _StructuredUploadError):
@@ -802,32 +924,27 @@ def _client_error_from_exception(exc: Exception) -> ClientError:
         return ClientError(RATE_LIMITED, "Daily review limit reached. Please try again tomorrow.")
     if isinstance(exc, ImageQualityError):
         return ClientError(exc.error_code, exc.user_message, retake=exc.retake)
-    if isinstance(exc, AuthenticationError):
-        _log.error("Upstream authentication failed: %s", exc)
-        return ClientError(
-            UPSTREAM_ERROR,
-            "The review service is temporarily unavailable. Please try again.",
-        )
+    if _is_model_config_error(exc):
+        # Log the exception type only — never the key, env name, or provider body.
+        _log.error("Review model configuration error: %s", type(exc).__name__)
+        return ClientError(VISION_UNAVAILABLE, VISION_UNAVAILABLE_MESSAGE)
     if isinstance(exc, RateLimitError):
-        _log.warning("Upstream rate limit: %s", exc)
-        return ClientError(RATE_LIMITED, "The review service is busy. Please try again shortly.")
+        _log.warning("Upstream rate limit: %s", type(exc).__name__)
+        return ClientError(RATE_LIMITED, RATE_LIMITED_UPSTREAM_MESSAGE)
     if isinstance(exc, APITimeoutError):
-        _log.warning("Upstream timeout: %s", exc)
-        return ClientError(UPSTREAM_TIMEOUT, "The review service timed out. Please try again.")
+        _log.warning("Upstream timeout: %s", type(exc).__name__)
+        return ClientError(UPSTREAM_TIMEOUT, UPSTREAM_TIMEOUT_MESSAGE)
     if isinstance(exc, APIStatusError):
-        _log.warning("Upstream status %s: %s", exc.status_code, exc)
-        if exc.status_code in (429, 529):
-            return ClientError(RATE_LIMITED, "The review service is busy. Please try again shortly.")
-        return ClientError(
-            UPSTREAM_ERROR,
-            "The review service is temporarily unavailable. Please try again.",
-        )
+        status = getattr(exc, "status_code", None)
+        _log.warning("Upstream status %s: %s", status, type(exc).__name__)
+        if status in (429, 529):
+            return ClientError(RATE_LIMITED, RATE_LIMITED_UPSTREAM_MESSAGE)
+        if status and status >= 500:
+            return ClientError(UPSTREAM_ERROR, UPSTREAM_ERROR_MESSAGE)
+        return ClientError(UPSTREAM_ERROR, UPSTREAM_ERROR_MESSAGE)
     if isinstance(exc, APIConnectionError):
-        _log.warning("Upstream connection error: %s", exc)
-        return ClientError(
-            UPSTREAM_ERROR,
-            "The review service is temporarily unavailable. Please try again.",
-        )
+        _log.warning("Upstream connection error: %s", type(exc).__name__)
+        return ClientError(UPSTREAM_ERROR, UPSTREAM_ERROR_MESSAGE)
     if isinstance(exc, RuntimeError) and "busy" in str(exc).lower():
         return ClientError(
             RATE_LIMITED,
@@ -835,10 +952,10 @@ def _client_error_from_exception(exc: Exception) -> ClientError:
         )
     if isinstance(exc, ValueError):
         return ClientError(INVALID_REQUEST, scrub_user_message(str(exc)))
-    _log.exception("Unhandled extraction error: %s", exc)
+    _log.exception("Unhandled extraction error: %s", type(exc).__name__)
     return ClientError(
         INTERNAL_ERROR,
-        "An error occurred while reviewing this label. Please submit a new photo or try again.",
+        "An unexpected error occurred. Please try again.",
     )
 
 
@@ -958,12 +1075,14 @@ def _intake_one_image(image_bytes: bytes, filename: str) -> PreparedImage | Clie
                 quality.width,
                 quality.height,
             )
-            blank = quality.exposure == "bright" and quality.block_cause == "glare"
+            blank = quality.block_cause == "blank" or (
+                quality.exposure == "bright" and quality.block_cause == "glare"
+            )
             return ClientError(
                 PHOTO_QUALITY_LOW,
                 BLANK_IMAGE_MESSAGE if blank else RETAKE_MESSAGE,
                 retake=quality_retake(
-                    quality.block_cause,
+                    "blank" if blank else quality.block_cause,
                     tip=BLANK_IMAGE_TIP if blank else None,
                 ),
                 quality=quality,
@@ -1134,6 +1253,12 @@ async def _extract_fields_with_retry(
     Returns ``(extracted, None)`` on success or ``(None, ClientError)`` on
     failure after exhausting retries.
     """
+    # Skip the key preflight when unit tests patch extract_label_fields.
+    if extract_label_fields is _claude_client.extract_label_fields:
+        config_error = _model_config_error()
+        if config_error:
+            return None, config_error
+
     try:
         await asyncio.wait_for(_claude_semaphore.acquire(), timeout=_CLAUDE_SEMAPHORE_TIMEOUT_S)
     except asyncio.TimeoutError:
@@ -1324,12 +1449,21 @@ async def _evaluate_type_size(
     type_size_details: TypeSizeMeasurement | None = None
     if not images:
         return None
+    # Bind each warning box to the photo it was extracted from. Using the
+    # first bbox on every image would measure a front-label box against a
+    # back-label photo (and vice versa) on multi-image submissions.
+    gw_by_index: dict[int, tuple[float, float, float, float]] = {}
+    for loc in extracted.field_locations:
+        if getattr(loc, "field", None) != "government_warning":
+            continue
+        idx = int(getattr(loc, "image_index", 0) or 0)
+        gw_by_index.setdefault(idx, (loc.x, loc.y, loc.width, loc.height))
     warning_text = _warning_text_for_typesize(extracted)
 
     async def _measure_one(
-        img_bytes: bytes, img_name: str, image_index: int
+        img_bytes: bytes, img_name: str, img_index: int
     ) -> TypeSizeMeasurement:
-        gw_bbox = _government_warning_bbox_for_image(extracted, image_index)
+        gw_bbox = gw_by_index.get(img_index)
         try:
             return await run_in_threadpool(
                 evaluate_type_size_from_image_bytes,
@@ -1355,12 +1489,10 @@ async def _evaluate_type_size(
         results = [await _measure_one(*images[0], 0)]
     else:
         results = list(
-            await asyncio.gather(
-                *[
-                    _measure_one(data, name, idx)
-                    for idx, (data, name) in enumerate(images)
-                ]
-            )
+            await asyncio.gather(*[
+                _measure_one(data, name, idx)
+                for idx, (data, name) in enumerate(images)
+            ])
         )
     for ts_res in results:
         if ts_res.method not in (CalibrationMethod.UNCALIBRATED_ESTIMATE, CalibrationMethod.NONE):
@@ -1379,6 +1511,8 @@ async def _review_single(files: list[UploadFile], application: ApplicationData) 
     extracted, error_msg, _roles = await _extract_fields(files, filenames, metrics=metrics)
 
     if error_msg:
+        if error_msg.code in VISION_HTTP_CODES:
+            _raise_vision_http(error_msg)
         wall_time_ms = int((time.monotonic() - start) * 1000)
         timings = _stage_timings(metrics)
         _log_stage_timings(timings)
@@ -1608,7 +1742,26 @@ async def review_labels_batch_stream(
             group_data.append((raw, uploaded.filename or "label.jpg"))
         file_data_groups.append(group_data)
 
-    async def _stream_one(idx: int, file_data: list[tuple[bytes, str]], app_data: ApplicationData) -> dict:
+    # Fail before the NDJSON stream starts so a missing key is HTTP 503, not
+    # a 200 "finished" batch of error rows. Skip when every file is already
+    # rejected as a non-image so MIME tests stay on the UNSUPPORTED_FILE path.
+    looks_like_image = any(
+        _reject_if_not_image(raw, name) is None
+        for group in file_data_groups
+        for raw, name in group
+    )
+    if looks_like_image and extract_label_fields is _claude_client.extract_label_fields:
+        config_error = _model_config_error()
+        if config_error:
+            _raise_service_unavailable(config_error)
+
+    async def _stream_one(
+        idx: int,
+        file_data: list[tuple[bytes, str]],
+        app_data: ApplicationData,
+        *,
+        raise_http: bool,
+    ) -> dict:
         start = time.monotonic()
         claude_call_start = 0
         claude_call_duration_ms = 0
@@ -1655,13 +1808,12 @@ async def review_labels_batch_stream(
                     (time.monotonic() - claude_call_start) * 1000
                 )
                 if extract_error or extracted is None:
-                    raise _StructuredUploadError(
-                        extract_error
-                        or ClientError(
-                            UPSTREAM_ERROR,
-                            "The review service is temporarily unavailable. Please try again.",
-                        )
+                    vision_error = extract_error or ClientError(
+                        INTERNAL_ERROR, "An unexpected error occurred. Please try again."
                     )
+                    if vision_error.code in VISION_HTTP_CODES and raise_http:
+                        _raise_vision_http(vision_error)
+                    raise _StructuredUploadError(vision_error)
 
                 compliance_started = time.monotonic()
                 type_size_details = await _evaluate_type_size(
@@ -1760,8 +1912,10 @@ async def review_labels_batch_stream(
                         extra=_timing_extra(timings, {"batch_index": idx}),
                     )
                     line = json.dumps({"index": idx, "result": result.model_dump()})
+        except StructuredHTTPException:
+            raise
         except Exception as exc:  # noqa: BLE001
-            _log.warning("Streaming batch error at index %d: %s", idx, exc)
+            _log.warning("Streaming batch error at index %d: %s", idx, type(exc).__name__)
             wall_ms = int((time.monotonic() - start) * 1000)
             _log_request_timing(
                 endpoint="/api/review/batch/stream",
@@ -1770,9 +1924,11 @@ async def review_labels_batch_stream(
                 claude_calls=1 if claude_call_start > 0 else 0,
                 image_count=len(file_data),
                 status="error",
-                extra={"batch_index": idx, "error": str(exc)},
+                extra={"batch_index": idx, "error": type(exc).__name__},
             )
             client_error = _client_error_from_exception(exc)
+            if client_error.code in VISION_HTTP_CODES and raise_http:
+                _raise_vision_http(client_error)
             result = _review_error_result(
                 [fname for _, fname in file_data],
                 wall_ms,
@@ -1787,19 +1943,58 @@ async def review_labels_batch_stream(
             "success": success,
         }
 
+    # Start every label now so later items overlap the first extract.
+    # Await index 0 in the route so a global vision/auth failure becomes
+    # HTTP 502/503/504/429 instead of a 200 NDJSON "finished" stream.
+    stream_tasks = [
+        asyncio.create_task(_stream_one(idx, file_data, app_data, raise_http=(idx == 0)))
+        for idx, (file_data, app_data) in enumerate(zip(file_data_groups, application_list))
+    ]
+    try:
+        first_rec = await stream_tasks[0]
+    except BaseException:
+        for task in stream_tasks[1:]:
+            task.cancel()
+        raise
+
+    def _stream_error_line(idx: int, exc: BaseException) -> str:
+        if isinstance(exc, StructuredHTTPException):
+            client_error = ClientError(exc.error_code, str(exc.detail))
+        else:
+            client_error = _client_error_from_exception(exc)
+        result = _review_error_result(
+            [fname for _, fname in file_data_groups[idx]],
+            0,
+            client_error,
+        )
+        return json.dumps({"index": idx, "result": result.model_dump()}) + "\n"
+
     async def generate():
-        total_claude_time_ms = 0
-        successful_labels = 0
-        tasks = [
-            asyncio.create_task(_stream_one(idx, file_data, app_data))
-            for idx, (file_data, app_data) in enumerate(zip(file_data_groups, application_list))
-        ]
-        for finished in asyncio.as_completed(tasks):
-            rec = await finished
-            total_claude_time_ms += rec["claude_ms"]
-            if rec["success"]:
-                successful_labels += 1
-            yield rec["line"]
+        # HTTP 200 is already committed. Later vision failures must become
+        # per-item error rows (never abort the NDJSON or skip the done line).
+        total_claude_time_ms = first_rec["claude_ms"]
+        successful_labels = 1 if first_rec["success"] else 0
+        yield first_rec["line"]
+        remaining = stream_tasks[1:]
+        if remaining:
+            task_index = {id(task): idx for idx, task in enumerate(stream_tasks)}
+            for finished in asyncio.as_completed(remaining):
+                idx = task_index.get(id(finished), -1)
+                try:
+                    rec = await finished
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning(
+                        "Streaming batch later-label error at index %s: %s",
+                        idx,
+                        type(exc).__name__,
+                    )
+                    if idx >= 0:
+                        yield _stream_error_line(idx, exc)
+                    continue
+                total_claude_time_ms += rec["claude_ms"]
+                if rec["success"]:
+                    successful_labels += 1
+                yield rec["line"]
 
         batch_wall_ms = int((time.monotonic() - batch_start) * 1000)
         _log_request_timing(
@@ -1839,6 +2034,8 @@ async def _label_check_single(
     )
 
     if error_msg:
+        if error_msg.code in VISION_HTTP_CODES:
+            _raise_vision_http(error_msg)
         wall_time_ms = int((time.monotonic() - start) * 1000)
         timings = _stage_timings(metrics)
         _log_stage_timings(timings)

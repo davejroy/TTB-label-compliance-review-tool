@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { reviewLabelsBatchStream } from "../api";
-import { downloadCsv, reviewResultCsvRows } from "../csv";
-import { isErrorResult, isRetakeResult } from "../errorContract";
+import { ApiError, reviewLabelsBatchStream } from "../api";
+import { CSV_RESULT_HEADER, downloadCsv, reviewResultCsvRows } from "../csv";
+import { canExportResults, isErrorResult, isRetakeResult, resultsForCsvExport } from "../errorContract";
+import ErrorResultCard from "./ErrorResultCard";
 import { EMPTY_APPLICATION, type ApplicationData, type RetakeArea, type ReviewResult } from "../types";
 import ApplicationForm from "./ApplicationForm";
 import ColaImportModal from "./ColaImportModal";
@@ -42,6 +43,7 @@ export default function BatchReview() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<ApiError | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
@@ -102,12 +104,26 @@ export default function BatchReview() {
 
   function updateItem(id: string, patch: Partial<BatchItem>) {
     if (loading) return;
+    const filesChanged = patch.files !== undefined;
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+    if (filesChanged) {
+      // A retake must not keep the previous photo's result in this slot.
+      setLabelStates(null);
+      setExpanded(null);
+    }
   }
 
   function removeItem(id: string) {
     if (loading) return;
+    const idx = items.findIndex((item) => item.id === id);
     setItems((prev) => prev.filter((item) => item.id !== id));
+    if (idx >= 0) {
+      setLabelStates((prev) => (prev ? prev.filter((_, i) => i !== idx) : prev));
+      setExpanded((current) => {
+        if (current === null || current === idx) return null;
+        return current > idx ? current - 1 : current;
+      });
+    }
   }
 
   const canSubmit =
@@ -122,18 +138,21 @@ export default function BatchReview() {
     ) &&
     !loading;
 
-  // Derive completed results in order for CSV export
+  // Derive completed results in order. Every finished label is exported.
   const completedResults = labelStates
     ?.map((s) => s.result)
     .filter((r): r is ReviewResult => r !== undefined) ?? null;
+  const exportableResults = resultsForCsvExport(completedResults ?? []);
+  const canExport = canExportResults(exportableResults);
+  const failedCount = completedResults?.filter((r) => isErrorResult(r)).length ?? 0;
 
   function exportCsv() {
-    if (!completedResults?.length || loading) return;
-    const rows: string[][] = [
-      ["Files", "Overall Status", "Field", "Field Status", "Application Value", "Label Value", "Message"],
-    ];
-    completedResults.forEach((result) => {
-      rows.push(...reviewResultCsvRows(result));
+    if (!canExport || loading || !labelStates) return;
+    const rows: string[][] = [Array.from(CSV_RESULT_HEADER)];
+    labelStates.forEach((state, index) => {
+      if (!state.result) return;
+      const beverage = items[index]?.application.beverage_type ?? "";
+      rows.push(...reviewResultCsvRows(state.result, beverage));
     });
     downloadCsv("batch-review-results.csv", rows);
   }
@@ -144,6 +163,7 @@ export default function BatchReview() {
     submittingRef.current = true;
     setLoading(true);
     setError(null);
+    setRequestError(null);
     setExpanded(null);
     startProgressTimers();
 
@@ -179,6 +199,15 @@ export default function BatchReview() {
     } catch (err) {
       clearTimers();
       setError(err instanceof Error ? err.message : "Something went wrong.");
+      setRequestError(err instanceof ApiError ? err : null);
+      setLabelStates((prev) => {
+        if (!prev) return prev;
+        return prev.map((state) =>
+          state.status === "pending" || state.status === "processing"
+            ? { ...state, status: "error" as const, result: state.result }
+            : state,
+        );
+      });
     } finally {
       submittingRef.current = false;
       setLoading(false);
@@ -194,7 +223,9 @@ export default function BatchReview() {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Batch COLA Review</h2>
+          <h2 className="text-lg font-bold text-slate-900" title="Batch COLA Review">
+            Batch COLA Review
+          </h2>
           <p className="text-sm text-slate-500">
             Review multiple beverage labels against their application records in one pass.
           </p>
@@ -228,7 +259,12 @@ export default function BatchReview() {
         {items.map((item, index) => (
           <div key={item.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-slate-900">Label {index + 1}</h2>
+              <h2
+                className="text-xl font-bold text-slate-900 truncate"
+                title={item.application.brand_name.trim() || `Label ${index + 1}`}
+              >
+                Label {index + 1}
+              </h2>
               {items.length > 1 && (
                 <button
                   type="button"
@@ -240,12 +276,15 @@ export default function BatchReview() {
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 min-[1400px]:grid-cols-2 gap-6 min-w-0">
+              <div className="min-w-0 overflow-hidden">
               <ApplicationForm
                 value={item.application}
                 onChange={(application) => updateItem(item.id, { application })}
                 idPrefix={`batch-${item.id}`}
               />
+              </div>
+              <div className="min-w-0">
               <ImageDropzone
                 ref={(handle) => {
                   dropzoneRefs.current[item.id] = handle;
@@ -254,6 +293,7 @@ export default function BatchReview() {
                 onChange={(files) => updateItem(item.id, { files })}
                 idPrefix={`batch-${item.id}`}
               />
+              </div>
             </div>
           </div>
         ))}
@@ -272,11 +312,22 @@ export default function BatchReview() {
             disabled={!canSubmit}
             className="rounded-lg bg-[#15396a] px-6 py-3 text-lg font-bold text-white hover:bg-[#0b1f3a] disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            {loading ? `Processing… (${doneCount}/${totalCount})` : `Review ${items.length} Labels`}
+            {loading
+              ? `Processing… (${doneCount}/${totalCount})`
+              : `Review ${items.length} Label${items.length !== 1 ? "s" : ""}`}
           </button>
         </div>
 
-        {error && <p className="mt-3 text-base text-red-700">{error}</p>}
+        {error && !requestError && <p className="mt-3 text-base text-red-700">{error}</p>}
+        {requestError && (
+          <div className="mt-3">
+            <ErrorResultCard
+              message={requestError.message}
+              errorCode={requestError.error_code}
+              requestId={requestError.request_id}
+            />
+          </div>
+        )}
       </form>
 
       {/* Streaming results panel */}
@@ -301,15 +352,25 @@ export default function BatchReview() {
                 </div>
               )}
             </div>
-            {allDone && completedResults && completedResults.length > 0 && (
-              <button
-                type="button"
-                disabled={loading}
-                className="rounded-lg border-2 border-[#15396a] px-4 py-2 text-sm font-bold text-[#15396a] hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={exportCsv}
-              >
-                Export CSV
-              </button>
+            {allDone && (
+              <div className="flex flex-col items-end gap-1">
+                {failedCount > 0 && (
+                  <p className="text-sm text-red-700">
+                    {failedCount} of {totalCount} label{totalCount !== 1 ? "s" : ""} failed
+                    {canExport
+                      ? " — errored labels export as NOT REVIEWED."
+                      : " — CSV export is unavailable."}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  disabled={loading || !canExport}
+                  className="rounded-lg border-2 border-[#15396a] px-4 py-2 text-sm font-bold text-[#15396a] hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={exportCsv}
+                >
+                  Export CSV
+                </button>
+              </div>
             )}
           </div>
 

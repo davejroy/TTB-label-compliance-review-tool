@@ -163,7 +163,7 @@ class TestContainerSizeTiers:
 
 
 # ---------------------------------------------------------------------------
-# Bold header advisory (never a hard fail)
+# Bold header is a hard fail (27 CFR 16.22(a)(2)); matches models.py
 # ---------------------------------------------------------------------------
 
 class TestBoldHeaderFail:

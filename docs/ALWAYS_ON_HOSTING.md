@@ -78,7 +78,7 @@ flowchart TD
 
     subgraph RenderPlatform [Render.com Managed PaaS]
         Frontend[Static Site: ttb-label-frontend-dev.onrender.com<br/>Global CDN - Free Tier]
-        Backend[Web Service: ttb-label-backend-dev-r1pp.onrender.com<br/>Plan: Starter $7/mo - Always-On 24/7]
+        Backend[Web Service: ttb-label-backend.onrender.com<br/>Plan: Starter $7/mo - Always-On 24/7]
     end
 
     subgraph ExternalServices [External APIs]

@@ -35,6 +35,39 @@ UPSTREAM_ERROR = "UPSTREAM_ERROR"
 INTERNAL_ERROR = "INTERNAL_ERROR"
 INVALID_REQUEST = "INVALID_REQUEST"
 AUTH_REQUIRED = "AUTH_REQUIRED"
+VISION_UNAVAILABLE = "VISION_UNAVAILABLE"
+# Aliases kept so older clients and docs still resolve.
+CONFIG_ERROR = VISION_UNAVAILABLE
+MODEL_UNAVAILABLE = VISION_UNAVAILABLE
+
+# User copy for vision/config/upstream failures. Never mention the provider,
+# env var, or key material. Only photo-quality codes say "retake".
+VISION_UNAVAILABLE_MESSAGE = (
+    "The label reader is unavailable right now — your photo is fine. "
+    "Try again shortly."
+)
+CONFIG_ERROR_MESSAGE = VISION_UNAVAILABLE_MESSAGE
+MODEL_UNAVAILABLE_MESSAGE = VISION_UNAVAILABLE_MESSAGE
+UPSTREAM_TIMEOUT_MESSAGE = (
+    "The label reader timed out — your photo is fine. Try again shortly."
+)
+UPSTREAM_ERROR_MESSAGE = (
+    "The label reader is unavailable right now — your photo is fine. "
+    "Try again shortly."
+)
+RATE_LIMITED_UPSTREAM_MESSAGE = (
+    "The label reader is busy — your photo is fine. Wait a moment and try again."
+)
+
+# These codes leave the review pipeline as a non-2xx structured body.
+# They must never appear as overall_status pass/fail.
+VISION_HTTP_CODES = frozenset({
+    VISION_UNAVAILABLE,
+    UPSTREAM_TIMEOUT,
+    UPSTREAM_ERROR,
+    RATE_LIMITED,
+})
+SERVICE_UNAVAILABLE_CODES = VISION_HTTP_CODES
 
 RETAKE_MESSAGE = "Photo quality is too low, please retake."
 BLANK_IMAGE_MESSAGE = (
@@ -58,6 +91,7 @@ RetakeArea = Literal["front", "back", "neck"]
 RetakeCause = Literal[
     "blur",
     "glare",
+    "blank",
     "dark",
     "angle",
     "curvature",
@@ -116,6 +150,7 @@ FIELD_AREAS: dict[str, RetakeArea] = {
 CAUSE_TIPS: dict[str, str] = {
     "blur": "Hold the phone still and tap the label to focus before you take the photo.",
     "glare": "Hold the phone parallel to the label and avoid overhead light glare.",
+    "blank": BLANK_IMAGE_TIP,
     "dark": "Move to brighter, even lighting or turn on a room light behind the camera.",
     "angle": "Hold the phone parallel to the label so the text is not skewed.",
     "curvature": "Flatten the label in the frame or photograph the curved panel straight-on.",
@@ -254,6 +289,8 @@ def infer_retake_cause(notes: str | None = None, *, default: RetakeCause = "blur
     extraction that already ran.
     """
     text = (notes or "").lower()
+    if any(token in text for token in ("blank", "empty frame", "nothing printed", "washed out")):
+        return "blank"
     if any(token in text for token in ("glare", "reflection", "specular", "flash bounce")):
         return "glare"
     if any(token in text for token in ("dark", "too dark", "underexposed", "shadow")):

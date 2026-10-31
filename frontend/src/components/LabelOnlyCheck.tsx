@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { checkLabelsBatch } from "../api";
-import { downloadCsv, labelCheckResultCsvRows } from "../csv";
-import { isErrorResult, isRetakeResult } from "../errorContract";
+import { ApiError, checkLabelsBatch } from "../api";
+import { CSV_RESULT_HEADER, downloadCsv, labelCheckResultCsvRows } from "../csv";
+import { canExportResults, isErrorResult, isRetakeResult, resultsForCsvExport } from "../errorContract";
+import ErrorResultCard from "./ErrorResultCard";
 import { BEVERAGE_TYPE_LABELS, type LabelCheckResult, type RetakeArea } from "../types";
 import ImageDropzone, { type ImageDropzoneHandle } from "./ImageDropzone";
 import LabelCheckResultsPanel from "./LabelCheckResultsPanel";
@@ -121,6 +122,7 @@ export default function LabelOnlyCheck() {
   const [statusStep, setStatusStep] = useState<number>(STEP_UPLOAD);
   const [showBar, setShowBar] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<ApiError | null>(null);
 
   // Submit guard refs
   const submittingRef = useRef(false);
@@ -146,7 +148,11 @@ export default function LabelOnlyCheck() {
     }
   }, []);
 
-  const isDone = !loading && results !== null;
+  const failedCount = results?.filter((r) => isErrorResult(r)).length ?? 0;
+  const exportableResults = resultsForCsvExport(results ?? []);
+  const canExport = canExportResults(exportableResults);
+  const checkFailed = !loading && (requestError !== null || (results !== null && failedCount === results.length && results.length > 0));
+  const isDone = !loading && results !== null && !checkFailed;
 
   function clearTimers() {
     stepTimers.current.forEach(clearTimeout);
@@ -191,21 +197,32 @@ export default function LabelOnlyCheck() {
   function updateItem(id: string, files: File[]) {
     if (loading) return;
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, files } : item)));
+    // Retaking or swapping a photo must not leave another image's findings
+    // in this slot. Results are index-aligned with items; clear them.
+    setResults(null);
+    setExpanded(null);
+    setPendingConfirmIdx(null);
   }
 
   function removeItem(id: string) {
     if (loading) return;
-    setItems((prev) => (prev.length > 1 ? prev.filter((item) => item.id !== id) : prev));
+    const idx = items.findIndex((item) => item.id === id);
+    if (items.length <= 1 || idx < 0) return;
+    setItems((prev) => prev.filter((item) => item.id !== id));
+    setResults((prev) => (prev ? prev.filter((_, i) => i !== idx) : prev));
+    setExpanded((current) => {
+      if (current === null || current === idx) return null;
+      return current > idx ? current - 1 : current;
+    });
+    setPendingConfirmIdx(null);
   }
 
   const canSubmit = !loading && items.some((item) => item.files.length > 0);
 
   function exportCsv() {
-    if (!results || loading) return;
-    const rows: string[][] = [
-      ["Files","Beverage Type","Overall Status","Check","Check Status","TTB Requirement","Label Value","Notes"],
-    ];
-    results.forEach((result) => {
+    if (!canExport || loading) return;
+    const rows: string[][] = [Array.from(CSV_RESULT_HEADER)];
+    exportableResults.forEach((result) => {
       const beverageType = result.beverage_type
         ? BEVERAGE_TYPE_LABELS[result.beverage_type] ?? result.beverage_type
         : "";
@@ -221,6 +238,7 @@ export default function LabelOnlyCheck() {
     setLoading(true);
     setShowBar(true);
     setError(null);
+    setRequestError(null);
     setResults(null);
     setResultItemIds([]);
     setExpanded(null);
@@ -236,6 +254,9 @@ export default function LabelOnlyCheck() {
       setStatusStep(STEP_COMPLETE);
       setResultItemIds(submittedIds);
       setResults(res);
+      if (res.length > 0 && res.every((r) => isErrorResult(r))) {
+        setError(res[0]?.error || "The review failed. Please try again.");
+      }
       // Queue the first result that needs beverage-type confirmation
       const firstPending = res.findIndex((r) => r.needs_beverage_confirmation);
       if (firstPending !== -1) setPendingConfirmIdx(firstPending);
@@ -244,7 +265,9 @@ export default function LabelOnlyCheck() {
       }, 100);
     } catch (err) {
       clearTimers();
+      setStatusStep(STEP_COMPLETE);
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setRequestError(err instanceof ApiError ? err : null);
       setTimeout(() => {
         statusBarRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }, 100);
@@ -346,14 +369,26 @@ export default function LabelOnlyCheck() {
           </button>
         </div>
 
-        {error && (
+        {error && !requestError && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>
+        )}
+        {requestError && (
+          <ErrorResultCard
+            message={requestError.message}
+            errorCode={requestError.error_code}
+            requestId={requestError.request_id}
+          />
         )}
       </form>
 
-      {showBar && (loading || isDone) && (
+      {showBar && (loading || isDone || checkFailed) && (
         <div ref={statusBarRef} className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm p-4">
-          <ProcessingStatusBar step={statusStep} done={isDone} statusMessage={loading ? statusMessage : null} />
+          <ProcessingStatusBar
+            step={statusStep}
+            done={isDone}
+            failed={checkFailed}
+            statusMessage={loading ? statusMessage : null}
+          />
         </div>
       )}
 
@@ -371,10 +406,20 @@ export default function LabelOnlyCheck() {
       {results && (
         <div ref={resultsRef} className="mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <h2 className="text-2xl font-bold text-slate-900">Results</h2>
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">Results</h2>
+              {failedCount > 0 && (
+                <p className="text-sm text-red-700 mt-1">
+                  {failedCount} of {results.length} label{results.length !== 1 ? "s" : ""} failed
+                  {canExport
+                    ? " — errored labels export as NOT REVIEWED."
+                    : " — CSV export is unavailable."}
+                </p>
+              )}
+            </div>
             <button
               type="button"
-              disabled={loading}
+              disabled={loading || !canExport}
               className="rounded-lg border-2 border-[#15396a] px-4 py-2 text-sm font-semibold text-[#15396a] hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={exportCsv}
             >
