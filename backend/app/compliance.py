@@ -1221,15 +1221,18 @@ def _is_city_state_or_street_line(line: str) -> bool:
         if not _clause_has_company_markers(head_tokens):
             return True
         if len(clauses) < 2:
-            # Uncomma'd "123 Main Street Denver CO": a street word before a
-            # trailing state is an address. "12 Apostles Wine Co" has no
-            # street word, so Co stays the legal suffix.
+            # Uncomma'd "123 Main Street Denver CO": a suffix is an address
+            # only when tokens after it are a city (no industry/legal word).
+            # "12 Lane Distilling CO" keeps the bottler.
             work = _strip_trailing_zip_tokens(tokens)
             head = work[:-1] if len(work) >= 2 and _tokens_are_state(work[-1:]) else work
-            if any(
-                token.lower() in _STREET_SUFFIXES or token.lower() in _STREET_SUFFIX_ABBREVS
-                for token in head
-            ):
+            for index, token in enumerate(head):
+                lowered = token.lower()
+                if lowered not in _STREET_SUFFIXES and lowered not in _STREET_SUFFIX_ABBREVS:
+                    continue
+                after = head[index + 1 :]
+                if after and _clause_has_company_markers(after):
+                    continue
                 return True
             return False
     if len(clauses) >= 2:

@@ -263,6 +263,16 @@ def test_denver_co_is_city_state_not_company():
         "Produced and Bottled by Crescent Ridge Winery\n123 Winery Lane, Napa, CA"
     ) == "crescent ridge winery"
     assert _producer_entity_name("123 Main St, Denver, CO") == ""
+    # A street word inside a numbered company name is not enough.
+    assert _is_city_state_or_street_line("12 Lane Distilling CO") is False
+    assert _is_city_state_or_street_line("10 Court Brewing") is False
+    assert _is_city_state_or_street_line("12 St George Distilling") is False
+    assert _producer_entity_name(
+        "Distilled by 12 Lane Distilling CO"
+    ) == "12 lane distilling co"
+    assert _producer_entity_name(
+        "Brewed by 10 Court Brewing"
+    ) == "10 court brewing"
 
 
 def test_brand_denver_co_is_not_derived_from_address_city_state():
