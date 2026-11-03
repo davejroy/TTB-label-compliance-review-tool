@@ -13,7 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 
 ### Fixed
 - Streaming batch later-label exceptions keep the label index: `as_completed` wrappers no longer drop the error row.
-- Street + city + state lines (`Main Street`, `Main St NW`, `St Charles Ave`, `PO Box 123`) stay addresses. Company names that happen to contain `St`/`Box`/`Way` (`Box Creek`, `St George Spirits`) still extract as the bottler. Numbered PO Box / route clauses that also carry an industry or legal word (`Box 12 Distilling`, `12 Apostles Wine Co`) stay the bottler.
+- Street + city + state lines (`Main Street`, `Main St NW`, `St Charles Ave`, `PO Box 123`) stay addresses. Company names that happen to contain `St`/`Box`/`Way` (`Box Creek`, `St George Spirits`) still extract as the bottler. Numbered PO Box / route clauses that also carry an industry or legal word (`Box 12 Distilling`, `12 Apostles Wine Co`) stay the bottler. A numbered street that already ends in a street suffix (`123 Winery Lane`) or a trailing Colorado `CO` (`123 Main St, Denver, CO`) stays an address.
 - Streaming batch later-label `StructuredHTTPException` rows use the same user-message scrubber as other client errors (no raw provider/key text).
 - Type-size 16.22 measurement uses the warning bbox from the matching `image_index` on multi-image submissions.
 - Streaming batch review retries the same transient Claude failures as the single-label path and still fails cleanly per item.

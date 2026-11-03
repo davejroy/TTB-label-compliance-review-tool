@@ -254,6 +254,15 @@ def test_denver_co_is_city_state_not_company():
     assert _is_city_state_or_street_line("PO Box 123, Denver, CO") is True
     assert _is_city_state_or_street_line("Rural Route 2, Fort Collins, CO") is True
     assert _is_city_state_or_street_line("123 Main St, Louisville, KY") is True
+    # Trailing Colorado "CO" is the state, not a legal suffix on the street.
+    assert _is_city_state_or_street_line("123 Main St, Denver, CO") is True
+    assert _is_city_state_or_street_line("123 Main Street Denver CO") is True
+    # Numbered street whose name includes an industry word is still a street.
+    assert _is_city_state_or_street_line("123 Winery Lane, Napa, CA") is True
+    assert _producer_entity_name(
+        "Produced and Bottled by Crescent Ridge Winery\n123 Winery Lane, Napa, CA"
+    ) == "crescent ridge winery"
+    assert _producer_entity_name("123 Main St, Denver, CO") == ""
 
 
 def test_brand_denver_co_is_not_derived_from_address_city_state():

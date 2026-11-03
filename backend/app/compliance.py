@@ -1161,23 +1161,33 @@ def _clause_has_company_markers(tokens: list[str]) -> bool:
     return any(token.lower() in _LEGAL_ENTITY_SUFFIXES for token in tokens) and len(tokens) >= 2
 
 
+def _tokens_have_street_suffix(tokens: list[str]) -> bool:
+    """True when the last non-compass token is a street suffix."""
+    work = list(tokens)
+    if len(work) >= 2 and work[-1].lower() in _STREET_COMPASS:
+        work = work[:-1]
+    if not work:
+        return False
+    last = work[-1].lower()
+    return last in _STREET_SUFFIXES or last in _STREET_SUFFIX_ABBREVS
+
+
 def _clause_looks_like_street(clause: str) -> bool:
     tokens = re.findall(r"[A-Za-z0-9]+", clause)
     if not tokens:
         return False
-    # Industry / legal words win over numbered-street heuristics so
-    # "Box 12 Distilling" and "Rural Route 2 Brewing" stay companies.
+    numbered = tokens[0].isdigit() or bool(_NUMBERED_STREET_RE.search(clause))
+    # "123 Winery Lane" is a street even though "winery" is an industry word.
+    # "Box 12 Distilling" has no street suffix, so the industry word wins.
+    if numbered and _tokens_have_street_suffix(tokens):
+        return True
     if _clause_has_company_markers(tokens):
         return False
-    if tokens[0].isdigit() or _NUMBERED_STREET_RE.search(clause):
+    if numbered:
         return True
-    work = list(tokens)
-    if len(work) >= 2 and work[-1].lower() in _STREET_COMPASS:
-        work = work[:-1]
-    last = work[-1].lower()
     # Suffix must be the last non-compass token. "St George Spirits" and
     # "Box Creek" fail that; "St Charles Ave" / "Main Street North" pass.
-    return last in _STREET_SUFFIXES or last in _STREET_SUFFIX_ABBREVS
+    return _tokens_have_street_suffix(tokens)
 
 
 def _is_colorado_city_before_co(city_tokens: list[str]) -> bool:
@@ -1199,11 +1209,29 @@ def _is_city_state_or_street_line(line: str) -> bool:
     tokens = re.findall(r"[A-Za-z0-9]+", line)
     if not tokens:
         return False
-    # "123 Main St" is a street. "12 Apostles Wine Co, Napa, CA" starts
-    # with a digit but is still the bottler (industry / legal suffix).
-    if tokens[0].isdigit() and not _clause_has_company_markers(tokens):
-        return True
     clauses = [part.strip() for part in re.split(r"[,;]", line) if part.strip()]
+    # Leading-digit lines are streets unless the *first clause* is a numbered
+    # company. Do not scan later city/state tokens: trailing "CO" is Colorado,
+    # not the legal suffix on "123 Main St, Denver, CO".
+    if tokens[0].isdigit():
+        head = clauses[0] if clauses else line
+        head_tokens = re.findall(r"[A-Za-z0-9]+", head)
+        if _clause_looks_like_street(head):
+            return True
+        if not _clause_has_company_markers(head_tokens):
+            return True
+        if len(clauses) < 2:
+            # Uncomma'd "123 Main Street Denver CO": a street word before a
+            # trailing state is an address. "12 Apostles Wine Co" has no
+            # street word, so Co stays the legal suffix.
+            work = _strip_trailing_zip_tokens(tokens)
+            head = work[:-1] if len(work) >= 2 and _tokens_are_state(work[-1:]) else work
+            if any(
+                token.lower() in _STREET_SUFFIXES or token.lower() in _STREET_SUFFIX_ABBREVS
+                for token in head
+            ):
+                return True
+            return False
     if len(clauses) >= 2:
         rest = clauses[1:]
         # "Frankfort, KY" / "Paso Robles, CA, 93446" are address-only.
