@@ -191,6 +191,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-10-31 | Promoted `-dev` `7b69489` (#49): body cap counts bytes actually read, immediate 413, fail-closed cap lookup; middleware order body-limit → CORS → security headers; frontend structured 413 text | Maintainer |
 | 2026-10-31 | Review fixes: GET/HEAD-only health exemption; no second ASGI response.start; CSV formula neutralization; SHA-pinned Actions; nginx Host=$proxy_host; image 3.11.18-slim + apt upgrade | Maintainer |
 | 2026-10-31 | Vision failures are typed HTTP 502/503/504/429; CSV Status + Comments; health `vision_configured`; type-size image_index; address parse | Maintainer |
+| 2026-11-03 | Address parse: industry/legal words win over numbered-street heuristics; later-label stream errors scrub exception detail | Maintainer |
 | 2026-10-30 | CI follow-up: type-size bbox test keyed by filename (gather+threadpool); `tsconfig.app.json` excludes Vitest files from production `tsc -b` | Maintainer |
 
 ## Related Documentation

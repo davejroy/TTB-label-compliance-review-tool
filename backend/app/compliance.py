@@ -1154,16 +1154,23 @@ def _clause_is_city_or_state_or_zip(clause: str) -> bool:
     return all(not token.isdigit() or _is_zip_token(token) for token in work)
 
 
+def _clause_has_company_markers(tokens: list[str]) -> bool:
+    """True when a clause is a bottler/legal name, not a bare street."""
+    if any(token.lower() in _COMPANY_CONTINUATION_WORDS for token in tokens):
+        return True
+    return any(token.lower() in _LEGAL_ENTITY_SUFFIXES for token in tokens) and len(tokens) >= 2
+
+
 def _clause_looks_like_street(clause: str) -> bool:
     tokens = re.findall(r"[A-Za-z0-9]+", clause)
     if not tokens:
         return False
+    # Industry / legal words win over numbered-street heuristics so
+    # "Box 12 Distilling" and "Rural Route 2 Brewing" stay companies.
+    if _clause_has_company_markers(tokens):
+        return False
     if tokens[0].isdigit() or _NUMBERED_STREET_RE.search(clause):
         return True
-    if any(token.lower() in _COMPANY_CONTINUATION_WORDS for token in tokens):
-        return False
-    if any(token.lower() in _LEGAL_ENTITY_SUFFIXES for token in tokens) and len(tokens) >= 2:
-        return False
     work = list(tokens)
     if len(work) >= 2 and work[-1].lower() in _STREET_COMPASS:
         work = work[:-1]
@@ -1192,7 +1199,9 @@ def _is_city_state_or_street_line(line: str) -> bool:
     tokens = re.findall(r"[A-Za-z0-9]+", line)
     if not tokens:
         return False
-    if tokens[0].isdigit():
+    # "123 Main St" is a street. "12 Apostles Wine Co, Napa, CA" starts
+    # with a digit but is still the bottler (industry / legal suffix).
+    if tokens[0].isdigit() and not _clause_has_company_markers(tokens):
         return True
     clauses = [part.strip() for part in re.split(r"[,;]", line) if part.strip()]
     if len(clauses) >= 2:

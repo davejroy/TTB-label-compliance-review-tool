@@ -17,16 +17,30 @@ HTTP server, so CPU-stage before/after numbers can be gathered offline.
 from __future__ import annotations
 
 import argparse
+import http.client
 import io
 import json
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
+
+
+def http_origin(url: str) -> str:
+    """Return a normalized http(s) origin, or raise ValueError.
+
+    urllib can open ``file://`` URLs. This bench script is operator-run and
+    only talks to a local or deployed backend over HTTP(S).
+    """
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Backend URL must be an http(s) origin")
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _synthetic_jpeg(width: int, height: int, quality: int = 85) -> bytes:
@@ -88,8 +102,6 @@ def _post_review(
     token: str,
     timeout: float,
 ) -> dict:
-    import urllib.request
-
     boundary = "----ttbBenchBoundary7f3a"
     parts: list[bytes] = []
 
@@ -113,8 +125,9 @@ def _post_review(
         parts.append(data)
         parts.append(b"\r\n")
 
+    origin = http_origin(url)
+    path = "/api/label-check/batch" if label_check else "/api/review"
     if label_check:
-        endpoint = url.rstrip("/") + "/api/label-check/batch"
         for name, data in files:
             _file("files", name, data)
         _field("image_counts", f"[{len(files)}]")
@@ -122,7 +135,6 @@ def _post_review(
         if len(files) == 2:
             _field("photo_roles", json.dumps(["front", "back"]))
     else:
-        endpoint = url.rstrip("/") + "/api/review"
         for name, data in files:
             _file("files", name, data)
         _field(
@@ -140,12 +152,19 @@ def _post_review(
 
     parts.append(f"--{boundary}--\r\n".encode("utf-8"))
     body = b"".join(parts)
-    request = urllib.request.Request(endpoint, data=body, method="POST")
-    request.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    parsed = urlparse(origin)
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
     if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(request, timeout=timeout) as resp:
+        headers["Authorization"] = f"Bearer {token}"
+    # http.client has no file:// handler. Host comes from http_origin().
+    conn_cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    conn = conn_cls(parsed.netloc, timeout=timeout)
+    try:
+        conn.request("POST", path, body=body, headers=headers)
+        resp = conn.getresponse()
         payload = json.loads(resp.read().decode("utf-8"))
+    finally:
+        conn.close()
     if isinstance(payload, list):
         return payload[0]
     return payload

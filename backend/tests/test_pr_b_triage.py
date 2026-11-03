@@ -236,6 +236,24 @@ def test_denver_co_is_city_state_not_company():
     assert _producer_entity_name(
         "Brewed by Copper Way, Portland, OR"
     ) == "copper way"
+    # Numbered PO Box / route is a street, but the same designator plus an
+    # industry or legal word is still the bottler.
+    assert _is_city_state_or_street_line("Box 12 Distilling, Denver, CO") is False
+    assert _is_city_state_or_street_line("Rural Route 2 Brewing, Fort Collins, CO") is False
+    assert _is_city_state_or_street_line("12 Apostles Wine Co, Napa, CA") is False
+    assert _is_city_state_or_street_line("10 Barrel Brewing, Bend, OR") is False
+    assert _producer_entity_name(
+        "Distilled by Box 12 Distilling, Denver, CO"
+    ) == "box 12 distilling"
+    assert _producer_entity_name(
+        "Brewed by Rural Route 2 Brewing, Fort Collins, CO"
+    ) == "rural route 2 brewing"
+    assert _producer_entity_name(
+        "Produced by 12 Apostles Wine Co, Napa, CA"
+    ) == "12 apostles wine co"
+    assert _is_city_state_or_street_line("PO Box 123, Denver, CO") is True
+    assert _is_city_state_or_street_line("Rural Route 2, Fort Collins, CO") is True
+    assert _is_city_state_or_street_line("123 Main St, Louisville, KY") is True
 
 
 def test_brand_denver_co_is_not_derived_from_address_city_state():

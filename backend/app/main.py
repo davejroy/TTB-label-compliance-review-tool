@@ -1959,7 +1959,7 @@ async def review_labels_batch_stream(
 
     def _stream_error_line(idx: int, exc: BaseException) -> str:
         if isinstance(exc, StructuredHTTPException):
-            client_error = ClientError(exc.error_code, str(exc.detail))
+            client_error = ClientError(exc.error_code, scrub_user_message(str(exc.detail)))
         else:
             client_error = _client_error_from_exception(exc)
         result = _review_error_result(

@@ -8,7 +8,7 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 
 | Field | Value |
 |---|---|
-| Last Updated | 2026-10-31 |
+| Last Updated | 2026-11-03 |
 | Tool Used | pip-audit, npm audit, pip freeze, npm list |
 | SBOM Format | Manual Markdown Catalog aligned with CycloneDX / SPDX structures |
 | Scope | Full Repository (Backend Python Web Service + Frontend React/TypeScript SPA) |
@@ -116,3 +116,4 @@ npm audit
 | 2026-10-30 | CI follow-up after ceb18a8 pins: flaky type-size image_index test; production `tsc -b` excludes Vitest files. | Maintainer |
 | 2026-10-31 | PR #27 review: `minimatch@11.0.1` override; backend image `python:3.11.18-slim-bookworm` + apt upgrade + drop pip/setuptools/wheel. | Maintainer |
 | 2026-10-31 | Promote dest `fdc9584` + `b6fa8a6`: vision typed HTTP errors, CSV Comments, type-size image_index, address parse. No dependency pin changes. | Maintainer |
+| 2026-11-03 | PR #28 security rescan of head after e7bbefe/e4eb087/d0e11bd. pip-audit / npm audit / bandit / gitleaks / trivy HIGH-CRIT: 0. No dependency pin changes. | Maintainer |

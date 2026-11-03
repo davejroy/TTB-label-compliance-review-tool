@@ -366,3 +366,55 @@ def test_later_stream_structured_http_keeps_index_and_done(client, monkeypatch):
     assert by_index[1]["overall_status"] == "error"
     assert by_index[1]["error_code"] == UPSTREAM_ERROR
     assert any(item.get("done") is True for item in lines)
+
+
+def test_later_stream_structured_http_scrubs_unsafe_detail(client, monkeypatch):
+    """Later-label StructuredHTTPException detail must not leak key material."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
+    extracted = ExtractedLabelData(
+        brand_name="BOURBON CO",
+        class_type="Whiskey",
+        alcohol_content="45% ABV",
+        net_contents="750 mL",
+        government_warning_present=True,
+        government_warning_header="GOVERNMENT WARNING:",
+        government_warning_body="According to the Surgeon General women should not drink.",
+        extraction_confidence=0.95,
+    )
+
+    async def type_size(images, *_a, **_k):
+        name = images[0][1] if images else ""
+        if "second.png" in name:
+            raise main_module.StructuredHTTPException(
+                502,
+                UPSTREAM_ERROR,
+                "sk-ant-leaked-material traceback (most recent call last): boom",
+            )
+        return None
+
+    monkeypatch.setattr(main_module, "extract_label_fields", lambda *_a, **_k: extracted)
+    monkeypatch.setattr(main_module, "_evaluate_type_size", type_size)
+
+    res = client.post(
+        "/api/review/batch/stream",
+        files=[
+            ("files", ("first.png", _png(), "image/png")),
+            ("files", ("second.png", _png(), "image/png")),
+        ],
+        data={
+            "image_counts": "[1,1]",
+            "applications": json.dumps([_application(), _application()]),
+        },
+    )
+    assert res.status_code == 200
+    dumped = res.text.lower()
+    assert "sk-ant-" not in dumped
+    assert "traceback" not in dumped
+    assert "leaked-material" not in dumped
+    lines = [json.loads(line) for line in res.text.strip().split("\n") if line.strip()]
+    by_index = {item["index"]: item["result"] for item in lines if "result" in item}
+    assert set(by_index) == {0, 1}
+    assert by_index[1]["overall_status"] == "error"
+    assert by_index[1]["error_code"] == UPSTREAM_ERROR
+    assert by_index[1]["error"] == "An unexpected error occurred. Please try again."
+    assert any(item.get("done") is True for item in lines)
