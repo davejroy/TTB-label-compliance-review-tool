@@ -81,7 +81,8 @@ def test_health_and_demo_info_unlimited(client: TestClient, monkeypatch: pytest.
     for _ in range(10):
         resp_health = client.get("/api/health")
         assert resp_health.status_code == 200
-        assert resp_health.json() == {"status": "ok"}
+        assert resp_health.json()["status"] == "ok"
+        assert "vision_configured" in resp_health.json()
 
         resp_info = client.get("/api/demo-info")
         assert resp_info.status_code == 200
@@ -241,8 +242,9 @@ def test_label_check_batch_rate_limiting_returns_429(client: TestClient, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_concurrency_semaphore_limits_claude_calls():
+async def test_concurrency_semaphore_limits_claude_calls(monkeypatch: pytest.MonkeyPatch):
     """Verify process-wide asyncio.Semaphore wraps Claude calls and enforces concurrency limit."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-semaphore")
     sem = get_claude_semaphore()
     assert sem._value == 5
 
@@ -531,7 +533,7 @@ def test_streaming_batch_masks_raw_exceptions(client: TestClient):
         assert "secret" not in err
         assert "database" not in err
         assert "/var/" not in err
-        assert "error occurred while reviewing this label" in err.lower()
+        assert "unexpected error occurred" in err.lower()
         assert result_line["result"]["overall_status"] == "error"
         assert result_line["result"]["error_code"] == "INTERNAL_ERROR"
         assert result_line["result"].get("request_id")

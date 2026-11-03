@@ -7,6 +7,7 @@ export type RetakeArea = "front" | "back" | "neck";
 export type RetakeCause =
   | "blur"
   | "glare"
+  | "blank"
   | "dark"
   | "angle"
   | "curvature"
@@ -24,6 +25,9 @@ export type ErrorCode =
   | "INTERNAL_ERROR"
   | "INVALID_REQUEST"
   | "AUTH_REQUIRED"
+  | "VISION_UNAVAILABLE"
+  | "CONFIG_ERROR"
+  | "MODEL_UNAVAILABLE"
   | string;
 
 export interface RetakeGuidance {

@@ -1,94 +1,269 @@
-# Error Codes & User-Facing Messages
+# Error Codes
 
-This document lists all user-facing error messages returned by the API, their causes, and recommended remediation steps.
+## Purpose
 
----
+This document is the durable registry of machine-readable `error_code` values
+returned by the TTB Label Compliance Review API. Field users and support staff
+should be able to identify what happened, whether to retake a photo, and how
+to trace the request.
 
-## Photo / Image Errors
+Every error response and every review/label-check body with
+`overall_status` of `retake` or `error` includes:
 
-| Error Message | Cause | Remediation |
-|---------------|-------|-------------|
-| Photo quality is too low to read. The file could not be decoded as a valid image. Please submit a new, clear photo saved as JPEG or PNG. | The uploaded file is corrupt, truncated, or in an unsupported format. | Re-take the photo and save as JPEG or PNG. Avoid WebP, HEIC, or RAW formats. |
-| Photo quality is too low to read. The image is only WxH pixels, which is too small for reliable text recognition. Please submit a new photo taken closer to the label. | The image resolution is below the minimum threshold (100x100 px). | Move the camera closer to the label and re-take the photo. |
-| File FILENAME exceeds 10 MB limit. | The uploaded file is larger than 10 MB. | Compress the image or reduce its resolution before uploading. |
-| The upload is too large. Please use fewer or smaller photos. (`FILE_TOO_LARGE`, HTTP 413) | Total request body exceeded `MAX_REQUEST_BODY_BYTES` (default 50 MB). Enforced from `Content-Length` when present and by counting the body bytes actually received, so chunked, missing, or understated `Content-Length` cannot bypass it. `GET`/`HEAD` `/api/health` is exempt so probes stay up; other methods on that path are still capped. The frontend shows this structured message for single, batch, and stream uploads (never a proxy HTML 413 page). | Use fewer photos or smaller files. Each photo can be up to 10 MB; a batch must stay under the request-body cap. |
-| File FILENAME could not be read as a valid image. Please submit a new photo. | An unexpected decode error occurred after passing initial format checks. | Try re-saving the image in a different format and re-uploading. |
-| A maximum of 4 images may be uploaded per label. You submitted N. Please resubmit with 4 or fewer photos. | More than 4 images were submitted for a single label. | Split your submission and upload at most 4 photos per label review. |
+| Field | Meaning |
+|---|---|
+| `error_code` | Stable token such as `PHOTO_QUALITY_LOW` |
+| `message` | Scrubbed, human-readable text |
+| `request_id` | Per-request correlation id |
 
----
+The same `request_id` is echoed in the `X-Request-ID` response header and in
+server log lines. Clients may send `X-Request-ID` only when it matches
+`^[A-Za-z0-9-]{1,64}$`; otherwise the server generates a fresh id.
 
-## Application Data & COLA Template Import Errors
+HTTP error bodies use a fixed user-safe `message` plus `request_id`. Parser
+and exception text is written to server logs only.
 
-| Error Message | Cause | Remediation |
-|---------------|-------|-------------|
-| Invalid application data: {detail} | The application form field contains malformed JSON or does not conform to the expected schema. | Validate the JSON structure against the ApplicationData model. |
-| CSV file is empty. / JSON file is empty. | Uploaded template file contains 0 bytes. | Upload a valid CSV or JSON file containing COLA records. |
-| CSV file is missing a header row. / CSV file contains headers but has no data rows. | Uploaded CSV has no column headers or data rows. | Ensure the first row has standard column headers (brand_name, class_type, etc.) and contains data rows. |
-| Missing required application field(s): {fields}. | One or more mandatory fields (`beverage_type`, `brand_name`, `class_type`, `alcohol_content`, `net_contents`) are missing or blank. | Fill in the missing application columns in the CSV or JSON file. |
-| Invalid beverage type '{val}'. Expected 'distilled_spirits', 'wine', or 'beer'. | Beverage type column contains an unrecognized classification. | Use one of the canonical types (`distilled_spirits`, `wine`, `beer`) or accepted aliases (`spirits`, `malt beverage`, etc.). |
-| Malformed JSON syntax (line X, col Y): {msg} | Uploaded JSON template contains syntax errors. | Validate JSON syntax in an editor before re-uploading. |
-| Invalid image_counts: {detail} | The image_counts field (batch endpoint) contains invalid JSON or non-integer values. | Provide a JSON array of positive integers, e.g. [2, 1, 3]. |
-| Sum of image_counts must match the number of uploaded files. | The total of all image_counts values does not equal the number of files uploaded. | Ensure sum(image_counts) == len(files). |
-| Failed to parse CSV/JSON pre-fill data: {detail} | Uploaded pre-fill file is malformed, has invalid headers, or contains unparsable rows. | Check CSV header column names (`brand_name`, `class_type`, `alcohol_content`, `net_contents`) or JSON structure and re-import. |
+Photo-quality failures also include:
 
----
+```json
+"retake": { "field": "ABV", "area": "front", "cause": "glare", "tip": "Hold the phone parallel to the label and avoid overhead light glare." }
+```
 
-## Claude API & Concurrency Errors
+The top-line `message` is exactly `Photo quality is too low, please retake.`
+whenever a retake is required.
 
-| Error Message | Cause | Remediation |
-|---------------|-------|-------------|
-| API key is invalid or missing. Check the ANTHROPIC_API_KEY environment variable. | The backend Anthropic API key is not configured or has been revoked. | Set the ANTHROPIC_API_KEY environment variable to a valid key. |
-| The review service is currently processing a high volume of label requests. Please wait a moment and resubmit. | Process-wide Claude concurrency limit reached and queue timeout expired. | Retry after a few seconds. Client `safeFetch` automatically retries 429/503/529. |
-| Claude API error after retries: ... | A transient or persistent Anthropic API error occurred after one automatic retry. | Retry the request. If the error persists, check the Anthropic status page. |
+## Error Code Format
 
----
+Codes are uppercase `SNAKE_CASE` tokens. They are stable identifiers: clients
+must branch on `error_code` and `overall_status`, never on message strings.
 
-## Rate Limiting & Abuse Prevention
+## Status Separation
 
-| Error Message | Cause | Remediation |
-|---------------|-------|-------------|
-| Rate limit exceeded: {detail}. Please wait a moment before submitting additional label reviews. | Inbound IP request rate exceeded the configured threshold on review routes (`RATE_LIMIT_REVIEW`, default 20/min). | Wait for the period indicated in the `Retry-After` header before issuing new review requests. Frontend UI still loads and health/demo-info endpoints remain open. |
+`overall_status` values:
 
----
+| Value | Meaning |
+|---|---|
+| `pass` | All evaluated checks passed |
+| `warning` | Human review recommended; not a hard violation |
+| `fail` | The label violates a TTB rule (unchanged semantics) |
+| `retake` | The photo could not be read; recapture is required |
+| `error` | The system or the upload failed |
 
-## 27 CFR 16.22 Type-Size Verification & Scale-Marker Messages
+A missing Government Warning is `fail` (absent), not `retake`. An unreadable
+warning on an otherwise readable label is `retake` with `field_status` of
+`unreadable` for that element.
 
-| State | Message / Condition | Cause | Remediation |
-|---|---|---|---|
-| `cannot_measure` | Scale marker not detected in photo. Please place a standard ISO/IEC 7810 ID-1 card (e.g. driver's license, credit card) or calibrated marker beside the Government Warning and retake the photo. | Physical scale marker was omitted, occluded, or outside the camera frame. | Place a standard ID card or ArUco target flush and co-planar beside the Government Warning and retake the photo. |
-| `cannot_measure` | Scale marker perspective tilt (X°) exceeds maximum 25.0° threshold. Hold the camera parallel and flat-on to the label surface to avoid foreshortening errors, then retake the photo. | Camera was held at an oblique perspective angle (>25° planar pitch/yaw). | Hold the camera flat-on and perpendicular to the label surface. |
-| `cannot_measure` | Scale marker detected, but Government Warning text glyphs could not be segmented cleanly. Ensure the warning text is in sharp focus and free of glare or shadows, then retake the photo. | Warning text is out of focus, motion-blurred, or obscured by specular glare or deep shadows. | Ensure steady lighting without flash glare, tap to focus on the text, and retake the photo. |
-| `cannot_measure` (Fallback) | Type-size evaluation encountered an unexpected condition ({ExceptionType}). Physical gauge measurement recommended. | Unhandled CV exception or corrupt image segment during type-size evaluation caught by defensive handlers. | System fails open without HTTP 500. Verification degrades gracefully to advisory mode. Re-take photo if automated calibration is needed. |
-| `fail` | Government Warning statement text is valid, but type size is deficient: Calibrated capital letter height X.XX mm ± Y.YY mm is below the statutory 27 CFR 16.22 requirement (Z.Z mm)... | Upper-case letter height is below the 27 CFR 16.22 statutory minimum for the container volume tier. | Re-typeset the Government Warning text to meet or exceed the statutory minimum millimeter height for the container capacity. |
-| `warning` | Calibrated capital letter height X.XX mm ± Y.YY mm is borderline near the Z.Z mm threshold. Physical gauge verification recommended. | Measured capital height upper confidence bound overlaps the statutory threshold. | Perform manual verification using a physical optical comparator or certified millimeter gauge. |
-| `warning` (Uncalibrated) | Uncalibrated photo without physical scale marker. Statutory threshold is >=X.X mm based on container volume... Physical gauge measurement required to verify 27 CFR 16.22 compliance. | Photo uploaded without a scale marker. | For automated type-size calibration, include an ID-1 card or ArUco marker in the photo, or verify using a physical gauge. |
+## Field Status
 
----
+`field_status` maps each required element to `present`, `absent`, or
+`unreadable`.
 
-## HTTP Status Codes
+| Value | Meaning |
+|---|---|
+| `present` | The element was read with enough confidence to evaluate |
+| `absent` | The element is confidently not on the label (a possible violation) |
+| `unreadable` | The element could not be read; never treat this as absent |
 
-| Code | Meaning |
-|------|---------|
-| 200  | Success |
-| 400  | Bad request - malformed input data |
-| 401  | Unauthorized - missing or invalid demo access token when DEMO_ACCESS_TOKEN gate is active (never returned for rate limits or normal public evaluator access) |
-| 413  | Payload Too Large - per-file >10 MB or total request body > `MAX_REQUEST_BODY_BYTES`. Structured `error_code=FILE_TOO_LARGE`. CORS wraps the size limiter, so an allowed origin still gets `Access-Control-Allow-Origin` on the 413; disallowed origins get no CORS headers. Security headers are outermost. |
-| 422  | Unprocessable entity - user-fixable input problem (per RFC 9110 Section 15.5.21) |
-| 429  | Too Many Requests - soft inbound IP rate limit exceeded; returns actionable retry message |
-| 500  | Internal server error - unexpected backend failure |
-| 503  | Service Unavailable - concurrency cap timeout or temporary upstream outage |
+An empty required field scored `0.0` on a readable photo (overall
+confidence at or above the class threshold) is `absent`. The compliance
+result is `fail` with "X not found on label", not a photo retake. A
+low-but-nonzero score (about `0.10`–`0.30`) stays `unreadable` and still
+requests a retake. Required elements: brand, class/type, ABV, net
+contents, warning, name and address.
+
+Blank photos return `The submitted image appears to be blank. Please upload a photo of an alcohol beverage label.` and a retake tip that the label is not in the frame / nothing printed is visible (not a glare tip). Non-label photos return `The submitted image does not appear to be an alcohol beverage label.` Application and batch form errors return HTTP 422 and name the invalid field (for example `field 'brand_name' is missing or invalid`). File-quality problems that still produce a review body stay HTTP 200 with `overall_status` of `retake` or `error`.
+
+## Retake Causes
+
+| Cause | Typical tip |
+|---|---|
+| `blur` | Hold the phone still and tap the label to focus before you take the photo. |
+| `glare` | Hold the phone parallel to the label and avoid overhead light glare. |
+| `blank` | No label is visible in the frame. Photograph the printed label so text is readable. Solid-white / empty frames use `cause=blank` and the blank-photo message (not glare wording). |
+| `dark` | Move to brighter, even lighting or turn on a room light behind the camera. |
+| `angle` | Hold the phone parallel to the label so the text is not skewed. |
+| `curvature` | Flatten the label in the frame or photograph the curved panel straight-on. |
+| `cropped` | Include the entire required statement in the frame, then retake. |
+| `low_resolution` | Move closer to the label and retake at full camera resolution. |
+
+`area` is `front`, `back`, or `neck`. `field` is the required element that
+could not be read (warning, ABV, net contents, brand, class/type, name and
+address, or `label` when the whole photo is unreadable).
+
+## Error Code Registry
+
+| Code | Severity | Component | User Message | Internal Meaning | Common Cause | Recommended Action | Retryable | Owner |
+|---|---|---|---|---|---|---|---|---|
+| PHOTO_QUALITY_LOW | User-fixable | Review / image intake | Photo quality is too low, please retake. | Whole-image confidence below threshold, corrupt decode, resolution too low, or extreme pre-gate (blank / black / tiny) | Blur, darkness, glare, tiny thumbnail, truncated file | Retake using the `retake` tip | Yes (new photo) | Review API |
+| PHOTO_UNREADABLE_FIELD | User-fixable | Review / extraction | Photo quality is too low, please retake. | One or more required fields scored below per-field threshold | Glare or crop on a single panel | Retake the named `area`; readable findings are still returned | Yes (new photo) | Review API |
+| UNSUPPORTED_FILE | User-fixable | Upload validation | File is not a supported image. Please upload a JPEG, PNG, WEBP, GIF, BMP, TIFF, HEIC, or HEIF photo of the label. | Signature is not JPEG/PNG/WEBP/GIF/BMP/TIFF/HEIC/HEIF | PDF, video, or renamed text file | Save as a supported still-image format and resubmit | Yes (new file) | Review API |
+| FILE_TOO_LARGE | User-fixable | Upload validation | The upload is too large. Please use fewer or smaller photos. (HTTP 413 request-body cap; a single file over 10 MB may instead say File 'name' exceeds 10 MB limit.) | Request body or per-file payload larger than the configured cap | Chunked or large multipart upload, high-resolution burst | Use fewer or smaller photos, then resubmit | Yes (new file) | Review API |
+| VISION_UNAVAILABLE | Transient / config | Extraction | The label reader is unavailable right now — your photo is fine. Try again shortly. | Missing, invalid, or revoked model API key (aliases: `CONFIG_ERROR`, `MODEL_UNAVAILABLE`) | Key unset or 401 | Do not retake the photo; set a valid key and retry | Yes (after config) | Review API |
+| RATE_LIMITED | Transient | Ingress / upstream | The label reader is busy — your photo is fine. Wait a moment and try again. (Inbound IP cap may still say “Too many requests.”) | Inbound IP limit, concurrency busy, or upstream 429/529 | Burst of reviews or provider overload | Wait and retry the same photos | Yes | Review API |
+| UPSTREAM_TIMEOUT | Transient | Extraction | The label reader timed out — your photo is fine. Try again shortly. | Vision request timed out after one retry | Slow upstream or large image | Retry the same photos | Yes | Review API |
+| UPSTREAM_ERROR | Transient | Extraction | The label reader is unavailable right now — your photo is fine. Try again shortly. | Upstream 5xx or connection error | Provider outage | Retry later; do not expose provider bodies | Yes | Review API |
+| INTERNAL_ERROR | System | API | An unexpected error occurred. Please try again. | Unhandled exception | Defect | Retry; send `request_id` to support | Maybe | Review API |
+| INVALID_REQUEST | User-fixable | API / templates | Request could not be processed (malformed JSON, too many images, bad template). Batch `image_counts` uses the scrubbed message `image_counts must be a JSON list of integers.` | 400 / 422 validation | Bad form fields, CSV, or non-JSON `image_counts` | Fix the payload | Yes (fixed payload) | Review API |
+| AUTH_REQUIRED | Access | Demo gate | Missing or invalid access token | 401 when the optional demo gate is enabled | Missing `Authorization` | Supply a valid token | No | Auth |
+
+## HTTP/API Error Mapping
+
+| HTTP Status | Internal Code | Condition | Response Body | Notes |
+|---|---|---|---|---|
+| 200 | (none) | `pass` / `warning` / `fail` | Existing review or label-check body plus `request_id` and `field_status` | Compliance fail is not remapped |
+| 200 | PHOTO_QUALITY_LOW | Whole-image unreadable or tiny/corrupt photo | `overall_status=retake`, `message`, `retake`, `request_id` | Never HTTP 500 |
+| 200 | PHOTO_UNREADABLE_FIELD | Some required fields unreadable | `overall_status=retake`, partial `fields`/`checks`, `retake` | LowConfidenceError path stays HTTP 200 |
+| 200 | UNSUPPORTED_FILE / FILE_TOO_LARGE / INVALID_REQUEST | Bad upload that still returns a result body | `overall_status=error` | Additive; clients already accepted 200 + `error` |
+| 200 | INTERNAL_ERROR (legacy path only) | Unexpected extraction failure that is not a vision/upstream code | `overall_status=error` | Message is scrubbed; vision/auth/timeout/429 no longer use this path |
+| 400 | INVALID_REQUEST | Malformed application or batch parameters | `{error_code,message,request_id,detail}` | Fixed message; parser text stays in logs |
+| 401 | AUTH_REQUIRED | Demo gate rejected the request | Same contract | Public demo remains ungated when the token is unset. The frontend clears the stored token and shows the Demo access login card |
+| 413 | FILE_TOO_LARGE | Request body or template exceeds the configured cap | Same contract | Enforced on bytes actually read (not only `Content-Length`), including chunked bodies. 413 is sent as soon as the cap is crossed; leftover chunks are not drained. If the cap cannot be read the limiter fails closed (413) instead of accepting an unlimited body. CORS wraps the size limiter so allowed origins receive `Access-Control-Allow-Origin` on 413; security headers wrap CORS so preflight still gets CSP/HSTS. The frontend unwraps single, batch, and stream wrappers and shows the structured FILE_TOO_LARGE text (never a proxy HTML 413 page). `MAX_REQUEST_BODY_BYTES` / `MAX_TEMPLATE_BYTES`; `GET`/`HEAD` `/api/health` is never blocked; other methods on that path are still capped |
+| 422 | INVALID_REQUEST | Unprocessable template or validation error | Same contract | Fixed message; parser text stays in logs |
+| 429 | RATE_LIMITED | Per-IP rate limit, daily cap, failed-auth lockout, or upstream 429/529 | Contract plus `error=too_many_requests` and `retry_after` when the inbound cap trips | Cap trips log `cap.per_ip`, `cap.daily_soft`, `cap.global_daily`, or `cap.auth_lockout`. Guards fail open. Upstream 429/529 uses the photo-is-fine message |
+| 500 | INTERNAL_ERROR | Unhandled exception | Contract only; no stack or path | Logged server-side with `request_id` |
+| 502 | UPSTREAM_ERROR | Upstream 5xx or connection error | `{error_code,message,request_id,detail}` | Never a 200 pass/fail/pre-fill body |
+| 503 | VISION_UNAVAILABLE | Missing or rejected model API key | `{error_code,message,request_id,detail}` | `/api/health` exposes `vision_configured` (boolean only). Photo is fine; do not retake |
+| 504 | UPSTREAM_TIMEOUT | Vision request timed out after one retry | `{error_code,message,request_id,detail}` | Streaming batch raises this on the first label instead of a 200 NDJSON “finished” stream |
+
+## Examples
+
+### Retake — unreadable field, partial results
+
+```http
+HTTP/1.1 200 OK
+X-Request-ID: 7f3c2a91b0e64d1e9c8a1f2d3e4b5c6a
+```
+
+```json
+{
+  "overall_status": "retake",
+  "error_code": "PHOTO_UNREADABLE_FIELD",
+  "error": "Photo quality is too low, please retake.",
+  "request_id": "7f3c2a91b0e64d1e9c8a1f2d3e4b5c6a",
+  "retake": {
+    "field": "name and address",
+    "area": "front",
+    "cause": "blur",
+    "tip": "Hold the phone still and tap the label to focus before you take the photo."
+  },
+  "field_status": {
+    "brand_name": "present",
+    "class_type": "present",
+    "alcohol_content": "present",
+    "net_contents": "present",
+    "government_warning": "present",
+    "name_and_address": "unreadable"
+  },
+  "fields": [
+    {"field": "brand_name", "status": "pass", "label_name": "Brand Name", "message": "Brand name matches the application."}
+  ]
+}
+```
+
+### Error — unsupported file
+
+```json
+{
+  "overall_status": "error",
+  "error_code": "UNSUPPORTED_FILE",
+  "error": "File 'notes.jpg' is not a supported image. Please upload a JPEG, PNG, WEBP, GIF, BMP, TIFF, HEIC, or HEIF photo of the label.",
+  "request_id": "a1b2c3d4e5f64789a0b1c2d3e4f50617",
+  "retake": null,
+  "fields": []
+}
+```
+
+### Fail — real compliance violation (unchanged)
+
+```json
+{
+  "overall_status": "fail",
+  "error_code": null,
+  "error": null,
+  "field_status": {
+    "government_warning": "absent"
+  }
+}
+```
+
+### HTTP 429
+
+```json
+{
+  "error_code": "RATE_LIMITED",
+  "message": "Rate limit exceeded: 2 per 1 minute. Please wait a moment before submitting additional label reviews.",
+  "detail": "Rate limit exceeded: 2 per 1 minute. Please wait a moment before submitting additional label reviews.",
+  "request_id": "c0ffee12aabbccddeeff001122334455",
+  "error": "too_many_requests",
+  "retry_after": 60
+}
+```
+
+## Logging Requirements
+
+- Every request generates or accepts a `request_id` and logs it on timing and
+  error lines (`request_id=<id> ...`).
+- Log technical detail server-side only: exception type, upstream status,
+  file size, confidence scores.
+- Never log image bytes, authorization secrets, API keys, or full provider
+  error bodies in user-facing fields.
+- User-facing `message` / `error` values are scrubbed of stack traces, file
+  paths, model identifiers, key fragments, and provider names.
+
+## Troubleshooting Playbooks
+
+### Photo quality / retake
+
+1. Read `retake.field`, `retake.area`, `retake.cause`, and `retake.tip`.
+2. Recapture that panel (front, back, or neck). Hold the phone parallel to
+   the label; avoid overhead glare; fill the frame.
+3. Resubmit. Readable findings from the first pass are informational only;
+   run a new review after the retake.
+
+### Unsupported or oversized file
+
+1. Confirm the file is a still image. The client dropzone accepts JPEG, PNG, WEBP, or HEIC. The server still re-checks magic bytes.
+2. iPhone HEIC/HEIF is accepted when the server can decode it; otherwise convert to JPEG.
+
+### Vision unavailable (missing or rejected key)
+
+1. Do not retake the photo. The message says the photo is fine.
+2. Confirm `/api/health` `vision_configured` is true.
+3. Retry after a valid key is set. Give support the `request_id` if it persists.
+
+### Rate limited
+
+1. Honor `Retry-After`.
+2. Health and demo-info endpoints stay unlimited.
+3. Daily per-IP / global soft caps return HTTP 429 with this same contract.
+   If the counter itself errors, the request is allowed through (fail-open).
+
+### Upstream timeout or error
+
+1. Retry once. The server already retried transient upstream failures.
+2. If it persists, give support the `request_id`.
+
+### Internal error
+
+1. Confirm the client did not receive a stack trace or file path.
+2. Escalate with the `request_id`. Do not ask the user to interpret logs.
 
 ## Change Log
 
 | Date | Change | Author |
 |---|---|---|
-| 2026-10-30 | Documented HTTP 413 `FILE_TOO_LARGE` for Content-Length and chunked bodies (`MAX_REQUEST_BODY_BYTES`) | Maintainer |
-| 2026-10-31 | 413 counts bytes actually read, is sent immediately, and fails closed if the cap cannot be read; frontend shows the structured FILE_TOO_LARGE text | Maintainer |
 | 2026-10-31 | Body cap: only GET/HEAD `/api/health` is exempt; POST/PUT on that path are still capped. Early 413 adopts a safe incoming X-Request-ID. | Maintainer |
+| 2026-10-31 | Vision/auth/timeout/429 leave as typed HTTP 502/503/504/429 (`VISION_UNAVAILABLE`, `UPSTREAM_ERROR`, `UPSTREAM_TIMEOUT`, `RATE_LIMITED`). Never 200 pass/fail/pre-fill. CSV Comments column + formula-injection escaping | Maintainer |
+| 2026-10-31 | Blank/empty photos use `cause=blank` and blank-photo wording (not glare). Docs routes get a Swagger-safe CSP; API routes keep `default-src 'none'` | Maintainer |
+| 2026-10-30 | Frontend unwraps Batch review/stream 413 wrappers; body-cap lookup fails closed; CORS refuses wildcard+credentials | Maintainer |
+| 2026-10-30 | 413 sent immediately without draining leftover chunks; frontend ignores proxy HTML 413; preflight keeps security headers | Maintainer |
+| 2026-10-28 | HTTP 413 now counts actual body bytes (chunked / missing / understated Content-Length) and carries CORS headers for allowed origins | Maintainer |
+| 2026-10-28 | Blank/washed-out photos keep the blank message; retake tip no longer blames glare | Maintainer |
+| 2026-10-24 | Q1 hardening: HTTP 413 for body/template caps; 429 for auth lockout; fixed error messages; validated `X-Request-ID` | Maintainer |
+| 2026-10-23 | Photo quality pre-gate: `PHOTO_QUALITY_LOW` extreme short-circuit; HEIC/HEIF now supported; scrubbed `image_counts` INVALID_REQUEST message | Maintainer |
+| 2026-10-23 | Daily soft cap now returns HTTP 429 / RATE_LIMITED; fail-open only when the counter errors | Maintainer |
+| 2026-10-23 | Rewrote the contract: stable `error_code`, `request_id`, `retake` object, `overall_status` retake/error, `field_status`, scrubbed messages | Maintainer |
+| 2026-10-01 | Added Gradio demo and Eval Dashboard error handling and connection error codes | Maintainer |
 | 2026-09-18 | Added fallback `cannot_measure` entry for unhandled CV exceptions during type-size evaluation | Maintainer |
 | 2026-09-16 | Added rate limiting and daily spend guard error codes | Maintainer |
 | 2026-09-09 | Added image quality diagnostics and low confidence error codes | Maintainer |
-
----
-
-*Last updated: October 30, 2026*

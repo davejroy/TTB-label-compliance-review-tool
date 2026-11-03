@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { resolveApiOrigin } from "../apiOrigin";
 import { getToken, onUnauthorized, setToken } from "../authStore";
 import { httpStatusUserMessage } from "../errorContract";
 
@@ -22,9 +23,7 @@ export const ACCESS_EXPIRED_MESSAGE = "Access code expired or incorrect";
  * This is a demonstration-grade shared-token gate, not real user authentication.
  */
 
-const API_BASE = import.meta.env.VITE_API_HOST
-  ? `https://${import.meta.env.VITE_API_HOST}`
-  : "";
+const API_BASE = resolveApiOrigin(import.meta.env.VITE_API_HOST);
 
 interface DemoInfo {
   auth_enabled: boolean;

@@ -48,4 +48,11 @@ describe('ProcessingStatusBar', () => {
     const completeText = screen.getByText('Complete');
     expect(completeText.className).toContain('text-green-600');
   });
+
+  it('shows a Failed rail and never paints Complete green when failed=true', () => {
+    render(<ProcessingStatusBar step={2} done={false} failed={true} />);
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.queryByText('Complete')).not.toBeInTheDocument();
+    expect(screen.getByText('Failed').className).toContain('text-red-700');
+  });
 });

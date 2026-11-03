@@ -17,24 +17,30 @@ _log = logging.getLogger(__name__)
 PERMISSIONS_POLICY = "camera=(self), microphone=(), geolocation=()"
 HSTS_VALUE = "max-age=31536000; includeSubDomains"
 API_CSP = "default-src 'none'; frame-ancestors 'none'"
-# Interactive OpenAPI docs (ENABLE_API_DOCS=true) need the FastAPI/Swagger CDN.
-# Keep this off the JSON API surface.
+# FastAPI 0.162 Swagger UI / ReDoc load scripts and styles from jsDelivr and
+# the FastAPI favicon. default-src stays none; only those docs assets are
+# allowed. API JSON routes keep API_CSP.
 DOCS_CSP = (
-    "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "default-src 'none'; "
+    "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
+    "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; "
     "img-src 'self' data: https://fastapi.tiangolo.com https://cdn.jsdelivr.net; "
-    "font-src 'self' https://cdn.jsdelivr.net; "
+    "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; "
     "connect-src 'self'; "
-    "frame-ancestors 'none'"
+    "worker-src 'self' blob:; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'"
 )
-_DOCS_PATH_PREFIXES = ("/docs", "/redoc")
 
 
 def csp_for_path(path: str) -> str:
-    """Return the CSP for *path*. Docs HTML gets a separate, usable policy."""
-    normalized = (path or "").rstrip("/") or "/"
-    if normalized in _DOCS_PATH_PREFIXES or normalized.startswith(("/docs/", "/redoc/")):
+    """Return the CSP for this request path.
+
+    ``/docs``, ``/redoc``, and ``/openapi.json`` need the docs UI allowlist.
+    Every other route, including review JSON, keeps the locked-down API CSP.
+    """
+    raw = (path or "/").split("?", 1)[0]
+    if raw == "/openapi.json" or raw.startswith("/docs") or raw.startswith("/redoc"):
         return DOCS_CSP
     return API_CSP
 
@@ -98,7 +104,10 @@ class SecurityHeadersMiddleware:
                     )
                     headers.setdefault("X-Frame-Options", "DENY")
                     headers.setdefault("Permissions-Policy", PERMISSIONS_POLICY)
-                    headers.setdefault("Content-Security-Policy", csp_for_path(scope.get("path", "")))
+                    headers.setdefault(
+                        "Content-Security-Policy",
+                        csp_for_path(scope.get("path", "")),
+                    )
                     if request_is_https(scope):
                         headers.setdefault("Strict-Transport-Security", HSTS_VALUE)
                 except Exception:  # noqa: BLE001

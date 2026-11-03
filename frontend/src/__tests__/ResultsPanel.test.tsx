@@ -117,6 +117,31 @@ describe('ResultsPanel - retake, error, and fail states', () => {
     expect(onRetake).toHaveBeenCalledWith('front');
   });
 
+  it('labels a blank photo as blank, not glare', () => {
+    const result: ReviewResult = {
+      filenames: ['blank.png'],
+      overall_status: 'retake',
+      processing_time_ms: 40,
+      error: 'The submitted image appears to be blank. Please upload a photo of an alcohol beverage label.',
+      error_code: 'PHOTO_QUALITY_LOW',
+      request_id: 'req-blank-1',
+      retake: {
+        field: 'label',
+        area: 'front',
+        cause: 'blank',
+        tip: 'No label is visible in the frame. Photograph the printed label so text is readable.',
+      },
+      fields: [],
+      extracted: baseExtracted,
+    };
+    render(<ResultsPanel result={result} files={[]} />);
+    expect(screen.getByTestId('retake-card')).toBeInTheDocument();
+    expect(screen.getByText('Blank photo')).toBeInTheDocument();
+    expect(screen.getByText(/appears to be blank/i)).toBeInTheDocument();
+    expect(screen.queryByText('Glare')).not.toBeInTheDocument();
+    expect(screen.queryByText(/overhead light glare/i)).not.toBeInTheDocument();
+  });
+
   it('renders a distinct error card with request_id', () => {
     const result: ReviewResult = {
       filenames: ['bad.jpg'],

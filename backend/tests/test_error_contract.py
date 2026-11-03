@@ -131,6 +131,7 @@ def test_low_confidence_overall_returns_retake_not_fail(client):
     assert body["retake"]["cause"] in {
         "blur",
         "glare",
+        "blank",
         "dark",
         "angle",
         "curvature",
@@ -283,10 +284,10 @@ def test_file_too_large_error_code(client):
     assert body["error_code"] == "FILE_TOO_LARGE"
 
 
-def test_upstream_timeout_is_scrubbed(client):
+def test_upstream_timeout_is_typed_http_error(client):
     err = ClientError(
         "UPSTREAM_TIMEOUT",
-        "The review service timed out. Please try again.",
+        "The label reader timed out — your photo is fine. Try again shortly.",
     )
     with patch(
         "app.main._extract_fields_with_retry",
@@ -297,18 +298,18 @@ def test_upstream_timeout_is_scrubbed(client):
             files=[("files", ("front.png", _sample_png(), "image/png"))],
             data={"application": json.dumps(_application())},
         )
-    assert res.status_code == 200
+    assert res.status_code == 504
     body = res.json()
-    assert body["overall_status"] == "error"
     assert body["error_code"] == "UPSTREAM_TIMEOUT"
-    assert "claude" not in (body["error"] or "").lower()
-    assert "anthropic" not in (body["error"] or "").lower()
+    assert body.get("overall_status") not in {"pass", "fail"}
+    assert "claude" not in json.dumps(body).lower()
+    assert "anthropic" not in json.dumps(body).lower()
 
 
-def test_upstream_error_is_scrubbed(client):
+def test_upstream_error_is_typed_http_error(client):
     err = ClientError(
         "UPSTREAM_ERROR",
-        "The review service is temporarily unavailable. Please try again.",
+        "The label reader is unavailable right now — your photo is fine. Try again shortly.",
     )
     with patch(
         "app.main._extract_fields_with_retry",
@@ -319,10 +320,11 @@ def test_upstream_error_is_scrubbed(client):
             files=[("files", ("front.png", _sample_png(), "image/png"))],
             data={"application": json.dumps(_application())},
         )
+    assert res.status_code == 502
     body = res.json()
-    assert body["overall_status"] == "error"
     assert body["error_code"] == "UPSTREAM_ERROR"
-    assert "sk-ant-" not in (body["error"] or "")
+    assert body.get("overall_status") not in {"pass", "fail"}
+    assert "sk-ant-" not in json.dumps(body)
 
 
 def test_invalid_application_http_error_has_contract(client):
@@ -435,3 +437,98 @@ def test_stream_non_image_is_unsupported_file_not_retake(client):
     assert body["error"] != RETAKE_MESSAGE
     assert "traceback" not in (body["error"] or "").lower()
     assert res.headers.get("x-request-id")
+
+
+def _assert_config_error_body(res):
+    """HTTP 503 VISION_UNAVAILABLE must be structured and must not leak key material."""
+    assert res.status_code == 503
+    body = res.json()
+    assert body["error_code"] in {"VISION_UNAVAILABLE", "CONFIG_ERROR"}
+    assert "photo is fine" in body["message"].lower()
+    assert body.get("overall_status") not in {"pass", "fail"}
+    dumped = json.dumps(body).lower()
+    assert "sk-ant-" not in dumped
+    assert "anthropic" not in dumped
+    assert "traceback" not in dumped
+    assert "an exception occurred" not in dumped
+    assert res.headers.get("x-request-id") == body["request_id"]
+
+
+def _readable_png() -> bytes:
+    """Large enough to pass photo pre-gate so the model-config path is reached."""
+    return _sample_png(400, 400)
+
+
+def test_missing_api_key_returns_503_config_error(client, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    res = client.post(
+        "/api/review",
+        files=[("files", ("front.png", _readable_png(), "image/png"))],
+        data={"application": json.dumps(_application())},
+    )
+    _assert_config_error_body(res)
+
+
+def test_missing_api_key_label_check_returns_503(client, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    res = client.post(
+        "/api/label-check/batch",
+        files=[("files", ("front.png", _readable_png(), "image/png"))],
+        data={"image_counts": "[1]"},
+    )
+    _assert_config_error_body(res)
+
+
+def test_missing_api_key_batch_returns_503(client, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    res = client.post(
+        "/api/review/batch",
+        files=[("files", ("front.png", _readable_png(), "image/png"))],
+        data={
+            "image_counts": "[1]",
+            "applications": json.dumps([_application()]),
+        },
+    )
+    _assert_config_error_body(res)
+
+
+def test_missing_api_key_stream_returns_503_not_ndjson(client, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    res = client.post(
+        "/api/review/batch/stream",
+        files=[("files", ("front.png", _readable_png(), "image/png"))],
+        data={
+            "image_counts": "[1]",
+            "applications": json.dumps([_application()]),
+        },
+    )
+    _assert_config_error_body(res)
+    assert "application/json" in (res.headers.get("content-type") or "")
+
+
+def test_invalid_api_key_exception_returns_503(client, monkeypatch):
+    """Rejected-key exceptions must be HTTP 503 VISION_UNAVAILABLE, never 200 INTERNAL_ERROR."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-a-real-key-for-tests")
+    with patch(
+        "app.main._run_extract_sync",
+        side_effect=Exception("invalid x-api-key header from provider"),
+    ):
+        res = client.post(
+            "/api/review",
+            files=[("files", ("front.png", _readable_png(), "image/png"))],
+            data={"application": json.dumps(_application())},
+        )
+    _assert_config_error_body(res)
+    assert "sk-ant-not-a-real-key" not in json.dumps(res.json()).lower()
+
+
+def test_client_error_from_exception_maps_auth_without_leaking():
+    from app.main import _client_error_from_exception
+
+    mapped = _client_error_from_exception(
+        Exception("Could not resolve authentication method. api_key client option must be set.")
+    )
+    assert mapped.code in {"VISION_UNAVAILABLE", "CONFIG_ERROR"}
+    assert "sk-ant-" not in mapped.message
+    assert "anthropic" not in mapped.message.lower()
+    assert "photo is fine" in mapped.message.lower()

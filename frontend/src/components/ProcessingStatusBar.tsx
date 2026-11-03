@@ -1,8 +1,10 @@
 interface Props {
   /** Current active step index (0-based). Pass -1 when idle. */
   step: number;
-  /** True once processing has fully completed (result arrived or error). */
+  /** True once processing has fully completed successfully. */
   done: boolean;
+  /** True when the request finished as a system failure — never green. */
+  failed?: boolean;
   /** Optional user-facing status copy (e.g. cold start wake notification, long request status). */
   statusMessage?: string | null;
 }
@@ -14,13 +16,25 @@ const STAGES = [
   { label: "Complete",    icon: "complete" },
 ];
 
-function StageIcon({ name, active, done }: { name: string; active: boolean; done: boolean }) {
+function StageIcon({
+  name,
+  active,
+  done,
+  failed,
+}: {
+  name: string;
+  active: boolean;
+  done: boolean;
+  failed?: boolean;
+}) {
   const base = "flex items-center justify-center w-8 h-8 rounded-full border-2 transition-all duration-500";
-  const cls = done
-    ? base + " bg-green-500 border-green-500 text-white"
-    : active
-      ? base + " bg-[#15396a] border-[#15396a] text-white animate-pulse"
-      : base + " bg-white border-slate-300 text-slate-400";
+  const cls = failed
+    ? base + " bg-red-600 border-red-600 text-white"
+    : done
+      ? base + " bg-green-500 border-green-500 text-white"
+      : active
+        ? base + " bg-[#15396a] border-[#15396a] text-white animate-pulse"
+        : base + " bg-white border-slate-300 text-slate-400";
 
   if (name === "upload") return (
     <span className={cls}>
@@ -44,42 +58,53 @@ function StageIcon({ name, active, done }: { name: string; active: boolean; done
       </svg>
     </span>
   );
-  // complete checkmark
+  // complete checkmark or failed X
   return (
     <span className={cls}>
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-      </svg>
+      {failed ? (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      ) : (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      )}
     </span>
   );
 }
 
-export default function ProcessingStatusBar({ step, done, statusMessage }: Props) {
+export default function ProcessingStatusBar({ step, done, failed = false, statusMessage }: Props) {
   const totalStages = STAGES.length; // 4
 
   return (
     <div className="w-full px-2 py-4">
       <div className="flex items-center">
         {STAGES.map((stage, i) => {
-          const isComplete = done ? true : i < step;
-          const isActive   = !done && i === step;
+          const isLast = i === totalStages - 1;
+          const isFailedStage = failed && isLast;
+          const isComplete = failed ? !isLast && i < Math.max(step, 0) : done ? true : i < step;
+          const isActive   = !done && !failed && i === step;
+          const label = isFailedStage ? "Failed" : stage.label;
 
           return (
             <div key={stage.label} className="flex items-center" style={{ flex: i < totalStages - 1 ? "1" : "0" }}>
               {/* Circle + label */}
               <div className="flex flex-col items-center gap-1 min-w-[64px]">
-                <StageIcon name={stage.icon} active={isActive} done={isComplete} />
+                <StageIcon name={stage.icon} active={isActive} done={isComplete} failed={isFailedStage} />
                 <span
                   className={
                     "text-xs font-semibold text-center transition-colors duration-500 " +
-                    (isComplete
-                      ? "text-green-600"
-                      : isActive
-                        ? "text-[#15396a]"
-                        : "text-slate-400")
+                    (isFailedStage
+                      ? "text-red-700"
+                      : isComplete
+                        ? "text-green-600"
+                        : isActive
+                          ? "text-[#15396a]"
+                          : "text-slate-400")
                   }
                 >
-                  {stage.label}
+                  {label}
                 </span>
               </div>
               {/* Connector line between stages */}
@@ -87,8 +112,11 @@ export default function ProcessingStatusBar({ step, done, statusMessage }: Props
                 <div className="flex-1 mx-1 mb-5">
                   <div className="h-0.5 w-full bg-slate-200 relative overflow-hidden rounded">
                     <div
-                      className="absolute inset-y-0 left-0 bg-green-500 transition-all duration-700"
-                      style={{ width: isComplete ? "100%" : "0%" }}
+                      className={
+                        "absolute inset-y-0 left-0 transition-all duration-700 " +
+                        (failed ? "bg-red-500" : "bg-green-500")
+                      }
+                      style={{ width: isComplete || failed ? "100%" : "0%" }}
                     />
                   </div>
                 </div>
@@ -99,7 +127,7 @@ export default function ProcessingStatusBar({ step, done, statusMessage }: Props
       </div>
 
       {/* Dynamic status copy (cold-start / long request notification) */}
-      {statusMessage && !done && (
+      {statusMessage && !done && !failed && (
         <div className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-blue-50/80 px-3 py-2 text-center text-sm font-medium text-slate-700 border border-blue-100 animate-pulse">
           <svg className="h-4 w-4 animate-spin text-[#15396a] shrink-0" viewBox="0 0 24 24" fill="none">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />

@@ -148,67 +148,7 @@ export default function ColaImportModal({
             </div>
           )}
 
-          {/* Section 1: Template Import */}
-          <section className="space-y-3">
-            <h3 className="text-base font-bold text-[#083c6f] flex items-center justify-between border-b border-slate-200 pb-2">
-              <span className="flex items-center gap-2">
-                <span>📁</span> Upload CSV or JSON Template
-              </span>
-              <button
-                type="button"
-                onClick={downloadColaTemplateCsv}
-                className="text-xs font-semibold text-[#15396a] hover:underline flex items-center gap-1"
-              >
-                <span>⬇️</span> Download Sample CSV
-              </button>
-            </h3>
-            <p className="text-xs sm:text-sm text-slate-600">
-              Upload a spreadsheet or JSON export containing standard COLA fields (Brand Name, Class/Type, ABV, Net Contents, Bottler Address).
-              {isBatchMode && " In Batch mode, multi-row files will populate multiple label review items."}
-            </p>
-
-            <div className="mt-3">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv,.json,text/csv,application/json"
-                className="hidden"
-                id="cola-template-upload"
-                onChange={handleFileUpload}
-                disabled={importing}
-              />
-              <label
-                htmlFor="cola-template-upload"
-                className={`flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-6 cursor-pointer transition-colors ${
-                  importing
-                    ? "bg-slate-100 border-slate-300 cursor-not-allowed"
-                    : "border-[#15396a]/40 bg-blue-50/40 hover:bg-blue-50 hover:border-[#15396a]"
-                }`}
-              >
-                {importing ? (
-                  <div className="flex items-center gap-2 text-slate-600 font-medium text-sm">
-                    <svg className="animate-spin h-5 w-5 text-[#15396a]" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                    </svg>
-                    Validating and parsing template…
-                  </div>
-                ) : (
-                  <>
-                    <span className="text-2xl mb-1" aria-hidden="true">📤</span>
-                    <span className="text-sm font-bold text-[#15396a]">
-                      Click to choose CSV or JSON file
-                    </span>
-                    <span className="text-xs text-slate-500 mt-1">
-                      Supports .csv, .json with standard RFC 4180 headers
-                    </span>
-                  </>
-                )}
-              </label>
-            </div>
-          </section>
-
-          {/* Section 2: Demo Presets */}
+          {/* Presets first so they stay above the fold on typical viewports. */}
           <section className="space-y-3">
             <h3 className="text-base font-bold text-[#083c6f] flex items-center gap-2 border-b border-slate-200 pb-2">
               <span>⚡</span> One-Click Demo & QA Presets
@@ -284,6 +224,65 @@ export default function ColaImportModal({
               )}
               </>
             )}
+          </section>
+
+          <section className="space-y-3">
+            <h3 className="text-base font-bold text-[#083c6f] flex items-center justify-between border-b border-slate-200 pb-2">
+              <span className="flex items-center gap-2">
+                <span>📁</span> Upload CSV or JSON Template
+              </span>
+              <button
+                type="button"
+                onClick={downloadColaTemplateCsv}
+                className="text-xs font-semibold text-[#15396a] hover:underline flex items-center gap-1"
+              >
+                <span>⬇️</span> Download Sample CSV
+              </button>
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-600">
+              Upload a spreadsheet or JSON export containing standard COLA fields (Brand Name, Class/Type, ABV, Net Contents, Bottler Address).
+              {isBatchMode && " In Batch mode, multi-row files will populate multiple label review items."}
+            </p>
+
+            <div className="mt-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.json,text/csv,application/json"
+                className="hidden"
+                id="cola-template-upload"
+                onChange={handleFileUpload}
+                disabled={importing}
+              />
+              <label
+                htmlFor="cola-template-upload"
+                className={`flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-6 cursor-pointer transition-colors ${
+                  importing
+                    ? "bg-slate-100 border-slate-300 cursor-not-allowed"
+                    : "border-[#15396a]/40 bg-blue-50/40 hover:bg-blue-50 hover:border-[#15396a]"
+                }`}
+              >
+                {importing ? (
+                  <div className="flex items-center gap-2 text-slate-600 font-medium text-sm">
+                    <svg className="animate-spin h-5 w-5 text-[#15396a]" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                    Validating and parsing template…
+                  </div>
+                ) : (
+                  <>
+                    <span className="text-2xl mb-1" aria-hidden="true">📤</span>
+                    <span className="text-sm font-bold text-[#15396a]">
+                      Click to choose CSV or JSON file
+                    </span>
+                    <span className="text-xs text-slate-500 mt-1">
+                      Supports .csv, .json with standard RFC 4180 headers
+                    </span>
+                  </>
+                )}
+              </label>
+            </div>
           </section>
         </div>
 

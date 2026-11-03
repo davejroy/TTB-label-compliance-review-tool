@@ -1,3 +1,4 @@
+import { resolveApiOrigin } from "./apiOrigin";
 import { authHeader, handleUnauthorized } from "./authStore";
 import { httpStatusUserMessage } from "./errorContract";
 import type { ApplicationData, ColaPreset, ErrorCode, LabelCheckResult, ReviewResult } from "./types";
@@ -20,9 +21,7 @@ export class ApiError extends Error {
 // services, so the backend's hostname is baked in at build time via
 // VITE_API_HOST. In local dev this is left empty and Vite's dev server proxy
 // forwards /api requests to the local backend.
-const API_BASE = import.meta.env.VITE_API_HOST
-  ? `https://${import.meta.env.VITE_API_HOST}`
-  : "";
+const API_BASE = resolveApiOrigin(import.meta.env.VITE_API_HOST);
 
 // Transient HTTP status codes that are worth retrying once.
 // 429 = rate limited, 529 = Anthropic overloaded, 503 = service unavailable.
@@ -110,6 +109,17 @@ async function safeFetch(url: string, init: RequestInit): Promise<Response> {
     // Return immediately on success or non-retryable errors.
     if (response.ok || !RETRYABLE_STATUS.has(response.status)) {
       return response;
+    }
+    // Config/auth failures are 503 VISION_UNAVAILABLE — retrying cannot help.
+    if (response.status === 503) {
+      try {
+        const peeked = await parseErrorPayload(response.clone());
+        if (peeked.error_code === "VISION_UNAVAILABLE" || peeked.error_code === "CONFIG_ERROR") {
+          return response;
+        }
+      } catch {
+        // Fall through to the existing single retry for transient 503s.
+      }
     }
     // Retryable status on first attempt - save and loop.
     lastError = response;
@@ -255,6 +265,7 @@ export async function reviewLabelsBatchStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const received = new Set<number>();
 
   while (true) {
     const { done, value } = await reader.read();
@@ -277,6 +288,7 @@ export async function reviewLabelsBatchStream(
           "result" in parsed
         ) {
           const { index, result } = parsed as { index: number; result: ReviewResult };
+          received.add(index);
           onResult(index, result);
         }
         // Ignore the {done: true} sentinel line — it's informational only
@@ -284,6 +296,12 @@ export async function reviewLabelsBatchStream(
         // Malformed line — skip silently
       }
     }
+  }
+
+  if (received.size < items.length) {
+    throw new Error(
+      "The batch stream ended before every label was reviewed. Please try again.",
+    );
   }
 }
 

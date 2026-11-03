@@ -1,15 +1,16 @@
 /** Shared Content-Security-Policy for the static frontend. */
 
+import { resolveApiOrigin } from "./apiOrigin";
+
 export const KNOWN_BACKEND_ORIGINS = [
   "https://ttb-label-backend.onrender.com",
-  "https://ttb-label-backend-dev-r1pp.onrender.com",
 ] as const;
 
 export function buildConnectSrc(apiHost?: string): string {
   const origins = new Set<string>(["'self'", ...KNOWN_BACKEND_ORIGINS]);
-  const trimmed = apiHost?.trim();
-  if (trimmed) {
-    origins.add(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+  const origin = resolveApiOrigin(apiHost);
+  if (origin) {
+    origins.add(origin);
   }
   return Array.from(origins).join(" ");
 }

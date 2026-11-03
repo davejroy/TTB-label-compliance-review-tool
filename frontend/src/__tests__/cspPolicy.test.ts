@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { resolveApiOrigin } from '../apiOrigin';
 import { buildConnectSrc, buildContentSecurityPolicy } from '../cspPolicy';
 
 const REQUIRED_DIRECTIVES = [
@@ -19,7 +20,6 @@ describe('frontend CSP', () => {
     }
     expect(policy).toContain("connect-src");
     expect(policy).toContain("'self'");
-    expect(policy).toContain('https://ttb-label-backend-dev-r1pp.onrender.com');
     expect(policy).toContain('https://ttb-label-backend.onrender.com');
     expect(policy).toContain("style-src 'self' 'unsafe-inline'");
   });
@@ -28,7 +28,19 @@ describe('frontend CSP', () => {
     const connect = buildConnectSrc();
     expect(connect).toContain("'self'");
     expect(connect).toContain('https://ttb-label-backend.onrender.com');
-    expect(connect).toContain('https://ttb-label-backend-dev-r1pp.onrender.com');
+  });
+
+  it('allows the same origin resolveApiOrigin would fetch', () => {
+    const host = 'api.example.test';
+    const origin = resolveApiOrigin(host);
+    expect(origin).toBe('https://api.example.test');
+    expect(buildConnectSrc(host)).toContain(origin);
+    expect(buildConnectSrc('https://custom-backend.example')).toContain(
+      'https://custom-backend.example',
+    );
+    expect(resolveApiOrigin('https://custom-backend.example')).toBe(
+      'https://custom-backend.example',
+    );
   });
 
   it('omits frame-ancestors from the meta-tag policy (browsers ignore it there)', () => {

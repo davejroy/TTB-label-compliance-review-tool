@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { ApiError, reviewLabel } from "../api";
+import { isErrorResult, isRetakeResult } from "../errorContract";
 import {
   EMPTY_APPLICATION,
   type ApplicationData,
@@ -59,6 +60,7 @@ export default function SingleReview() {
   const [statusStep, setStatusStep] = useState(-1);
   const [showBar, setShowBar] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [reviewFailed, setReviewFailed] = useState(false);
 
   // Pre-fill state
   const [prefilling, setPrefilling] = useState(false);
@@ -130,6 +132,7 @@ export default function SingleReview() {
     setResult(null);
     setError(null);
     setRequestError(null);
+    setReviewFailed(false);
     setStatusStep(-1);
     setShowBar(false);
     setPrefillDone(false);
@@ -166,6 +169,12 @@ export default function SingleReview() {
     try {
       // Submit with current (possibly empty) application — we only care about extracted fields
       const res = await reviewLabel(files, application);
+      if (isErrorResult(res) || isRetakeResult(res)) {
+        setPrefillError(
+          res.error || "Pre-fill failed — the label could not be read. Please fill the fields manually.",
+        );
+        return;
+      }
       setApplication((prev) => mergeExtracted(prev, res.extracted));
       setPrefillDone(true);
       // Clear the "Done" badge after 4 s
@@ -190,6 +199,7 @@ export default function SingleReview() {
     setShowBar(true);
     setError(null);
     setRequestError(null);
+    setReviewFailed(false);
     setResult(null);
     startProgressTimers();
     // Scroll to status bar after a brief delay so it has rendered
@@ -200,6 +210,7 @@ export default function SingleReview() {
       const res = await reviewLabel(files, application);
       clearTimers();
       setStatusStep(STEP_COMPLETE);
+      setReviewFailed(isErrorResult(res) && !isRetakeResult(res));
       setResult(res);
       // Scroll to results once they arrive
       setTimeout(() => {
@@ -207,6 +218,8 @@ export default function SingleReview() {
       }, 100);
     } catch (err) {
       clearTimers();
+      setStatusStep(STEP_COMPLETE);
+      setReviewFailed(true);
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setRequestError(err instanceof ApiError ? err : null);
       setTimeout(() => {
@@ -220,7 +233,7 @@ export default function SingleReview() {
 
   // Decide what to show in the results panel
   const showStatusBar = showBar && (loading || statusStep === STEP_COMPLETE);
-  const isDone = statusStep === STEP_COMPLETE;
+  const isDone = statusStep === STEP_COMPLETE && !reviewFailed && !loading;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -340,7 +353,12 @@ export default function SingleReview() {
             ref={statusBarRef}
             className="rounded-xl border border-slate-200 bg-white px-4 pt-4 pb-2 shadow-sm mb-4"
           >
-            <ProcessingStatusBar step={statusStep} done={isDone} statusMessage={loading ? statusMessage : null} />
+            <ProcessingStatusBar
+              step={statusStep}
+              done={isDone}
+              failed={reviewFailed}
+              statusMessage={loading ? statusMessage : null}
+            />
           </div>
         )}
 

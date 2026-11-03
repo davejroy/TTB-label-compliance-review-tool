@@ -4,6 +4,7 @@ import { RETAKE_MESSAGE } from "../errorContract";
 const CAUSE_LABELS: Record<string, string> = {
   blur: "Blur",
   glare: "Glare",
+  blank: "Blank photo",
   dark: "Too dark",
   angle: "Angle",
   curvature: "Curvature",

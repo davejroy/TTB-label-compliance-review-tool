@@ -4,8 +4,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ImageDropzone, { type ImageDropzoneHandle } from '../components/ImageDropzone';
 
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+
 function pngFile(name: string): File {
-  return new File(['fake-png'], name, { type: 'image/png' });
+  return new File([PNG_BYTES], name, { type: 'image/png' });
 }
 
 describe('ImageDropzone', () => {
@@ -113,38 +115,54 @@ describe('ImageDropzone', () => {
     expect(next[1].name).toBe('back-retake.png');
   });
 
-  it('assigns an unused panel role after the first image is removed', async () => {
+  it('replaces only the front slot so back results cannot land on it', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const front = pngFile('front.png');
     const back = pngFile('back.png');
-    const { rerender } = render(
-      <ImageDropzone files={[front, back]} onChange={onChange} idPrefix="roles" />,
+    const ref = createRef<ImageDropzoneHandle>();
+
+    render(
+      <ImageDropzone ref={ref} files={[front, back]} onChange={onChange} idPrefix="front-retake" />,
     );
 
-    expect(screen.getByText('front')).toBeInTheDocument();
-    expect(screen.getByText('back')).toBeInTheDocument();
+    ref.current?.openCapture('front');
+    const replacement = pngFile('front-retake.png');
+    const camera = document.getElementById('front-retake-camera') as HTMLInputElement;
+    await user.upload(camera, replacement);
 
-    await user.click(screen.getAllByRole('button', { name: 'Remove image' })[0]);
     await waitFor(() => expect(onChange).toHaveBeenCalled());
-    const afterRemove = onChange.mock.calls.at(-1)?.[0] as File[];
-    expect(afterRemove).toHaveLength(1);
-    expect(afterRemove[0].name).toBe('back.png');
+    const next = onChange.mock.calls.at(-1)?.[0] as File[];
+    expect(next).toHaveLength(2);
+    expect(next[0].name).toBe('front-retake.png');
+    expect(next[1].name).toBe('back.png');
+  });
 
-    onChange.mockClear();
-    rerender(<ImageDropzone files={afterRemove} onChange={onChange} idPrefix="roles" />);
-    expect(screen.getByText('back')).toBeInTheDocument();
-    expect(screen.queryByText('front')).not.toBeInTheDocument();
+  it('rejects a .txt drop and does not add it to the file list', async () => {
+    const onChange = vi.fn();
+    render(<ImageDropzone files={[]} onChange={onChange} idPrefix="txt" />);
+    const txt = new File(['plain notes'], 'notes.txt', { type: 'text/plain' });
+    const zone = screen.getByText(/drag & drop label photos here/i).closest('div');
+    expect(zone).toBeTruthy();
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(txt);
+    fireEvent.drop(zone as HTMLElement, { dataTransfer });
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/not a supported label photo/i);
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent(/notes\.txt/);
+    expect(onChange).not.toHaveBeenCalled();
+  });
 
-    await user.upload(screen.getByLabelText(/Label Images/i), pngFile('new-front.png'));
-    await waitFor(() => expect(onChange).toHaveBeenCalled());
-    const afterAdd = onChange.mock.calls.at(-1)?.[0] as File[];
-    expect(afterAdd).toHaveLength(2);
-
-    rerender(<ImageDropzone files={afterAdd} onChange={onChange} idPrefix="roles" />);
-    const roles = screen
-      .getAllByText(/^(front|back|neck)$/i)
-      .map((node) => node.textContent?.toLowerCase());
-    expect(roles).toEqual(['back', 'front']);
+  it('rejects a spoofed image whose magic bytes are not an image', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<ImageDropzone files={[]} onChange={onChange} idPrefix="fake" />);
+    const fake = new File(['just text pretending'], 'front.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText(/Label Images/i), fake);
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/not a supported label photo/i);
+    });
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

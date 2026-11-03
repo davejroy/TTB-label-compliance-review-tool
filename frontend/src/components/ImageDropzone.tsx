@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { areaToFileIndex, defaultPanelRole, nextUnusedPanelRole } from "../errorContract";
+import { areaToFileIndex, defaultPanelRole } from "../errorContract";
+import { validateImageFile } from "../imageValidation";
 import { MAX_IMAGES_PER_LABEL, type RetakeArea } from "../types";
 
 interface Props {
@@ -53,6 +54,7 @@ const ImageDropzone = forwardRef<ImageDropzoneHandle, Props>(function ImageDropz
   const replaceIndexRef = useRef<number | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [roles, setRoles] = useState<RetakeArea[]>([]);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const displayRoles = files.map((_, index) => roles[index] ?? defaultPanelRole(index));
 
   function clearReplaceIndex() {
@@ -90,28 +92,45 @@ const ImageDropzone = forwardRef<ImageDropzoneHandle, Props>(function ImageDropz
     };
   }, []);
 
-  function addFiles(newFiles: FileList | null, options?: { replace?: boolean }) {
+  async function addFiles(newFiles: FileList | null, options?: { replace?: boolean }) {
     if (!newFiles || newFiles.length === 0) {
       clearReplaceIndex();
       return;
     }
     const incoming = Array.from(newFiles);
+    const accepted: File[] = [];
+    const rejected: string[] = [];
+    for (const file of incoming) {
+      const reason = await validateImageFile(file);
+      if (reason) {
+        rejected.push(file.name);
+      } else {
+        accepted.push(file);
+      }
+    }
+    if (rejected.length > 0) {
+      setValidationError(
+        rejected.length === 1
+          ? `"${rejected[0]}" is not a supported label photo. Please upload a JPEG, PNG, WEBP, or HEIC image.`
+          : `${rejected.length} files are not supported label photos. Please upload JPEG, PNG, WEBP, or HEIC images.`,
+      );
+    } else {
+      setValidationError(null);
+    }
+    if (accepted.length === 0) {
+      clearReplaceIndex();
+      return;
+    }
     const replaceAt = options?.replace ? replaceIndexRef.current : null;
     clearReplaceIndex();
     if (replaceAt !== null && files.length > 0) {
       const next = [...files];
-      next[replaceAt] = incoming[0] ?? next[replaceAt];
+      next[replaceAt] = accepted[0] ?? next[replaceAt];
       onChange(next);
       return;
     }
-    const kept = files.map((_, index) => displayRoles[index]);
-    const room = MAX_IMAGES_PER_LABEL - files.length;
-    const addedRoles: RetakeArea[] = [];
-    for (let i = 0; i < Math.min(incoming.length, room); i += 1) {
-      addedRoles.push(nextUnusedPanelRole([...kept, ...addedRoles]));
-    }
-    const combined = [...files, ...incoming].slice(0, MAX_IMAGES_PER_LABEL);
-    setRoles([...kept, ...addedRoles].slice(0, combined.length));
+    const combined = [...files, ...accepted].slice(0, MAX_IMAGES_PER_LABEL);
+    setRoles(combined.map((_, index) => displayRoles[index] ?? defaultPanelRole(index)));
     onChange(combined);
   }
 
@@ -157,7 +176,7 @@ const ImageDropzone = forwardRef<ImageDropzoneHandle, Props>(function ImageDropz
             {files.map((file, index) => {
               const role = displayRoles[index];
               return (
-                <div key={index} className="relative">
+                <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="relative">
                   <ThumbnailImage
                     key={`${file.name}-${file.size}-${file.lastModified}`}
                     file={file}
@@ -258,6 +277,11 @@ const ImageDropzone = forwardRef<ImageDropzoneHandle, Props>(function ImageDropz
           }}
         />
       </div>
+      {validationError && (
+        <p className="mt-2 text-sm text-red-700" role="alert">
+          {validationError}
+        </p>
+      )}
     </div>
   );
 });

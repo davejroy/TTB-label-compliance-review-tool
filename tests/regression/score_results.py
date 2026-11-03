@@ -31,9 +31,49 @@ def _results_path() -> Path:
     sys.exit(2)
 
 
+def _load_results(payload) -> dict:
+    """Return the id→record mapping, rejecting an empty wrapper."""
+    if not isinstance(payload, dict):
+        raise ValueError("results payload must be an object")
+    if "results" in payload:
+        results = payload.get("results")
+        if not isinstance(results, dict) or not results:
+            raise ValueError("empty results mapping")
+        return results
+    if not payload:
+        raise ValueError("empty results mapping")
+    return payload
+
+
+def _http_status(rec) -> int | None:
+    if isinstance(rec, dict) and isinstance(rec.get("status"), int):
+        return rec["status"]
+    return None
+
+
+def _has_usable_report(body: dict) -> bool:
+    """False when the payload is empty, a failed extraction, or a hollow pass."""
+    if not body:
+        return False
+    fields = body.get("fields") or body.get("checks") or []
+    extracted = body.get("extracted")
+    if body.get("overall_status") == "pass":
+        if not fields:
+            return False
+        if extracted in (None, False):
+            return False
+        if isinstance(extracted, dict) and not extracted and not fields:
+            return False
+    return True
+
+
 def _outcome(body) -> str:
     if not isinstance(body, dict):
         return "error"
+    if not _has_usable_report(body):
+        status = body.get("overall_status") or ""
+        if status == "pass":
+            return "error"
     error = body.get("error") or body.get("message") or ""
     status = body.get("overall_status") or ""
     if status:
@@ -58,31 +98,12 @@ def _defect_field(name: str) -> str:
     return name
 
 
-def _load_results(payload) -> dict:
-    """Return the id→record mapping, rejecting an empty wrapper."""
-    if not isinstance(payload, dict):
-        raise ValueError("results payload must be an object")
-    if "results" in payload:
-        results = payload.get("results")
-        if not isinstance(results, dict) or not results:
-            raise ValueError("empty results mapping")
-        return results
-    if not payload:
-        raise ValueError("empty results mapping")
-    return payload
-
-
-def _http_status(rec) -> int | None:
-    if isinstance(rec, dict) and isinstance(rec.get("status"), int):
-        return rec["status"]
-    return None
-
-
-def _typesize_state(body: dict) -> str | None:
+def _type_size_state(body: dict) -> str | None:
+    """Return the 16.22 type-size state from a review body."""
     if not isinstance(body, dict):
         return None
-    for item in body.get("fields") or []:
-        if not isinstance(item, dict) or item.get("field") != "government_warning":
+    for item in body.get("fields") or body.get("checks") or []:
+        if not isinstance(item, dict):
             continue
         details = item.get("type_size_details") or {}
         if isinstance(details, dict) and details.get("state"):
@@ -92,6 +113,20 @@ def _typesize_state(body: dict) -> str | None:
             if isinstance(finding, dict) and finding.get("code") == "type_size":
                 return finding.get("status")
     return None
+
+
+def _type_size_matches(expected: str, actual: str | None, fields: dict[str, str]) -> bool:
+    if actual == expected:
+        return True
+    # A type-size fail is often rolled into the government_warning field.
+    if expected == "fail" and (
+        actual == "fail" or fields.get("government_warning") == "fail"
+    ):
+        return True
+    if expected == "pass" and actual in {"pass", "warning", "cannot_measure"}:
+        # Uncalibrated advisory is not a planted type-size defect.
+        return actual == "pass"
+    return False
 
 
 def main() -> int:
@@ -138,21 +173,20 @@ def main() -> int:
             fields = _field_status(body) if isinstance(body, dict) else {}
             for defect in meta.get("defects") or []:
                 defect_n += 1
-                if fields.get(_defect_field(defect)) == "fail":
+                if defect == "government_warning_type_size":
+                    if _type_size_matches("fail", _type_size_state(body) if isinstance(body, dict) else None, fields):
+                        strict += 1
+                elif fields.get(_defect_field(defect)) == "fail":
                     strict += 1
         elif group == "typesize":
             ts_n += 1
-            want = meta.get("ts_expected") or expected
-            measured = _typesize_state(body) if isinstance(body, dict) else None
             fields = _field_status(body) if isinstance(body, dict) else {}
+            ts_expected = meta.get("ts_expected") or expected
+            actual = _type_size_state(body) if isinstance(body, dict) else None
             if http_status is not None and http_status >= 500:
                 continue
-            if want == "fail":
-                if measured == "fail" or fields.get("government_warning") == "fail" or outcome == "fail":
-                    ts_ok += 1
-            elif want == "pass":
-                if outcome != "error" and measured != "fail" and fields.get("government_warning") != "fail":
-                    ts_ok += 1
+            if _type_size_matches(str(ts_expected), actual, fields):
+                ts_ok += 1
         elif group == "edge":
             edge_n += 1
             if http_status is not None and http_status >= 500:
@@ -176,8 +210,8 @@ def main() -> int:
         (good_n == 0 or good_ok == good_n, f"good labels {good_ok}/{good_n} (want all pass)"),
         (deg_n == 0 or deg_ok >= 26 or deg_ok == deg_n, f"degraded {deg_ok}/{deg_n} (want >=26/27)"),
         (defect_n == 0 or strict >= 20, f"strict defects {strict}/{defect_n} (want >=20/26)"),
+        (ts_n == 0 or ts_ok == ts_n, f"typesize {ts_ok}/{ts_n} (want all match ts_expected)"),
         (not readable_retakes, "no retake on readable degraded photos"),
-        (ts_n == 0 or ts_ok == ts_n, f"typesize {ts_ok}/{ts_n} (want all ts_expected)"),
         (edge_n == 0 or edge_ok == edge_n, f"edge {edge_ok}/{edge_n} (want all reject)"),
     ]
     failed = [msg for ok, msg in targets if not ok]

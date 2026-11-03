@@ -57,4 +57,18 @@ describe("App Header Instructions Button", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
   });
+
+  it("updates the header subtitle on the Label-Only tab", async () => {
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /label-only check/i })).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(/upload a label image and compare it against the application details/i),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /label-only check/i }));
+    expect(
+      screen.getByText(/check it against ttb mandatory requirements/i),
+    ).toBeInTheDocument();
+  });
 });

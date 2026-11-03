@@ -449,16 +449,16 @@ def test_warn_mode_white_paper_label_is_not_blocked(client, monkeypatch):
     assert body["overall_status"] != "retake" or body.get("error_code") != "PHOTO_QUALITY_LOW"
 
 
-def test_solid_white_reports_glare_not_low_resolution(client, monkeypatch):
-    """Blown-out / solid white frames are glare (overexposure), not low_resolution."""
+def test_solid_white_reports_blank_not_glare_or_low_resolution(client, monkeypatch):
+    """Solid white frames are blank photos, not glare or low_resolution."""
     monkeypatch.setenv("QUALITY_PREGATE_MODE", "warn")
     white = Image.new("RGB", (400, 300), (255, 255, 255))
     assessment = assess_image_quality(white)
     assert assessment.exposure == "bright"
     assert assessment.glare_fraction >= 0.9
     assert assessment.should_block is True
-    assert assessment.block_cause == "glare"
-    assert assessment.retake_cause == "glare"
+    assert assessment.block_cause == "blank"
+    assert assessment.retake_cause == "blank"
 
     mocked = AsyncMock(return_value=(_readable_extraction(), None))
     with patch("app.main._extract_fields_with_retry", mocked):
@@ -468,7 +468,10 @@ def test_solid_white_reports_glare_not_low_resolution(client, monkeypatch):
     body = res.json()
     assert body["overall_status"] == "retake"
     assert body["error_code"] == "PHOTO_QUALITY_LOW"
-    assert body["retake"]["cause"] == "glare"
+    assert body["retake"]["cause"] == "blank"
+    assert "glare" not in (body.get("error") or "").lower()
+    assert "glare" not in (body.get("retake") or {}).get("tip", "").lower()
+    assert "blank" in (body.get("error") or "").lower()
     quality = body.get("quality") or {}
     assert quality.get("exposure") == "bright"
     assert float(quality.get("glare_fraction") or 0) >= 0.9

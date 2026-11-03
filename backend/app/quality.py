@@ -76,6 +76,7 @@ _CAUSE_WARNING: dict[str, str] = {
     "blur": "Photo looks out of focus.",
     "dark": "Photo looks too dark.",
     "glare": "Photo has glare or blown-out highlights.",
+    "blank": "Photo appears blank; no label is visible in the frame.",
     "low_resolution": "Photo resolution or contrast is too low.",
 }
 
@@ -201,9 +202,9 @@ def _extreme_cause(
         return "low_resolution"
     if brightness < thresholds.extreme_black_mean:
         return "dark"
-    # Blown-out / solid-white frames are overexposure (mapped to glare),
-    # not low resolution. Check glare and blank-bright before any other
-    # low-contrast cause so quality.exposure=bright + glare≈1.0 reports glare.
+    # Solid-white / empty frames are blank, not glare. True specular
+    # blow-out (high glare fraction without being a flat empty frame)
+    # still maps to glare.
     blown_out = (
         contrast < thresholds.extreme_blank_stddev
         and brightness > thresholds.extreme_blank_mean_high
@@ -212,7 +213,9 @@ def _extreme_cause(
         glare >= thresholds.extreme_glare_fraction
         and contrast < thresholds.extreme_blank_stddev
     )
-    if extreme_glare or blown_out:
+    if blown_out:
+        return "blank"
+    if extreme_glare:
         return "glare"
     return None
 
