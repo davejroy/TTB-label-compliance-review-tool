@@ -8,7 +8,7 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 
 | Field | Value |
 |---|---|
-| Last Updated | 2026-11-03 |
+| Last Updated | 2026-11-04 |
 | Tool Used | pip-audit, npm audit, pip freeze, npm list |
 | SBOM Format | Manual Markdown Catalog aligned with CycloneDX / SPDX structures |
 | Scope | Full Repository (Backend Python Web Service + Frontend React/TypeScript SPA) |
@@ -35,6 +35,7 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 | `pydantic` | 2.10.5 | Python | Data validation & schema serialization | MIT | PyPI |
 | `python-dotenv` | 1.2.4 | Python | Local `.env` environment loader | BSD-3-Clause | PyPI |
 | `Pillow` | 13.0.0 | Python | Image decoding, bounds checking, preprocessing | MIT-CMU | PyPI |
+| `pillow-heif` | 1.8.1 | Python | HEIC/HEIF opener for Pillow (bundles libheif) | BSD-3-Clause | PyPI |
 | `opencv-python-headless` | 5.0.0.93 | Python | Scale-marker detection, homography, CV type-size measurement (27 CFR 16.22 Option A) | Apache-2.0 | PyPI |
 | `slowapi` | 0.1.9 | Python | Inbound soft rate limiting & abuse prevention | MIT | PyPI |
 
@@ -60,6 +61,7 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 | `python-multipart` | Python | 0.0.20 -> 0.0.32 | PYSEC-2026-1852, PYSEC-2026-3036..3040 (Multipart boundary parsing vulnerabilities) | Moderate | **Fixed** | Updated pin in `backend/requirements.txt` to `0.0.32`. Validated against all 210 pytest test cases. |
 | `starlette` | Python | 0.41.3 -> **1.10.0** | PYSEC-2026-1941/1942/161 (multipart/range DoS) | Moderate | **Fixed** | Direct pin `starlette==1.10.0` with `fastapi==0.162.0` (promoted from `-dev` #51 `ceb18a8`). |
 | `Pillow` | Python | 11.1.0 -> **13.0.0** | PYSEC-2026-2249/2250 and later decoder CVEs | Moderate | **Fixed** | Promoted from `-dev` #50 `35a2189`. Magic-byte allowlist, 10 MB per-file / 50 MB body caps, and `Image.MAX_IMAGE_PIXELS = 64_000_000` remain. |
+| `pillow-heif` | Python | `>=0.16.0` -> **1.8.1** | Older wheels bundle libheif with a critical heap overflow on crafted HEIC | Critical | **Fixed** | Exact pin so a cached resolver cannot keep a pre-1.7.0 wheel. HEIC uploads remain unauthenticated by design (fail-open). |
 | `happy-dom` | npm (dev) | 18.0.1 -> **21.0.4** | GHSA-37j7-fg3j-429f, GHSA-w4gp-fjgq-3q4g | Critical (test VM) | **Fixed** | Promoted from `-dev` #51. DevDependency only. |
 | `vitest` | npm (dev) | 3.2.7 -> **5.0.5** | GHSA-82fw-gwwq-j7x9 | Moderate | **Fixed** | Promoted from `-dev` #51 with `vite@8.3.5`. |
 | Transitive npm packages | npm | Various | Minor transitive vulnerabilities | Low | **Fixed** | `zod` override `4.6.7`; `minimatch` override `11.0.1` (GHSA-g3hv-75wg-m249, eslint/dev only). Full `npm audit` is clean. |
@@ -73,7 +75,7 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 | License | Components | Compatibility Notes |
 |---|---|---|
 | MIT | `fastapi`, `anthropic`, `pydantic`, `slowapi`, `react`, `react-dom`, `vite`, `tailwindcss`, `vitest`, `eslint` | Permissive; fully compatible with open/commercial deployment. |
-| BSD-3-Clause | `uvicorn`, `python-dotenv` | Permissive; attribution retained. |
+| BSD-3-Clause | `uvicorn`, `python-dotenv`, `pillow-heif` | Permissive; attribution retained. |
 | Apache-2.0 | `python-multipart`, `opencv-python-headless`, `typescript` | Permissive; patent grant included; compatible. |
 | MIT-CMU | `Pillow` | Permissive; historical PIL license. |
 
@@ -117,3 +119,4 @@ npm audit
 | 2026-10-31 | PR #27 review: `minimatch@11.0.1` override; backend image `python:3.11.18-slim-bookworm` + apt upgrade + drop pip/setuptools/wheel. | Maintainer |
 | 2026-10-31 | Promote dest `fdc9584` + `b6fa8a6`: vision typed HTTP errors, CSV Comments, type-size image_index, address parse. No dependency pin changes. | Maintainer |
 | 2026-11-03 | PR #28 security rescan of head after e7bbefe/e4eb087/d0e11bd. pip-audit / npm audit / bandit / gitleaks / trivy HIGH-CRIT: 0. No dependency pin changes. | Maintainer |
+| 2026-11-04 | Pin `pillow-heif==1.8.1` (keep `Pillow==13.0.0`). Frontend origin/CSP hardening only; no npm pin changes. | Maintainer |

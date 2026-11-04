@@ -1,7 +1,9 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { isAllowedApiOrigin } from './src/apiOrigin.ts'
 import { buildContentSecurityPolicy } from './src/cspPolicy.ts'
+import { escapeHtmlAttr } from './src/htmlAttr.ts'
 
 function cspMetaPlugin(apiHost: string | undefined) {
   return {
@@ -21,7 +23,7 @@ function cspMetaPlugin(apiHost: string | undefined) {
         }
         return html.replace(
           '<head>',
-          `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}" />`,
+          `<head>\n    <meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttr(csp)}" />`,
         )
       },
     },
@@ -30,8 +32,13 @@ function cspMetaPlugin(apiHost: string | undefined) {
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  const env = loadEnv(mode, process.cwd(), 'VITE_')
   const apiHost = env.VITE_API_HOST || process.env.VITE_API_HOST
+  if (apiHost && apiHost.trim() && !isAllowedApiOrigin(apiHost)) {
+    throw new Error(
+      'Invalid VITE_API_HOST: expected an optional http(s) scheme, a hostname of letters, digits, dots or hyphens, an optional port, and an optional trailing slash.',
+    )
+  }
   return {
     plugins: [react(), tailwindcss(), cspMetaPlugin(apiHost)],
     server: {

@@ -15,6 +15,11 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **HEIC pin + frontend origin/CSP hardening (November 2026)**:
+  - `backend/requirements.txt` pins `pillow-heif==1.8.1` (still `Pillow==13.0.0`) so HEIC decode cannot resolve to a wheel that bundles a vulnerable libheif. Demo-token gate and `USE_FAST_EXTRACTION` are unchanged (fail-open / off).
+  - `resolveApiOrigin` accepts only an optional `http`/`https` scheme, a `[A-Za-z0-9.-]` hostname, an optional port, and an optional trailing slash. Anything else (quotes, angle brackets, spaces, `javascript:`, a path) falls back to same-origin.
+  - Vite `loadEnv` loads only `VITE_` variables. The production CSP `<meta>` attribute is HTML-escaped (`& " < > '`). Valid policies decode to the same directive string.
+
 - **Vision error contract + CSV Comments (October 2026)**:
   - Missing, invalid, or revoked model keys return HTTP 503 `VISION_UNAVAILABLE`. Upstream 5xx/connection → 502 `UPSTREAM_ERROR`; timeout → 504 `UPSTREAM_TIMEOUT`; 429/529 → 429 `RATE_LIMITED`. None of these paths return 200 pass/fail or a pre-fill success.
   - `/api/health` adds `vision_configured` (boolean only).
@@ -134,6 +139,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 | `DEMO_USERNAME` | Display username in demo modal | No | `ttb-demo` | No |
 | `MAX_REQUEST_BODY_BYTES` | Total HTTP body cap (Content-Length and chunked) | No | `52428800` | No |
 | `ENABLE_API_DOCS` | Serve `/docs` `/redoc` `/openapi.json` with a docs-only CSP | No | unset | No |
+| `VITE_API_HOST` | Frontend build-time API host (optional `http(s)` + hostname + optional port + optional `/`) | Yes (frontend prod build) | hostname or empty | No |
 
 ## External Dependencies
 

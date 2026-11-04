@@ -6,6 +6,6 @@ anthropic==2.3.0
 pydantic==2.10.5
 python-dotenv==1.2.4
 Pillow==13.0.0
-pillow-heif>=0.16.0
+pillow-heif==1.8.1
 opencv-python-headless==5.0.0.93
 slowapi==0.1.9

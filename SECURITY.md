@@ -35,7 +35,8 @@ This tool processes uploaded beverage label images and calls the Anthropic Claud
 ## Security Practices
 
 - Images are processed entirely in memory and are never written to disk (per NFR-2 in `docs/PDR.md`).
-- Pillow `Image.MAX_IMAGE_PIXELS` is explicitly capped at 64,000,000 to defend against image decompression bomb exploits.
+- Pillow `Image.MAX_IMAGE_PIXELS` is explicitly capped at 64,000,000 to defend against image decompression bomb exploits. `pillow-heif` is pinned to `1.8.1` so HEIC decode uses a current bundled libheif.
+- Frontend `VITE_API_HOST` is restricted to an optional `http(s)` scheme, a hostname of letters/digits/dots/hyphens, an optional port, and an optional trailing slash. The Vite CSP meta attribute is HTML-escaped. Vite loads only `VITE_` environment variables at build time.
 - Inbound rate limiting is applied via `slowapi` on expensive review endpoints, returning HTTP 429 Too Many Requests (never 401/403) with Retry-After guidance while keeping `/api/health` and `/api/demo-info` unrestricted.
 - Process-wide concurrency limits (`asyncio.Semaphore`, configurable via `MAX_CONCURRENT_CLAUDE_CALLS`) wrap Claude API vision extractions to prevent API resource exhaustion.
 - The Anthropic API key is read from the environment and is never echoed in API responses or logs.
