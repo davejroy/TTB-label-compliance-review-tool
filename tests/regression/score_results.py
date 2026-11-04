@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Grade a regression results JSON against tests/regression/images/manifest.json.
 
-Targets after the accuracy fixes:
+Targets after dest 59ebdd3 (#55 NV policy):
   good 6/6 pass
-  degraded verdicts >= 26/27
-  strict planted defects >= 20/26
+  degraded not-fail (pass / needs_verification / allowed extreme retake)
+  strict planted defects (D12 NV counts as caught)
   no retake on readable photos
 """
 
@@ -120,7 +120,9 @@ def _type_size_matches(expected: str, actual: str | None, fields: dict[str, str]
         return True
     # A type-size fail is often rolled into the government_warning field.
     if expected == "fail" and (
-        actual == "fail" or fields.get("government_warning") == "fail"
+        actual == "fail"
+        or actual == "needs_verification"
+        or fields.get("government_warning") in {"fail", "needs_verification"}
     ):
         return True
     if expected == "pass" and actual in {"pass", "warning", "cannot_measure"}:
@@ -163,9 +165,9 @@ def main() -> int:
                 good_ok += 1
         elif group == "degraded":
             deg_n += 1
-            # Extreme blur / 80 px are allowed retakes; everything else should pass.
+            # Extreme blur / 80 px are allowed retakes; NV is not-fail (dest #55).
             extreme = fid.endswith("gblurX_B1") or "tiny" in fid or fid.endswith("gblurX")
-            if outcome == "pass" or (extreme and outcome == "retake"):
+            if outcome in {"pass", "needs_verification"} or (extreme and outcome == "retake"):
                 deg_ok += 1
             if outcome == "retake" and not extreme:
                 readable_retakes.append(fid)
@@ -176,7 +178,7 @@ def main() -> int:
                 if defect == "government_warning_type_size":
                     if _type_size_matches("fail", _type_size_state(body) if isinstance(body, dict) else None, fields):
                         strict += 1
-                elif fields.get(_defect_field(defect)) == "fail":
+                elif fields.get(_defect_field(defect)) in {"fail", "needs_verification"}:
                     strict += 1
         elif group == "typesize":
             ts_n += 1

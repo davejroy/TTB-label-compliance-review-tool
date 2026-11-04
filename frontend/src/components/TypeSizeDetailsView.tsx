@@ -32,6 +32,11 @@ export default function TypeSizeDetailsView({
       dot: "bg-amber-500",
       label: "Needs Review / Advisory",
     },
+    needs_verification: {
+      bg: "bg-amber-50 border-amber-300 text-amber-800",
+      dot: "bg-amber-500",
+      label: "Needs Verification",
+    },
     cannot_measure: {
       bg: "bg-slate-100 border-slate-300 text-slate-800",
       dot: "bg-slate-500",

@@ -20,6 +20,11 @@ describe('StatusBadge', () => {
                  expect(screen.getByText('Needs Review')).toBeInTheDocument();
            });
 
+           it('renders "Needs Verification" text for status="needs_verification"', () => {
+                 render(<StatusBadge status="needs_verification" />);
+                 expect(screen.getByText('Needs Verification')).toBeInTheDocument();
+           });
+
            it('renders "Fail" text for status="fail"', () => {
                  render(<StatusBadge status="fail" />);
                  expect(screen.getByText('Fail')).toBeInTheDocument();

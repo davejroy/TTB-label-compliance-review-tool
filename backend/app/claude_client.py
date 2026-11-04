@@ -305,7 +305,11 @@ EXTRACTION_TOOL = {
             },
             "class_type": {
                 "type": "string",
-                "description": "The class/type designation, e.g. 'Kentucky Straight Bourbon Whiskey', 'Cabernet Sauvignon', 'India Pale Ale'.",
+                "description": (
+                    "The class/type designation, e.g. 'Kentucky Straight Bourbon Whiskey', "
+                    "'Cabernet Sauvignon', 'India Pale Ale'. If the printed designation is "
+                    "ALL CAPS, title-case it (keep intended acronyms)."
+                ),
             },
             "alcohol_content": {
                 "type": "string",
@@ -317,7 +321,11 @@ EXTRACTION_TOOL = {
             },
             "name_and_address": {
                 "type": "string",
-                "description": "The bottler/producer/importer name and address block, exactly as printed.",
+                "description": (
+                    "The bottler/producer/importer name and address block, exactly as printed, "
+                    "including any leading phrase such as 'Brewed and Canned by', 'Bottled by', "
+                    "or 'Imported by'. Do not drop those 27 CFR 4.35 / 5.66-5.68 / 7.66-7.68 phrases."
+                ),
             },
             "country_of_origin": {
                 "type": "string",
@@ -1103,6 +1111,9 @@ def _parse_extraction_response(response: object) -> ExtractedLabelData:
                 from .errors import NOT_A_LABEL_MESSAGE
 
                 raise ValueError(NOT_A_LABEL_MESSAGE)
+            class_type = (data.class_type or "").strip()
+            if class_type and class_type.isupper() and len(class_type) > 3:
+                data.class_type = class_type.title()
             return data
     raise RuntimeError("Claude did not return structured label data")
 

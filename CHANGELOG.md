@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 ## [Unreleased]
 
 ### Changed
+- Type-size: container-geometry estimates below 27 CFR 16.22 become `needs_verification`. A hard type-size fail still requires a calibrated scale-marker measurement.
+- COLA name-and-address matching tolerates a missing or variant 27 CFR 4.35 / 5.66-5.68 / 7.66-7.68 bottler phrase when the remaining name and place match exactly.
+- Printed `Imported by` overrides a domestic origin guess so country-of-origin cannot clean-pass.
+- Missing wine sulfite declaration is `needs_verification` (27 CFR 4.32(e)).
+- CSV Comments cite only the applicable CFR and strip a trailing period before the parenthetical.
+- Extraction keeps the printed bottler phrase, title-cases ALL-CAPS class/type, and still omits `temperature` / `top_p` / `top_k` (API 2026-10-21 returns HTTP 400 if those are sent).
+
+### Changed
 - Vision/auth/timeout/rate-limit failures now return typed non-2xx bodies (`VISION_UNAVAILABLE` 503, `UPSTREAM_ERROR` 502, `UPSTREAM_TIMEOUT` 504, `RATE_LIMITED` 429) instead of HTTP 200 `overall_status=error`. Pre-fill never treats these as success.
 - CSV export is one row per label with Status (`PASS` / `FAIL` / `NEEDS VERIFICATION` / `NOT REVIEWED`) and a Comments column. Every completed row is exported. Formula-injection prefixes (`=`, `+`, `-`, `@`, tab, CR) are neutralized. No `.xlsx` export.
 

@@ -20,6 +20,7 @@ import argparse
 import http.client
 import io
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -29,6 +30,22 @@ ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
+
+
+_AUTH_HEADER_RE = re.compile(
+    r"(?i)(authorization\s*:\s*)(\S+(?:\s+\S+)?)"
+)
+_AUTH_JSON_RE = re.compile(
+    r'(?i)("(?:authorization|token|access_token)"\s*:\s*")([^"]+)'
+)
+
+
+def _redact_auth(text: str) -> str:
+    """Redact scheme plus credential so Bearer tokens never leak."""
+    if not text:
+        return text
+    redacted = _AUTH_HEADER_RE.sub(r"\1[REDACTED]", text)
+    return _AUTH_JSON_RE.sub(r"\1[REDACTED]", redacted)
 
 
 def http_origin(url: str) -> str:
@@ -162,7 +179,11 @@ def _post_review(
     try:
         conn.request("POST", path, body=body, headers=headers)
         resp = conn.getresponse()
-        payload = json.loads(resp.read().decode("utf-8"))
+        raw = resp.read().decode("utf-8", errors="replace")
+        if resp.status >= 400:
+            snippet = _redact_auth(raw)[:300]
+            raise RuntimeError(f"HTTP {resp.status}: {snippet}")
+        payload = json.loads(raw)
     finally:
         conn.close()
     if isinstance(payload, list):

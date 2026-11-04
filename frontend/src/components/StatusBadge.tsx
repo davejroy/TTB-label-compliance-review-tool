@@ -3,6 +3,7 @@ import type { Status } from "../types";
 const STYLES: Record<Status, string> = {
   pass: "bg-green-100 text-green-800 border-green-300",
   warning: "bg-amber-100 text-amber-800 border-amber-300",
+  needs_verification: "bg-amber-100 text-amber-800 border-amber-300",
   fail: "bg-red-100 text-red-800 border-red-300",
   retake: "bg-orange-100 text-orange-800 border-orange-300",
   error: "bg-slate-200 text-slate-800 border-slate-400",
@@ -11,6 +12,7 @@ const STYLES: Record<Status, string> = {
 const LABELS: Record<Status, string> = {
   pass: "Pass",
   warning: "Needs Review",
+  needs_verification: "Needs Verification",
   fail: "Fail",
   retake: "Retake",
   error: "Error",
@@ -19,6 +21,7 @@ const LABELS: Record<Status, string> = {
 const ICONS: Record<Status, string> = {
   pass: "✓",
   warning: "⚠",
+  needs_verification: "⚠",
   fail: "✕",
   retake: "↻",
   error: "!",

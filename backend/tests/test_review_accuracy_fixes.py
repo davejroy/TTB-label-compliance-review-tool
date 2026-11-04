@@ -288,7 +288,7 @@ class TestReviewModeRules:
         abv = next(item for item in results if item.field == "alcohol_content")
         assert abv.status == "fail"
 
-    def test_wine_missing_sulfites_is_warning_in_review(self):
+    def test_wine_missing_sulfites_is_needs_verification_in_review(self):
         results = run_compliance_checks(
             _application(beverage_type="wine", alcohol_content="13.5% Alc./Vol."),
             _extracted(
@@ -298,7 +298,7 @@ class TestReviewModeRules:
             ),
         )
         sulfite = next(item for item in results if item.field == "sulfite_declaration")
-        assert sulfite.status == "warning"
+        assert sulfite.status == "needs_verification"
         assert "sulfite" in sulfite.message.lower()
 
     def test_allergen_absent_is_informational_pass(self):

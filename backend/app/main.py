@@ -1494,9 +1494,26 @@ async def _evaluate_type_size(
                 for idx, (data, name) in enumerate(images)
             ])
         )
+    marker_methods = {
+        CalibrationMethod.SCALE_MARKER_ARUCO,
+        CalibrationMethod.SCALE_MARKER_CARD_ID1,
+        CalibrationMethod.SCALE_MARKER_RULER,
+    }
+    completed_marker = [
+        ts_res
+        for ts_res in results
+        if ts_res.method in marker_methods and ts_res.state in {"pass", "fail", "warning"}
+    ]
+    if completed_marker:
+        return completed_marker[-1]
+    geometry = [
+        ts_res
+        for ts_res in results
+        if ts_res.method == CalibrationMethod.CONTAINER_GEOMETRY
+    ]
+    if geometry:
+        return geometry[-1]
     for ts_res in results:
-        if ts_res.method not in (CalibrationMethod.UNCALIBRATED_ESTIMATE, CalibrationMethod.NONE):
-            return ts_res
         if type_size_details is None:
             type_size_details = ts_res
     return type_size_details

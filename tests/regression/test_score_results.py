@@ -46,6 +46,7 @@ def test_type_size_state_from_details_and_warning_format():
     }
     assert _type_size_state(body) == "fail"
     assert _type_size_matches("fail", "fail", {"government_warning": "fail"}) is True
+    assert _type_size_matches("fail", "needs_verification", {"government_warning": "needs_verification"}) is True
     assert _type_size_matches("pass", "fail", {}) is False
     fmt_only = {
         "fields": [

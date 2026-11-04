@@ -1,6 +1,6 @@
 export type BeverageType = "distilled_spirits" | "wine" | "beer";
-export type Status = "pass" | "warning" | "fail" | "retake" | "error";
-export type FieldCheckStatus = "pass" | "warning" | "fail";
+export type Status = "pass" | "warning" | "needs_verification" | "fail" | "retake" | "error";
+export type FieldCheckStatus = "pass" | "warning" | "needs_verification" | "fail";
 export type FormatStatus = "pass" | "advisory" | "fail";
 export type FieldPresence = "present" | "absent" | "unreadable";
 export type RetakeArea = "front" | "back" | "neck";
@@ -52,7 +52,7 @@ export interface TypeSizeMeasurement {
   required_min_height_mm: number;
   uncertainty_mm?: number;
   skew_angle_deg?: number;
-  state: "pass" | "fail" | "warning" | "cannot_measure";
+  state: "pass" | "fail" | "warning" | "needs_verification" | "cannot_measure";
   verification_note: string;
   estimated_characters_per_inch?: number;
   max_characters_per_inch?: number;

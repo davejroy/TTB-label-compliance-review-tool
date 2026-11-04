@@ -35,8 +35,8 @@ class ImageQualityAdvisory(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="Human-readable quality notes.")
 
 BeverageType = Literal["distilled_spirits", "wine", "beer"]
-Status = Literal["pass", "warning", "fail"]
-OverallStatus = Literal["pass", "warning", "fail", "retake", "error"]
+Status = Literal["pass", "warning", "needs_verification", "fail"]
+OverallStatus = Literal["pass", "warning", "needs_verification", "fail", "retake", "error"]
 Confidence = Literal["high", "medium", "low"]
 
 class CalibrationMethod(str, Enum):
@@ -59,9 +59,9 @@ class TypeSizeMeasurement(BaseModel):
     required_min_height_mm: float = Field(..., description="Statutory 16.22 threshold based on container capacity (>= 1.0 mm for <= 237 mL, >= 2.0 mm for 237 mL-3 L, >= 3.0 mm for > 3 L)")
     uncertainty_mm: Optional[float] = Field(None, description="95% confidence interval half-width (+/- mm)")
     skew_angle_deg: Optional[float] = Field(None, description="Planar tilt angle of target in degrees")
-    state: Literal["pass", "fail", "warning", "cannot_measure"] = Field(
+    state: Literal["pass", "fail", "warning", "needs_verification", "cannot_measure"] = Field(
         ...,
-        description="Type-size compliance state: pass | fail | warning | cannot_measure",
+        description="Type-size compliance state: pass | fail | warning | needs_verification | cannot_measure",
     )
     verification_note: str = Field(..., description="Plain-language audit explanation or advisory note")
     estimated_characters_per_inch: Optional[float] = Field(

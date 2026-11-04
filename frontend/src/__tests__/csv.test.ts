@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   CSV_RESULT_HEADER,
+  appendCitations,
   exportComment,
   exportStatus,
   labelCheckResultCsvRows,
@@ -188,7 +189,7 @@ describe('reviewResultCsvRows', () => {
         });
         expect(rows[0][2]).toBe('PASS');
         expect(rows[0][3]).toMatch(/all required elements present/i);
-        expect(rows[0][3]).toMatch(/warning text and type size/i);
+        expect(rows[0][3]).toMatch(/warning text/i);
     });
 
     it('writes NEEDS VERIFICATION comments that say what the reviewer must confirm', () => {
@@ -282,6 +283,12 @@ describe('labelCheckResultCsvRows', () => {
         expect(rows[0][3]).toMatch(/Government Warning type size failed/i);
         expect(rows[0][3]).toMatch(/below the 1\.0 mm minimum/i);
         expect(rows[0][3]).toMatch(/27 CFR 16\.22/);
+        expect(rows[0][3]).not.toMatch(/\.\s*\(27 CFR/);
+    });
+
+    it('strips a trailing period before appending a citation', () => {
+        expect(appendCitations('Name and Address on label does not match application.', ['27 CFR 7.66-7.68']))
+            .toBe('Name and Address on label does not match application (27 CFR 7.66-7.68).');
     });
 
     it('keeps every completed row, including NOT REVIEWED errors', () => {
