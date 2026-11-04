@@ -75,7 +75,7 @@ The prototype implements a **fail-open security and abuse prevention architectur
 7. **Middleware order (Starlette LIFO)**: last added is outermost. Production stack is body-limit (innermost) → CORS → security headers (outermost). CORS wraps the size limiter so a 413 to an allowed origin still carries `Access-Control-Allow-Origin` (none for disallowed origins); security headers wrap CORS so preflight OPTIONS, which CORS answers itself, still get CSP/HSTS. A wildcard origin is never paired with credentials.
 8. **Type-size bbox isolation**: `_evaluate_type_size` applies a Government Warning box only when `field_locations.image_index` matches the photo under measurement. `merge_extracted_label_data` remaps each photo's locations onto the merged index so a back-label box is never applied to the front photo.
 9. **Docs CSP**: `/docs`, `/redoc`, and `/openapi.json` use a docs CSP (`default-src 'none'` plus jsDelivr / FastAPI assets and `connect-src 'self'`). API JSON keeps `default-src 'none'; frame-ancestors 'none'`.
-10. **Frontend origin**: `VITE_API_HOST` and CSP `connect-src` share `resolveApiOrigin` (hostname gets `https://`; a full URL is kept as-is). Docker nginx stays `connect-src 'self'`.
+10. **Frontend origin**: `VITE_API_HOST` and CSP `connect-src` share `resolveApiOrigin` (hostname gets `https://`; a full URL is kept as-is). Values must match an optional `http(s)` scheme, a `[A-Za-z0-9.-]` hostname, an optional port, and an optional trailing slash; anything else falls back to same-origin. The Vite CSP `<meta>` attribute is HTML-escaped. Docker nginx stays `connect-src 'self'`.
 
 This is **not** real per-user authentication or authorization: it is designed to keep public demos accessible and safe from abuse. See [REGULATORY_REFERENCES.md](./REGULATORY_REFERENCES.md).
 
@@ -89,7 +89,7 @@ Key environment variables (see [HANDOFF.md](./HANDOFF.md) for the authoritative 
 | `CLAUDE_MODEL` | Vision-capable Claude model override (default: `claude-sonnet-4-5`) | No | No |
 | `USE_FAST_EXTRACTION` | Feature flag to route extractions to faster/cheaper model on -dev (default: `false`) | No | No |
 | `EXTRACTION_FAST_MODEL` | Fast model when `USE_FAST_EXTRACTION=true` (default: `claude-3-5-haiku-latest`) | No | No |
-| `VITE_API_HOST` | Backend host the frontend calls (build-time). `resolveApiOrigin` and CSP `connect-src` share this value (hostname gets `https://`; a full URL is kept as-is). Docker nginx stays `connect-src 'self'`. | Yes (frontend) | No |
+| `VITE_API_HOST` | Backend host the frontend calls (build-time). Must be an optional `http(s)` scheme, `[A-Za-z0-9.-]` hostname, optional port, optional `/`. `resolveApiOrigin` and CSP `connect-src` share this value (hostname gets `https://`; a full URL is kept as-is). Invalid values fall back to same-origin; a non-empty invalid host fails the Vite build. Docker nginx stays `connect-src 'self'`. | Yes (frontend) | No |
 | `CORS_ORIGINS` | Allowed browser origins for the backend API. Unset fails open to local Vite + the `render.yaml` frontend (`https://ttb-label-frontend.onrender.com`); methods GET/POST/OPTIONS, headers Authorization/Content-Type, credentials off. | Recommended | No |
 | `MAX_REQUEST_BODY_BYTES` | Total HTTP request-body cap (Content-Length and chunked). Default 50 MB. | Recommended | No |
 | `MAX_LABELS_PER_BATCH` | Max labels per batch/stream request (default 50) | No | No |
@@ -193,6 +193,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-10-31 | Vision failures are typed HTTP 502/503/504/429; CSV Status + Comments; health `vision_configured`; type-size image_index; address parse | Maintainer |
 | 2026-11-03 | Address parse: industry/legal words win over numbered-street heuristics; later-label stream errors scrub exception detail | Maintainer |
 | 2026-10-30 | CI follow-up: type-size bbox test keyed by filename (gather+threadpool); `tsconfig.app.json` excludes Vitest files from production `tsc -b` | Maintainer |
+| 2026-11-04 | Pin `pillow-heif==1.8.1`; validate `VITE_API_HOST`; HTML-escape the Vite CSP meta attribute | Maintainer |
 
 ## Related Documentation
 

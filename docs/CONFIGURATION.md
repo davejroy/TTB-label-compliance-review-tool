@@ -30,13 +30,15 @@ All secrets are supplied via the environment only; none are stored in the repo.
 | MAX_LABELS_PER_BATCH | No | `50` | Maximum labels accepted on `/api/review/batch` and `/api/review/batch/stream`. |
 | MAX_TEMPLATE_BYTES | No | `1048576` (1 MB) | Maximum COLA template upload size. |
 | ENABLE_API_DOCS | No | unset (off) | When `true`/`1`/`yes`/`on`, serves `/docs`, `/redoc`, and `/openapi.json`. Those HTML pages get a separate CSP that allows the FastAPI/Swagger CDN (`cdn.jsdelivr.net`). JSON API routes keep `default-src 'none'`. |
+| VITE_API_HOST | Yes (frontend production build) | (empty; same-origin `/api`) | Build-time backend host for `fetch` and CSP `connect-src`. Allowed: optional `http://` or `https://`, a hostname of letters/digits/dots/hyphens, optional `:port`, optional trailing `/`. Invalid values fall back to same-origin; a non-empty invalid value fails the Vite build. Vite `loadEnv` reads only `VITE_` variables. |
 
 Defined in: backend/app/auth.py (DEMO_ACCESS_TOKEN, DEMO_USERNAME),
 backend/app/claude_client.py (CLAUDE_MODEL, USE_FAST_EXTRACTION, EXTRACTION_FAST_MODEL),
 backend/app/limiter.py (RATE_LIMIT_REVIEW, MAX_REVIEW_REQUESTS_PER_DAY),
 backend/app/request_limits.py (MAX_REQUEST_BODY_BYTES, MAX_LABELS_PER_BATCH, MAX_TEMPLATE_BYTES),
 backend/app/security.py (API_CSP, DOCS_CSP),
-backend/app/main.py (ANTHROPIC_API_KEY, CORS_ORIGINS, MAX_CONCURRENT_CLAUDE_CALLS, CLAUDE_CONCURRENCY_TIMEOUT, ENABLE_API_DOCS).
+backend/app/main.py (ANTHROPIC_API_KEY, CORS_ORIGINS, MAX_CONCURRENT_CLAUDE_CALLS, CLAUDE_CONCURRENCY_TIMEOUT, ENABLE_API_DOCS),
+frontend/src/apiOrigin.ts and frontend/vite.config.ts (VITE_API_HOST).
 
 ## Upload Limits (backend/app/request_limits.py)
 

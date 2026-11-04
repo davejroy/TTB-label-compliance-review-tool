@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveApiOrigin } from '../apiOrigin';
+import { isAllowedApiOrigin, resolveApiOrigin } from '../apiOrigin';
 import { buildConnectSrc } from '../cspPolicy';
 
 describe('resolveApiOrigin vs connect-src', () => {
@@ -21,5 +21,25 @@ describe('resolveApiOrigin vs connect-src', () => {
     expect(resolveApiOrigin('')).toBe('');
     expect(resolveApiOrigin(undefined)).toBe('');
     expect(buildConnectSrc()).toContain("'self'");
+  });
+
+  it('accepts an optional port and trailing slash', () => {
+    expect(resolveApiOrigin('https://api.example.test:8443/')).toBe(
+      'https://api.example.test:8443',
+    );
+    expect(isAllowedApiOrigin('localhost:8000')).toBe(true);
+    expect(resolveApiOrigin('localhost:8000')).toBe('https://localhost:8000');
+  });
+
+  it.each([
+    ['quotes', 'evil.com"onclick="alert(1)'],
+    ['angle brackets', 'evil.com><script>'],
+    ['spaces', 'api.example.test /admin'],
+    ['javascript scheme', 'javascript:alert(1)'],
+    ['path injection', 'api.example.test/api/../admin'],
+  ])('rejects %s and falls back to same-origin', (_label, value) => {
+    expect(isAllowedApiOrigin(value)).toBe(false);
+    expect(resolveApiOrigin(value)).toBe('');
+    expect(buildConnectSrc(value)).not.toContain(value);
   });
 });

@@ -323,6 +323,28 @@ def test_exif_orientation_transposed_on_intake():
     assert out.size[0] <= out.size[1]
 
 
+def test_pillow_heif_register_and_generated_roundtrip():
+    """Register the HEIF opener and round-trip a generated HEIC (no fixture file)."""
+    pillow_heif = pytest.importorskip("pillow_heif")
+    try:
+        pillow_heif.register_heif_opener()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"libheif unavailable: {exc}")
+
+    src = Image.new("RGB", (32, 24), (12, 80, 160))
+    buf = io.BytesIO()
+    try:
+        src.save(buf, format="HEIF")
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"HEIC encode unavailable: {exc}")
+    data = buf.getvalue()
+    assert data[4:8] == b"ftyp"
+
+    opened = Image.open(io.BytesIO(data))
+    opened.load()
+    assert opened.size == (32, 24)
+
+
 def test_heic_decode_roundtrip_or_skip():
     pillow_heif = pytest.importorskip("pillow_heif")
     try:

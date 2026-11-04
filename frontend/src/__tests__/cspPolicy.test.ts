@@ -1,8 +1,17 @@
+// @vitest-environment node
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { resolveApiOrigin } from '../apiOrigin';
 import { buildConnectSrc, buildContentSecurityPolicy } from '../cspPolicy';
+import { escapeHtmlAttr } from '../htmlAttr';
+
+const VITE_CONFIG_PATH = fileURLToPath(
+  new URL('../../vite.config.ts', import.meta.url),
+);
+const RENDER_YAML_PATH = fileURLToPath(
+  new URL('../../../render.yaml', import.meta.url),
+);
 
 const REQUIRED_DIRECTIVES = [
   "default-src 'self'",
@@ -30,6 +39,13 @@ describe('frontend CSP', () => {
     expect(connect).toContain('https://ttb-label-backend.onrender.com');
   });
 
+  it('keeps connect-src fail-open to known backends when VITE_API_HOST is invalid', () => {
+    const connect = buildConnectSrc('javascript:alert(1)');
+    expect(connect).toContain("'self'");
+    expect(connect).toContain('https://ttb-label-backend.onrender.com');
+    expect(connect).not.toContain('javascript:');
+  });
+
   it('allows the same origin resolveApiOrigin would fetch', () => {
     const host = 'api.example.test';
     const origin = resolveApiOrigin(host);
@@ -53,14 +69,42 @@ describe('frontend CSP', () => {
     expect(metaPolicy).toContain("base-uri 'self'");
   });
 
-  it('loads VITE_API_HOST from mode env files via Vite loadEnv', () => {
-    const viteConfig = readFileSync(resolve(__dirname, '../../vite.config.ts'), 'utf8');
+  it('loads only VITE_ vars from mode env files via Vite loadEnv', () => {
+    const viteConfig = readFileSync(VITE_CONFIG_PATH, 'utf8');
     expect(viteConfig).toContain('loadEnv');
+    expect(viteConfig).toContain("loadEnv(mode, process.cwd(), 'VITE_')");
     expect(viteConfig).toContain('VITE_API_HOST');
+    expect(viteConfig).toContain('escapeHtmlAttr(csp)');
+  });
+
+  it('rejects hosts that would break out of the CSP meta attribute', () => {
+    const injected = 'evil"><script>alert(1)</script>';
+    expect(resolveApiOrigin(injected)).toBe('');
+    expect(buildConnectSrc(injected)).not.toContain(injected);
+    expect(buildContentSecurityPolicy(injected)).not.toContain('<script>');
+    expect(escapeHtmlAttr('a&b"c<d>e\'f')).toBe(
+      'a&amp;b&quot;c&lt;d&gt;e&#39;f',
+    );
+  });
+
+  it('attribute-escapes a valid CSP to an equivalent HTML-decoded value', () => {
+    const policy = buildContentSecurityPolicy('api.example.test', {
+      frameAncestors: false,
+    });
+    const escaped = escapeHtmlAttr(policy);
+    const decoded = escaped
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&');
+    expect(decoded).toBe(policy);
+    // Valid policies have no & " < >, so those escapes are identity.
+    expect(policy).not.toMatch(/[&"<>]/);
   });
 
   it('declares the same policy on the Render static site', () => {
-    const yaml = readFileSync(resolve(__dirname, '../../../render.yaml'), 'utf8');
+    const yaml = readFileSync(RENDER_YAML_PATH, 'utf8');
     expect(yaml).toContain('Content-Security-Policy');
     expect(yaml).toContain("default-src 'self'");
     expect(yaml).toContain("img-src 'self' data: blob:");
