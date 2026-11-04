@@ -68,6 +68,25 @@ describe("TypeSizeDetailsView", () => {
     expect(screen.getByText(/Scale marker perspective tilt/i)).toBeInTheDocument();
   });
 
+  it("renders container-geometry needs_verification without calling it a fail", () => {
+    const details: TypeSizeMeasurement = {
+      method: "container_geometry",
+      pixels_per_mm: 4.0,
+      measured_capital_height_mm: 1.5,
+      required_min_height_mm: 2.0,
+      uncertainty_mm: 0.2,
+      state: "needs_verification",
+      verification_note:
+        "Uncalibrated container-geometry estimate 1.50 mm is below the 27 CFR 16.22 2.0 mm threshold.",
+    };
+
+    render(<TypeSizeDetailsView details={details} />);
+
+    expect(screen.getByText("Needs Verification")).toBeInTheDocument();
+    expect(screen.queryByText("Deficient Type Size")).not.toBeInTheDocument();
+    expect(screen.getByText(/Known Container Geometry/i)).toBeInTheDocument();
+  });
+
   it("renders uncalibrated estimate advisory state correctly", () => {
     const details: TypeSizeMeasurement = {
       method: "uncalibrated_estimate",

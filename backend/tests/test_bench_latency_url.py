@@ -19,6 +19,14 @@ def test_http_origin_accepts_http_and_https():
     assert bench_latency.http_origin("https://api.example.test/extra") == "https://api.example.test"
 
 
+def test_redact_auth_covers_scheme_and_json_keys():
+    header = "Authorization: Bearer demo-token-value"
+    assert "demo-token-value" not in bench_latency._redact_auth(header)
+    assert "[REDACTED]" in bench_latency._redact_auth(header)
+    body = '{"authorization":"secret-word-token","ok":true}'
+    assert "secret-word-token" not in bench_latency._redact_auth(body)
+
+
 def test_http_origin_rejects_file_and_empty():
     with pytest.raises(ValueError, match="http"):
         bench_latency.http_origin("file:///etc/passwd")

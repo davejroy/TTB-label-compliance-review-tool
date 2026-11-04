@@ -145,6 +145,153 @@ def _container_volume_ml(net_contents: Optional[str]) -> Optional[float]:
     return qty
 
 
+def _typical_container_width_mm(net_contents: Optional[str]) -> float:
+    """Approximate container body width in mm for uncalibrated geometry.
+
+    Used only to decide needs_verification vs advisory. A hard 16.22 FAIL
+    still requires a physical scale marker (27 CFR 16.22).
+    """
+    qty_ml = _container_volume_ml(net_contents)
+    if qty_ml is None:
+        return 78.0
+    if qty_ml <= 237.0:
+        return 52.0
+    if qty_ml <= 3000.0:
+        return 78.0
+    return 120.0
+
+
+def _geometry_type_size(
+    image_bgr: np.ndarray,
+    working_scale: float,
+    gw_bbox: Optional[Tuple[float, float, float, float]],
+    net_contents: Optional[str],
+    required_min_mm: float,
+    max_cpi: int,
+    warning_text: Optional[str],
+) -> TypeSizeMeasurement:
+    """Estimate type size from container width. Below-threshold → NV, never FAIL."""
+    if gw_bbox is None:
+        return TypeSizeMeasurement(
+            method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+            required_min_height_mm=required_min_mm,
+            max_characters_per_inch=max_cpi,
+            state="warning",
+            verification_note=(
+                f"Uncalibrated photo without physical scale marker. Statutory threshold is >={required_min_mm:.1f} mm "
+                f"based on container volume ({net_contents or 'standard'}). Physical gauge measurement required to verify 27 CFR 16.22 compliance."
+            ),
+        )
+    # Close-up of the warning (large bbox, cropped container) cannot use
+    # image-width / typical-bottle-width. Stay uncalibrated; do not invent mm.
+    bbox_area = max(0.0, gw_bbox[2]) * max(0.0, gw_bbox[3])
+    if bbox_area >= 0.15 or (gw_bbox[2] >= 0.65 and gw_bbox[3] >= 0.20):
+        return TypeSizeMeasurement(
+            method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+            required_min_height_mm=required_min_mm,
+            max_characters_per_inch=max_cpi,
+            state="warning",
+            verification_note=(
+                f"Uncalibrated photo without physical scale marker. Statutory threshold is >={required_min_mm:.1f} mm "
+                f"based on container volume ({net_contents or 'standard'}). Physical gauge measurement required to verify 27 CFR 16.22 compliance."
+            ),
+        )
+    glyph_res = measure_capital_letter_height_px(
+        image_bgr, gw_bbox=gw_bbox, scale=working_scale
+    )
+    if glyph_res is None:
+        return TypeSizeMeasurement(
+            method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+            required_min_height_mm=required_min_mm,
+            max_characters_per_inch=max_cpi,
+            state="warning",
+            verification_note=(
+                f"Uncalibrated photo without physical scale marker. Statutory threshold is >={required_min_mm:.1f} mm "
+                f"based on container volume ({net_contents or 'standard'}). Physical gauge measurement required to verify 27 CFR 16.22 compliance."
+            ),
+        )
+
+    median_cap_px, uncertainty_px = glyph_res
+    height, width = image_bgr.shape[:2]
+    typical_width_mm = _typical_container_width_mm(net_contents)
+    # Dest #54: skip geometry on heavily downscaled bottle shots. A working
+    # copy under 400 px cannot separate planted 1.50 mm from legal 2.0 mm.
+    if max(height, width) < 400:
+        return TypeSizeMeasurement(
+            method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+            required_min_height_mm=required_min_mm,
+            max_characters_per_inch=max_cpi,
+            state="warning",
+            verification_note=(
+                f"Uncalibrated photo without physical scale marker. Statutory threshold is >={required_min_mm:.1f} mm "
+                f"based on container volume ({net_contents or 'standard'}). Physical gauge measurement required to verify 27 CFR 16.22 compliance."
+            ),
+        )
+
+    px_per_mm = width / typical_width_mm
+    if px_per_mm <= 0:
+        return TypeSizeMeasurement(
+            method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+            required_min_height_mm=required_min_mm,
+            max_characters_per_inch=max_cpi,
+            state="warning",
+            verification_note=(
+                f"Uncalibrated photo without physical scale marker. Statutory threshold is >={required_min_mm:.1f} mm "
+                f"based on container volume ({net_contents or 'standard'}). Physical gauge measurement required to verify 27 CFR 16.22 compliance."
+            ),
+        )
+
+    measured_cap_mm = median_cap_px / px_per_mm
+    uncertainty_mm = max(uncertainty_px / px_per_mm, 0.15)
+    upper_bound_mm = measured_cap_mm + uncertainty_mm
+    estimated_cpi = None
+    if warning_text and gw_bbox is not None:
+        bbox_w_px = gw_bbox[2] * width
+        bbox_h_px = gw_bbox[3] * height
+        estimated_cpi = estimate_characters_per_inch(
+            warning_text,
+            bbox_w_px,
+            bbox_h_px,
+            px_per_mm,
+            measured_cap_mm,
+        )
+
+    if upper_bound_mm < required_min_mm:
+        return TypeSizeMeasurement(
+            method=CalibrationMethod.CONTAINER_GEOMETRY,
+            pixels_per_mm=round(px_per_mm, 2),
+            measured_capital_height_mm=round(measured_cap_mm, 2),
+            required_min_height_mm=required_min_mm,
+            max_characters_per_inch=max_cpi,
+            estimated_characters_per_inch=(
+                round(estimated_cpi, 1) if estimated_cpi is not None else None
+            ),
+            uncertainty_mm=round(uncertainty_mm, 2),
+            state="needs_verification",
+            verification_note=(
+                f"Uncalibrated container-geometry estimate {measured_cap_mm:.2f} mm "
+                f"± {uncertainty_mm:.2f} mm is below the 27 CFR 16.22 "
+                f"{required_min_mm:.1f} mm threshold for container volume "
+                f"({net_contents or 'standard'}). This is not a hard fail: a "
+                "scale-marker measurement is required to fail type size."
+            ),
+        )
+
+    return TypeSizeMeasurement(
+        method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
+        required_min_height_mm=required_min_mm,
+        max_characters_per_inch=max_cpi,
+        estimated_characters_per_inch=(
+            round(estimated_cpi, 1) if estimated_cpi is not None else None
+        ),
+        state="warning",
+        verification_note=(
+            f"Uncalibrated photo without physical scale marker. Statutory threshold is >={required_min_mm:.1f} mm "
+            f"based on container volume ({net_contents or 'standard'}). Physical gauge measurement required to verify 27 CFR 16.22 compliance."
+        ),
+    )
+
+
 def get_required_min_height_mm(net_contents: Optional[str]) -> float:
     """Determine statutory 27 CFR 16.22(b) minimum capital letter height.
 
@@ -719,16 +866,14 @@ def evaluate_type_size_from_image_bytes(
                         "(e.g. driver's license, credit card) or calibrated marker beside the Government Warning and retake the photo."
                     ),
                 )
-            # Uncalibrated photo path: retain honest advisory without invented mm
-            return TypeSizeMeasurement(
-                method=CalibrationMethod.UNCALIBRATED_ESTIMATE,
-                required_min_height_mm=required_min_mm,
-                max_characters_per_inch=max_cpi,
-                state="warning",
-                verification_note=(
-                    f"Uncalibrated photo without physical scale marker. Statutory threshold is >={required_min_mm:.1f} mm "
-                    f"based on container volume ({net_contents or 'standard'}). Physical gauge measurement required to verify 27 CFR 16.22 compliance."
-                ),
+            return _geometry_type_size(
+                image_bgr,
+                working_scale,
+                gw_bbox,
+                net_contents,
+                required_min_mm,
+                max_cpi,
+                warning_text,
             )
 
         ordered_pts, px_per_mm, skew_angle = marker_res

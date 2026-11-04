@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   CSV_RESULT_HEADER,
+  appendCitations,
   exportComment,
   exportStatus,
   labelCheckResultCsvRows,
@@ -188,7 +189,7 @@ describe('reviewResultCsvRows', () => {
         });
         expect(rows[0][2]).toBe('PASS');
         expect(rows[0][3]).toMatch(/all required elements present/i);
-        expect(rows[0][3]).toMatch(/warning text and type size/i);
+        expect(rows[0][3]).toMatch(/warning text/i);
     });
 
     it('writes NEEDS VERIFICATION comments that say what the reviewer must confirm', () => {
@@ -215,7 +216,37 @@ describe('reviewResultCsvRows', () => {
         expect(exportComment(result)).toMatch(/equivalent/i);
         const rows = reviewResultCsvRows(result, 'distilled_spirits');
         expect(rows[0][2]).toBe('NEEDS VERIFICATION');
-        expect(rows[0][3]).toBe(exportComment(result));
+        expect(rows[0][3]).toBe(exportComment(result, 'distilled_spirits'));
+        expect(rows[0][3]).toMatch(/27 CFR 5\.63\(a\)\(3\) \/ 5\.65/);
+    });
+
+    it.each([
+        ['wine', '27 CFR 4.35'],
+        ['distilled_spirits', '27 CFR 5.66-5.68'],
+        ['malt beverage', '27 CFR 7.66-7.68'],
+    ] as const)('uses the COLA %s type for name-and-address citations', (beverageType, citation) => {
+        const result = {
+            filenames: ['ipa.jpg'],
+            overall_status: 'fail' as const,
+            processing_time_ms: 40,
+            fields: [
+                {
+                    field: 'name_and_address',
+                    label_name: 'Name and Address',
+                    status: 'fail' as const,
+                    application_value: 'Hopline Brewing Co, Fort Collins, CO',
+                    label_value: 'Other Brewing Co, Denver, CO',
+                    message: 'Name and Address on label does not match application.',
+                },
+            ],
+            extracted: { government_warning_present: true, field_locations: [] },
+        };
+        const rows = reviewResultCsvRows(result, beverageType);
+        expect(rows[0][3]).toContain(citation);
+        if (citation !== '27 CFR 4.35') {
+            expect(rows[0][3]).not.toMatch(/27 CFR 4\.35/);
+        }
+        expect(exportComment(result, beverageType)).toContain(citation);
     });
 });
 
@@ -282,6 +313,12 @@ describe('labelCheckResultCsvRows', () => {
         expect(rows[0][3]).toMatch(/Government Warning type size failed/i);
         expect(rows[0][3]).toMatch(/below the 1\.0 mm minimum/i);
         expect(rows[0][3]).toMatch(/27 CFR 16\.22/);
+        expect(rows[0][3]).not.toMatch(/\.\s*\(27 CFR/);
+    });
+
+    it('strips a trailing period before appending a citation', () => {
+        expect(appendCitations('Name and Address on label does not match application.', ['27 CFR 7.66-7.68']))
+            .toBe('Name and Address on label does not match application (27 CFR 7.66-7.68).');
     });
 
     it('keeps every completed row, including NOT REVIEWED errors', () => {

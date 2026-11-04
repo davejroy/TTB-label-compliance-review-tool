@@ -166,7 +166,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 - No persistence, distributed tracing, or external metric aggregator (system is intentionally stateless).
 - Not integrated with live COLA database (application data is entered manually or imported via CSV/JSON).
 - **Standards of Fill (T.D. TTB-200)**: Net contents checks validate against the modernized authorized standards of fill under 27 CFR 4.72 (wine) and 27 CFR 5.203 (distilled spirits) effective January 10, 2025 per Treasury Decision TTB-200 (89 FR 96570), with malt beverages (Part 7) unrestricted.
-- **Type Size (27 CFR 16.22 Option A MVP)**: Automated millimeter type-size verification is implemented for calibrated scale markers (ISO/IEC 7810 ID-1 cards, ArUco targets). Uncalibrated photos retain an honest advisory disclosure without invented mm numbers. Multi-photo reviews must not reuse another image's normalized warning box.
+- **Type Size (27 CFR 16.22 Option A MVP)**: Automated millimeter type-size verification is implemented for calibrated scale markers (ISO/IEC 7810 ID-1 cards, ArUco targets). A hard 16.22 fail still requires a scale marker. Container-geometry estimates below the statutory minimum are `needs_verification`. Close-up / uncalibrated photos retain an honest advisory without invented mm numbers. Multi-photo reviews must not reuse another image's normalized warning box.
 - **Heading bold (27 CFR 16.22(a)(2) type)**: Claude's boldness estimate is treated as **advisory**. A false negative must not flip a wording-pass into a hard fail.
 - Government Warning wording is validated against the standard statutory text (plus the <= 100 mL short form per 27 CFR 16.21(c)).
 - Outbound calls to the Anthropic API may conflict with production egress-firewall restrictions.
@@ -194,6 +194,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-11-03 | Address parse: industry/legal words win over numbered-street heuristics; later-label stream errors scrub exception detail | Maintainer |
 | 2026-10-30 | CI follow-up: type-size bbox test keyed by filename (gather+threadpool); `tsconfig.app.json` excludes Vitest files from production `tsc -b` | Maintainer |
 | 2026-11-04 | Pin `pillow-heif==1.8.1`; validate `VITE_API_HOST`; HTML-escape the Vite CSP meta attribute | Maintainer |
+| 2026-11-04 | Promote dest `59ebdd3`: first-class `needs_verification`; container-geometry type-size NV (scale-marker fail only); bottler-phrase match; printed Imported by; wine sulfite NV; CSV citation period strip | Maintainer |
 
 ## Related Documentation
 

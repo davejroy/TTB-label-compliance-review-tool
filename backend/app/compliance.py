@@ -528,6 +528,16 @@ def _build_warning_format(
                     estimated=False,
                 )
             )
+        elif type_size_details.state == "needs_verification":
+            findings.append(
+                WarningFormatFinding(
+                    code="type_size",
+                    status="advisory",
+                    citation="27 CFR 16.22(b)",
+                    message=type_size_details.verification_note,
+                    estimated=True,
+                )
+            )
         elif type_size_details.state in ("warning", "cannot_measure"):
             findings.append(
                 WarningFormatFinding(
@@ -1049,6 +1059,25 @@ def _token_spans(text: str) -> list[tuple[str, int, int]]:
     return spans
 
 
+def _matched_producer_prefix(name_and_address: str) -> str | None:
+    """Return the matched leading 27 CFR bottler/importer phrase, or None.
+
+    Classification uses prefix tokens only so a company named
+    ``Imported Goods Co`` is not treated as an importer clause.
+    """
+    text = (name_and_address or "").strip()
+    spans = _token_spans(text)
+    for prefix in _PRODUCER_PREFIXES:
+        prefix_words = [re.sub(r"[^a-z0-9&]+", "", word) for word in prefix.split()]
+        prefix_words = [word for word in prefix_words if word]
+        count = len(prefix_words)
+        if count == 0 or len(spans) < count:
+            continue
+        if [spans[i][0] for i in range(count)] == prefix_words:
+            return prefix
+    return None
+
+
 def _strip_producer_prefix_raw(name_and_address: str) -> str:
     """Remove a leading bottled-by / produced-by clause from a raw address line.
 
@@ -1507,6 +1536,22 @@ def _check_text_field(
             message=f"{label_name} matches application.",
         )
 
+    if field == "name_and_address":
+        app_prefix = _matched_producer_prefix(str(application_value))
+        label_prefix = _matched_producer_prefix(str(label_value))
+        if app_prefix or label_prefix:
+            app_core = _normalize(_strip_producer_prefix_raw(str(application_value)))
+            label_core = _normalize(_strip_producer_prefix_raw(str(label_value)))
+            if app_core and label_core and app_core == label_core:
+                return FieldResult(
+                    field=field, label_name=label_name, status="pass",
+                    application_value=application_value, label_value=label_value,
+                    message=(
+                        f"{label_name} matches application after allowing a missing or "
+                        "variant 27 CFR 4.35 / 5.66-5.68 / 7.66-7.68 bottler phrase."
+                    ),
+                )
+
     similarity = _similarity(norm_app, norm_label)
     if similarity >= 0.85:
         return FieldResult(
@@ -1811,6 +1856,12 @@ def _check_government_warning(
                 + type_size_details.verification_note
             )
             status = "fail"
+        elif type_size_details.state == "needs_verification":
+            message = (
+                "Government Warning statement text is valid, but type size needs "
+                "verification: " + type_size_details.verification_note
+            )
+            status = "needs_verification"
         elif type_size_details.state == "cannot_measure":
             message = (
                 "Government Warning text matches required wording. Calibrated measurement "
@@ -2163,6 +2214,17 @@ def _check_label_country_of_origin(extracted: ExtractedLabelData) -> FieldResult
             message=f"Country of origin statement found: '{label_value}'.",
         )
 
+    printed_import = _matched_producer_prefix(extracted.name_and_address or "")
+    if printed_import and printed_import.startswith("imported"):
+        return FieldResult(
+            field=field, label_name=label_name, status="fail",
+            application_value=requirement, label_value=label_value,
+            message=(
+                "Printed 'Imported by' text is present, but no country-of-origin "
+                "statement was found. " + requirement
+            ),
+        )
+
     if extracted.origin_guess == "domestic":
         return FieldResult(
             field=field, label_name=label_name, status="pass",
@@ -2213,7 +2275,10 @@ _FORMULA_DEPENDENT = (
 )
 
 
-def _check_sulfite_declaration(extracted: ExtractedLabelData) -> FieldResult:
+def _check_sulfite_declaration(
+    extracted: ExtractedLabelData,
+    beverage_type: str | None = None,
+) -> FieldResult:
     """Check for a sulfite declaration on wine labels (27 CFR 4.32(e)).
 
     Wines containing >=10 ppm SO2 must bear 'Contains Sulfites' or equivalent.
@@ -2227,7 +2292,7 @@ def _check_sulfite_declaration(extracted: ExtractedLabelData) -> FieldResult:
         "Wines containing 10 ppm or more of sulfur dioxide must bear the "
         "statement 'Contains Sulfites' or equivalent (27 CFR 4.32(e))."
     )
-    bev = (extracted.beverage_type_guess or "").lower()
+    bev = (beverage_type or extracted.beverage_type_guess or "").lower()
     if "wine" not in bev and bev not in ("", "unknown"):
         return FieldResult(
             field=field, label_name=label_name, status="pass",
@@ -2242,7 +2307,7 @@ def _check_sulfite_declaration(extracted: ExtractedLabelData) -> FieldResult:
             message="Sulfite declaration found on label." + _FORMULA_DEPENDENT,
         )
     return FieldResult(
-        field=field, label_name=label_name, status="warning",
+        field=field, label_name=label_name, status="needs_verification",
         application_value=None, label_value=None,
         message=(
             "No sulfite declaration found. If this wine contains >=10 ppm "
@@ -2484,7 +2549,7 @@ def check_label_requirements(
     if "country_of_origin" not in skip:
         checks.append(_check_label_country_of_origin(extracted))
     if "sulfite_declaration" not in skip:
-        checks.append(_check_sulfite_declaration(extracted))
+        checks.append(_check_sulfite_declaration(extracted, resolved_type))
     if "allergen_statements" not in skip:
         checks.append(_check_allergen_statements(extracted))
     if "age_statement" not in skip:
@@ -2506,6 +2571,8 @@ def overall_status(results: list) -> str:
     statuses = [r.status if hasattr(r, "status") else r for r in results]
     if any(s == "fail" for s in statuses):
         return "fail"
+    if any(s == "needs_verification" for s in statuses):
+        return "needs_verification"
     if any(s == "warning" for s in statuses):
         return "warning"
     return "pass"

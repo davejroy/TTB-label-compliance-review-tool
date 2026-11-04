@@ -106,6 +106,9 @@ def test_extract_request_uses_output_cap_and_cache_control():
         extract_label_fields([(b"fake_jpeg_bytes", "test.jpg")], preprocessed=True)
         _, kwargs = mock_create.call_args
         assert kwargs["max_tokens"] == EXTRACTION_MAX_TOKENS
+        assert "temperature" not in kwargs
+        assert "top_p" not in kwargs
+        assert "top_k" not in kwargs
         assert kwargs["system"][-1]["cache_control"] == {"type": "ephemeral"}
         assert kwargs["tools"][0]["cache_control"] == {"type": "ephemeral"}
         assert kwargs["messages"][0]["content"][-1]["cache_control"] == {"type": "ephemeral"}

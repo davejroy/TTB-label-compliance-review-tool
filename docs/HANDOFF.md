@@ -15,6 +15,14 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **Type-size NV + address phrase + CSV citations (November 2026)**:
+  - Container-geometry type-size estimates below 27 CFR 16.22 are `needs_verification`, never a hard fail. A calibrated scale-marker measurement can still fail. An undersized warning with no scale marker goes to needs_verification.
+  - Name-and-address matching allows a dropped or variant bottler phrase (27 CFR 4.35 / 5.66-5.68 / 7.66-7.68) when the remaining name and place match exactly. Classification uses the matched leading phrase only.
+  - Printed `Imported by` overrides a domestic `origin_guess`. Missing wine sulfite is `needs_verification`.
+  - CSV Comments append only the applicable citation and strip a trailing period before it. `needs_verification` exports as NEEDS VERIFICATION.
+  - Extraction prompt keeps the printed bottler phrase. Sampling params stay omitted. Address-extraction hardening from the prior production promote is kept (not duplicated). `pillow-heif==1.8.1`, CSP escaping, and `VITE_` host validation stay as already on production.
+  - Fail-open demo access and `USE_FAST_EXTRACTION` remain unchanged (gate fail-open when unset; fast extraction off).
+
 - **HEIC pin + frontend origin/CSP hardening (November 2026)**:
   - `backend/requirements.txt` pins `pillow-heif==1.8.1` (still `Pillow==13.0.0`) so HEIC decode cannot resolve to a wheel that bundles a vulnerable libheif. Demo-token gate and `USE_FAST_EXTRACTION` are unchanged (fail-open / off).
   - `resolveApiOrigin` accepts only an optional `http`/`https` scheme, a `[A-Za-z0-9.-]` hostname, an optional port, and an optional trailing slash. Anything else (quotes, angle brackets, spaces, `javascript:`, a path) falls back to same-origin.
@@ -148,7 +156,7 @@ Deployed on Render.com via `render.yaml` Blueprint:
 ## Known Issues
 
 - Standards of fill check validates against modernized T.D. TTB-200 authorized size lists (§4.72 / §5.203); custom authorized sizes require manual formula verification.
-- Exact physical type-size verification (27 CFR 16.22) is automated via Option A (scale marker) when an ID-1 card or ArUco target is co-planar; uncalibrated photos retain the honest statutory physical gauge advisory with zero invented mm.
+- Exact physical type-size verification (27 CFR 16.22) is a hard fail only from a calibrated scale-marker measurement. Container-geometry estimates below the statutory minimum are `needs_verification`. Close-up / uncalibrated photos retain the honest physical-gauge advisory with zero invented mm.
 - Gradio (`6.31.0`) / Streamlit (`1.66.1`) demo pins from `-dev` `#50` are not in this production layout (`tools/gradio_demo`, `tools/eval_dashboard` are excluded on promote). See [SBOM.md](./SBOM.md).
 
 ## Operational Notes

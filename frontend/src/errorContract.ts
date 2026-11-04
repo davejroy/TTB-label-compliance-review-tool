@@ -131,6 +131,8 @@ export function statusLabel(status: Status): string {
       return "Pass";
     case "warning":
       return "Needs Review";
+    case "needs_verification":
+      return "Needs Verification";
     case "fail":
       return "Fail";
     case "retake":
