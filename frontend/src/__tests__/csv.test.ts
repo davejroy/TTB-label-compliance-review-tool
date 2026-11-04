@@ -220,8 +220,12 @@ describe('reviewResultCsvRows', () => {
         expect(rows[0][3]).toMatch(/27 CFR 5\.63\(a\)\(3\) \/ 5\.65/);
     });
 
-    it('uses the COLA beverage type for beer and spirits citations, not wine Part 4', () => {
-        const beerFail = {
+    it.each([
+        ['wine', '27 CFR 4.35'],
+        ['distilled_spirits', '27 CFR 5.66-5.68'],
+        ['malt beverage', '27 CFR 7.66-7.68'],
+    ] as const)('uses the COLA %s type for name-and-address citations', (beverageType, citation) => {
+        const result = {
             filenames: ['ipa.jpg'],
             overall_status: 'fail' as const,
             processing_time_ms: 40,
@@ -237,13 +241,12 @@ describe('reviewResultCsvRows', () => {
             ],
             extracted: { government_warning_present: true, field_locations: [] },
         };
-        const beerRows = reviewResultCsvRows(beerFail, 'beer');
-        expect(beerRows[0][3]).toMatch(/27 CFR 7\.66-7\.68/);
-        expect(beerRows[0][3]).not.toMatch(/27 CFR 4\.35/);
-
-        const spiritsRows = reviewResultCsvRows(beerFail, 'distilled_spirits');
-        expect(spiritsRows[0][3]).toMatch(/27 CFR 5\.66-5\.68/);
-        expect(spiritsRows[0][3]).not.toMatch(/27 CFR 4\.35/);
+        const rows = reviewResultCsvRows(result, beverageType);
+        expect(rows[0][3]).toContain(citation);
+        if (citation !== '27 CFR 4.35') {
+            expect(rows[0][3]).not.toMatch(/27 CFR 4\.35/);
+        }
+        expect(exportComment(result, beverageType)).toContain(citation);
     });
 });
 

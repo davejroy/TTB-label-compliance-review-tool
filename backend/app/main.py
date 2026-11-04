@@ -1441,14 +1441,14 @@ def _government_warning_bbox_for_image(
 
 _TYPE_SIZE_SEVERITY = {
     "fail": 3,
-    "needs_verification": 2,
-    "warning": 1,
+    "warning": 2,
+    "needs_verification": 1,
     "pass": 0,
 }
 
 
 def _prefer_type_size(results: list[TypeSizeMeasurement]) -> TypeSizeMeasurement:
-    """Return the most severe completed measurement (fail > NV > warning > pass)."""
+    """Return the most severe completed measurement (fail > warning > NV > pass)."""
     return max(results, key=lambda item: _TYPE_SIZE_SEVERITY.get(item.state, -1))
 
 

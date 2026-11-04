@@ -22,6 +22,7 @@ from app.models import (
 from app.claude_client import build_extraction_create_kwargs
 
 import numpy as np
+import pytest
 
 
 def _extracted(**overrides) -> ExtractedLabelData:
@@ -165,25 +166,24 @@ def test_wine_missing_sulfite_is_needs_verification():
     assert sulfite.status == "needs_verification"
 
 
-def test_completed_marker_wins_over_geometry_preference():
-    marker = TypeSizeMeasurement(
+def _marker(state: str, note: str) -> TypeSizeMeasurement:
+    return TypeSizeMeasurement(
         method=CalibrationMethod.SCALE_MARKER_CARD_ID1,
         required_min_height_mm=2.0,
-        state="fail",
-        verification_note="marker fail",
+        state=state,
+        verification_note=note,
     )
+
+
+def test_completed_marker_wins_over_geometry_preference():
+    marker = _marker("fail", "marker fail")
     geometry = TypeSizeMeasurement(
         method=CalibrationMethod.CONTAINER_GEOMETRY,
         required_min_height_mm=2.0,
         state="needs_verification",
         verification_note="geometry nv",
     )
-    incomplete = TypeSizeMeasurement(
-        method=CalibrationMethod.SCALE_MARKER_CARD_ID1,
-        required_min_height_mm=2.0,
-        state="cannot_measure",
-        verification_note="skew",
-    )
+    incomplete = _marker("cannot_measure", "skew")
     later_pass = TypeSizeMeasurement(
         method=CalibrationMethod.SCALE_MARKER_ARUCO,
         required_min_height_mm=2.0,
@@ -204,3 +204,27 @@ def test_completed_marker_wins_over_geometry_preference():
     ]
     assert _prefer_type_size(completed_marker) is marker
     assert incomplete.state == "cannot_measure"
+
+
+@pytest.mark.parametrize(
+    "first,second,expected",
+    [
+        ("fail", "pass", "fail"),
+        ("pass", "fail", "fail"),
+        ("fail", "warning", "fail"),
+        ("warning", "fail", "fail"),
+        ("fail", "needs_verification", "fail"),
+        ("needs_verification", "fail", "fail"),
+        ("warning", "pass", "warning"),
+        ("pass", "warning", "warning"),
+        ("warning", "needs_verification", "warning"),
+        ("needs_verification", "warning", "warning"),
+        ("needs_verification", "pass", "needs_verification"),
+        ("pass", "needs_verification", "needs_verification"),
+    ],
+)
+def test_prefer_type_size_uses_severity_not_order(first, second, expected):
+    left = _marker(first, f"first {first}")
+    right = _marker(second, f"second {second}")
+    assert _prefer_type_size([left, right]).state == expected
+    assert _prefer_type_size([right, left]).state == expected
