@@ -12,6 +12,7 @@ from app.compliance import (
     run_compliance_checks,
 )
 from app.cv_typesize import _geometry_type_size
+from app.main import _prefer_type_size
 from app.models import (
     ApplicationData,
     CalibrationMethod,
@@ -183,7 +184,13 @@ def test_completed_marker_wins_over_geometry_preference():
         state="cannot_measure",
         verification_note="skew",
     )
-    results = [geometry, incomplete, marker]
+    later_pass = TypeSizeMeasurement(
+        method=CalibrationMethod.SCALE_MARKER_ARUCO,
+        required_min_height_mm=2.0,
+        state="pass",
+        verification_note="later marker pass",
+    )
+    results = [geometry, incomplete, marker, later_pass]
     completed_marker = [
         item
         for item in results
@@ -195,5 +202,5 @@ def test_completed_marker_wins_over_geometry_preference():
         }
         and item.state in {"pass", "fail", "warning"}
     ]
-    assert completed_marker[-1] is marker
+    assert _prefer_type_size(completed_marker) is marker
     assert incomplete.state == "cannot_measure"

@@ -1439,6 +1439,19 @@ def _government_warning_bbox_for_image(
     return (loc.x, loc.y, loc.width, loc.height)
 
 
+_TYPE_SIZE_SEVERITY = {
+    "fail": 3,
+    "needs_verification": 2,
+    "warning": 1,
+    "pass": 0,
+}
+
+
+def _prefer_type_size(results: list[TypeSizeMeasurement]) -> TypeSizeMeasurement:
+    """Return the most severe completed measurement (fail > NV > warning > pass)."""
+    return max(results, key=lambda item: _TYPE_SIZE_SEVERITY.get(item.state, -1))
+
+
 async def _evaluate_type_size(
     images: list[tuple[bytes, str]],
     extracted: ExtractedLabelData,
@@ -1505,14 +1518,14 @@ async def _evaluate_type_size(
         if ts_res.method in marker_methods and ts_res.state in {"pass", "fail", "warning"}
     ]
     if completed_marker:
-        return completed_marker[-1]
+        return _prefer_type_size(completed_marker)
     geometry = [
         ts_res
         for ts_res in results
         if ts_res.method == CalibrationMethod.CONTAINER_GEOMETRY
     ]
     if geometry:
-        return geometry[-1]
+        return _prefer_type_size(geometry)
     for ts_res in results:
         if type_size_details is None:
             type_size_details = ts_res

@@ -252,7 +252,10 @@ function failComment(field: FieldResult, beverageType: string): string {
 }
 
 /** Short plain-text explanation for the CSV Comments column. */
-export function exportComment(result: ReviewResult | LabelCheckResult): string {
+export function exportComment(
+  result: ReviewResult | LabelCheckResult,
+  beverageType = "",
+): string {
   const status = exportStatus(result);
   if (status === "NOT REVIEWED") {
     const code = result.error_code || "INTERNAL_ERROR";
@@ -269,15 +272,17 @@ export function exportComment(result: ReviewResult | LabelCheckResult): string {
   }
 
   const findings = findingsOf(result);
-  const beverageType = "beverage_type" in result && result.beverage_type
-    ? String(result.beverage_type)
-    : "";
+  const resolvedType =
+    beverageType
+    || ("beverage_type" in result && result.beverage_type
+      ? String(result.beverage_type)
+      : "");
   if (status === "FAIL") {
     const failed = findings.filter((field) => field.status === "fail");
     if (failed.length === 0) {
       return result.error || "A required label element failed compliance review.";
     }
-    return failed.map((field) => failComment(field, beverageType)).join(" ");
+    return failed.map((field) => failComment(field, resolvedType)).join(" ");
   }
 
   if (isRetakeResult(result)) {
@@ -301,7 +306,7 @@ export function exportComment(result: ReviewResult | LabelCheckResult): string {
   );
   if (warnings.length > 0) {
     return `Reviewer must confirm: ${warnings
-      .map((field) => `${field.label_name} — ${appendCitations(field.message, citationsFor(field, beverageType))}`)
+      .map((field) => `${field.label_name} — ${appendCitations(field.message, citationsFor(field, resolvedType))}`)
       .join(" ")}`;
   }
   return result.error || "Reviewer must confirm this label before accepting the result.";
@@ -315,7 +320,7 @@ function resultCsvRow(
     result.filenames.join("; "),
     beverageType,
     exportStatus(result),
-    exportComment(result),
+    exportComment(result, beverageType),
     result.request_id || "",
   ];
 }

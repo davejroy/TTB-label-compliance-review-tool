@@ -216,7 +216,34 @@ describe('reviewResultCsvRows', () => {
         expect(exportComment(result)).toMatch(/equivalent/i);
         const rows = reviewResultCsvRows(result, 'distilled_spirits');
         expect(rows[0][2]).toBe('NEEDS VERIFICATION');
-        expect(rows[0][3]).toBe(exportComment(result));
+        expect(rows[0][3]).toBe(exportComment(result, 'distilled_spirits'));
+        expect(rows[0][3]).toMatch(/27 CFR 5\.63\(a\)\(3\) \/ 5\.65/);
+    });
+
+    it('uses the COLA beverage type for beer and spirits citations, not wine Part 4', () => {
+        const beerFail = {
+            filenames: ['ipa.jpg'],
+            overall_status: 'fail' as const,
+            processing_time_ms: 40,
+            fields: [
+                {
+                    field: 'name_and_address',
+                    label_name: 'Name and Address',
+                    status: 'fail' as const,
+                    application_value: 'Hopline Brewing Co, Fort Collins, CO',
+                    label_value: 'Other Brewing Co, Denver, CO',
+                    message: 'Name and Address on label does not match application.',
+                },
+            ],
+            extracted: { government_warning_present: true, field_locations: [] },
+        };
+        const beerRows = reviewResultCsvRows(beerFail, 'beer');
+        expect(beerRows[0][3]).toMatch(/27 CFR 7\.66-7\.68/);
+        expect(beerRows[0][3]).not.toMatch(/27 CFR 4\.35/);
+
+        const spiritsRows = reviewResultCsvRows(beerFail, 'distilled_spirits');
+        expect(spiritsRows[0][3]).toMatch(/27 CFR 5\.66-5\.68/);
+        expect(spiritsRows[0][3]).not.toMatch(/27 CFR 4\.35/);
     });
 });
 
