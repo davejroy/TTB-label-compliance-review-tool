@@ -195,6 +195,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-10-30 | CI follow-up: type-size bbox test keyed by filename (gather+threadpool); `tsconfig.app.json` excludes Vitest files from production `tsc -b` | Maintainer |
 | 2026-11-04 | Pin `pillow-heif==1.8.1`; validate `VITE_API_HOST`; HTML-escape the Vite CSP meta attribute | Maintainer |
 | 2026-11-04 | Promote dest `59ebdd3`: first-class `needs_verification`; container-geometry type-size NV (scale-marker fail only); bottler-phrase match; printed Imported by; wine sulfite NV; CSV citation period strip | Maintainer |
+| 2026-11-05 | Promote dest `f9a52d5`: sulfite citation follows beverage type (4.32(e) / 5.63(c)(7) / 7.63(b)(3)); type-size `cannot_measure` stays below completed measurements | Maintainer |
 
 ## Related Documentation
 

@@ -300,6 +300,7 @@ class TestReviewModeRules:
         sulfite = next(item for item in results if item.field == "sulfite_declaration")
         assert sulfite.status == "needs_verification"
         assert "sulfite" in sulfite.message.lower()
+        assert "27 CFR 4.32(e)" in sulfite.message
 
     def test_allergen_absent_is_informational_pass(self):
         results = check_label_requirements(

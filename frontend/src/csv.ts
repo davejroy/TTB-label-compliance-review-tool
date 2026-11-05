@@ -192,8 +192,8 @@ const FIELD_CITATIONS: Record<string, Record<string, string>> = {
   },
   sulfite_declaration: {
     wine: "27 CFR 4.32(e)",
-    distilled_spirits: "27 CFR 4.32(e)",
-    beer: "27 CFR 4.32(e)",
+    distilled_spirits: "27 CFR 5.63(c)(7)",
+    beer: "27 CFR 7.63(b)(3)",
   },
 };
 

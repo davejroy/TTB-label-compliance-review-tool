@@ -164,6 +164,7 @@ def test_wine_missing_sulfite_is_needs_verification():
     )
     sulfite = next(item for item in results if item.field == "sulfite_declaration")
     assert sulfite.status == "needs_verification"
+    assert "27 CFR 4.32(e)" in sulfite.message
 
 
 def _marker(state: str, note: str) -> TypeSizeMeasurement:
@@ -221,6 +222,14 @@ def test_completed_marker_wins_over_geometry_preference():
         ("needs_verification", "warning", "warning"),
         ("needs_verification", "pass", "needs_verification"),
         ("pass", "needs_verification", "needs_verification"),
+        ("fail", "cannot_measure", "fail"),
+        ("cannot_measure", "fail", "fail"),
+        ("warning", "cannot_measure", "warning"),
+        ("cannot_measure", "warning", "warning"),
+        ("needs_verification", "cannot_measure", "needs_verification"),
+        ("cannot_measure", "needs_verification", "needs_verification"),
+        ("pass", "cannot_measure", "pass"),
+        ("cannot_measure", "pass", "pass"),
     ],
 )
 def test_prefer_type_size_uses_severity_not_order(first, second, expected):
