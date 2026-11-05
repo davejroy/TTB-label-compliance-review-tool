@@ -164,7 +164,8 @@ def test_wine_missing_sulfite_is_needs_verification():
     )
     sulfite = next(item for item in results if item.field == "sulfite_declaration")
     assert sulfite.status == "needs_verification"
-    assert "27 CFR 4.32(e)" in sulfite.message
+    assert "this product" in sulfite.message
+    assert "27 CFR" not in sulfite.message
 
 
 def _marker(state: str, note: str) -> TypeSizeMeasurement:

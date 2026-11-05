@@ -47,15 +47,18 @@ def test_sulfite_citation_follows_beverage_type(beverage_type, citation):
     assert _sulfite_citation(beverage_type) == citation
 
 
-def test_wine_missing_sulfite_is_needs_verification_with_4_32e():
+def test_wine_missing_sulfite_is_needs_verification_beverage_neutral():
     result = _check_sulfite_declaration(
         _extracted(sulfite_declaration=None, beverage_type_guess="wine"),
         "wine",
     )
     assert result.status == "needs_verification"
-    assert "27 CFR 4.32(e)" in result.message
+    assert "this product" in result.message
+    assert "this wine" not in result.message
+    assert "27 CFR 4.32(e)" not in result.message
     assert "27 CFR 5.63(c)(7)" not in result.message
     assert "27 CFR 7.63(b)(3)" not in result.message
+    assert "27 CFR" not in result.message
 
 
 @pytest.mark.parametrize("beverage_type", ["distilled_spirits", "beer", "malt beverage"])
@@ -120,7 +123,8 @@ def test_cola_review_runs_sulfite_only_for_wine():
     assert all(item.field != "sulfite_declaration" for item in spirits)
     sulfite = next(item for item in wine if item.field == "sulfite_declaration")
     assert sulfite.status == "needs_verification"
-    assert "27 CFR 4.32(e)" in sulfite.message
+    assert "this product" in sulfite.message
+    assert "27 CFR" not in sulfite.message
 
 
 def test_label_only_wine_missing_sulfite_is_needs_verification():
@@ -130,7 +134,8 @@ def test_label_only_wine_missing_sulfite_is_needs_verification():
     )
     sulfite = next(item for item in results if item.field == "sulfite_declaration")
     assert sulfite.status == "needs_verification"
-    assert "27 CFR 4.32(e)" in sulfite.message
+    assert "this product" in sulfite.message
+    assert "27 CFR" not in sulfite.message
 
 
 @pytest.mark.parametrize(

@@ -182,11 +182,12 @@ the architecture simple for a prototype.
   intentionally strict, per Jenny's note that this check is exact and agents
   reject labels for things like "Government Warning" in title case.
 - **Sulfite declaration:** wines that contain >=10 ppm SO2 must bear
-  "Contains Sulfites" (or equivalent) (27 CFR 4.32(e)). Missing wine
-  declaration is "Needs Review" so the agent can verify with production/lab
-  data. Beer and spirits auto-pass this check. CSV Comments cite the
-  type-specific CFR when a sulfite finding is exported: wine 27 CFR 4.32(e),
-  distilled spirits 27 CFR 5.63(c)(7), malt beverages 27 CFR 7.63(b)(3).
+  "Contains Sulfites" (or equivalent). Missing wine declaration is
+  "Needs Review" so the agent can verify with production/lab data. The
+  check message says "this product" and does not embed a CFR cite. Beer
+  and spirits auto-pass this check. CSV Comments append the type-specific
+  Part once: wine 27 CFR 4.32(e), distilled spirits 27 CFR 5.63(c)(7),
+  malt beverages 27 CFR 7.63(b)(3).
 - **Allergen/additive disclosures (27 CFR 4.32(f), 5.63(c), 7.63(c)):** FD&C
   Yellow No. 5, aspartame, saccharin, and cochineal extract/carmine must be
   declared when present. "Needs Review" since presence requires formula verification.

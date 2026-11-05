@@ -243,11 +243,13 @@ describe('reviewResultCsvRows', () => {
         };
         const rows = reviewResultCsvRows(result, beverageType);
         expect(rows[0][3]).toContain(citation);
+        expect(rows[0][3].split(citation)).toHaveLength(2);
         expect(rows[0][3]).not.toMatch(/27 CFR 4\.32\(e\).*27 CFR 4\.32\(e\)/);
         if (citation !== '27 CFR 4.32(e)') {
             expect(rows[0][3]).not.toContain('27 CFR 4.32(e)');
         }
         expect(exportComment(result, beverageType)).toContain(citation);
+        expect(exportComment(result, beverageType).split(citation)).toHaveLength(2);
     });
 
     it.each([

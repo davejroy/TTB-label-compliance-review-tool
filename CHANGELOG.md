@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventi
 ## [Unreleased]
 
 ### Changed
-- Sulfite citation follows beverage type: wine `27 CFR 4.32(e)`, distilled spirits `27 CFR 5.63(c)(7)`, malt beverages `27 CFR 7.63(b)(3)`. Missing sulfite is still `needs_verification` for wine only; beer and spirits auto-pass. Type-size still picks the most severe completed measurement; `cannot_measure` never outranks a completed result.
+- Sulfite citation follows beverage type: wine `27 CFR 4.32(e)`, distilled spirits `27 CFR 5.63(c)(7)`, malt beverages `27 CFR 7.63(b)(3)`. Missing sulfite is still `needs_verification` for wine only; beer and spirits auto-pass. The backend sulfite message says "this product" and does not embed a CFR cite; CSV Comments append the type-specific Part once. Type-size still picks the most severe completed measurement; `cannot_measure` never outranks a completed result.
 - Type-size: container-geometry estimates below 27 CFR 16.22 become `needs_verification`. A hard type-size fail still requires a calibrated scale-marker measurement.
 - COLA name-and-address matching tolerates a missing or variant 27 CFR 4.35 / 5.66-5.68 / 7.66-7.68 bottler phrase when the remaining name and place match exactly.
 - Printed `Imported by` overrides a domestic origin guess so country-of-origin cannot clean-pass.

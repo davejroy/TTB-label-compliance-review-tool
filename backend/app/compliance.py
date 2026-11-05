@@ -2298,16 +2298,15 @@ def _check_sulfite_declaration(
 ) -> FieldResult:
     """Check for a sulfite declaration on wine labels.
 
-    Wines containing >=10 ppm SO2 must bear 'Contains Sulfites' or equivalent
-    (27 CFR 4.32(e)). This check applies only to wine; beer and spirits
-    auto-pass. CSV / wine messages cite the type-specific CFR
-    (4.32(e) / 5.63(c)(7) / 7.63(b)(3)).
+    Wines containing >=10 ppm SO2 must bear 'Contains Sulfites' or equivalent.
+    This check applies only to wine; beer and spirits auto-pass. The user
+    message is beverage-neutral and does not embed a CFR cite; CSV Comments
+    append the type-specific citation once (4.32(e) / 5.63(c)(7) / 7.63(b)(3)).
 
     FORMULA-DEPENDENT: Whether the declaration is required depends on the
     actual measured SO2 level, not the label text alone.
     """
     field, label_name = "sulfite_declaration", "Sulfite Declaration"
-    citation = _sulfite_citation(beverage_type or extracted.beverage_type_guess)
     bev = (beverage_type or extracted.beverage_type_guess or "").lower()
     if "wine" not in bev and bev not in ("", "unknown"):
         return FieldResult(
@@ -2326,9 +2325,9 @@ def _check_sulfite_declaration(
         field=field, label_name=label_name, status="needs_verification",
         application_value=None, label_value=None,
         message=(
-            "No sulfite declaration found. If this wine contains >=10 ppm "
-            "sulfur dioxide, 'Contains Sulfites' (or equivalent) is required "
-            f"({citation}). Verify SO\u2082 level with production/lab data."
+            "No sulfite declaration found. If this product contains >=10 ppm "
+            "sulfur dioxide, 'Contains Sulfites' (or equivalent) is required. "
+            "Verify SO\u2082 level with production/lab data."
             + _FORMULA_DEPENDENT
         ),
     )
