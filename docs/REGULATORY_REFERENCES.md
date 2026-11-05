@@ -58,6 +58,20 @@ See [`docs/TYPE_SIZE_16_22_DESIGN.md`](./TYPE_SIZE_16_22_DESIGN.md) and [`docs/f
 
 ---
 
+## Sulfite Declaration
+
+Products that contain 10 or more parts per million sulfur dioxide must bear "Contains Sulfites" or an equivalent statement. The citation follows beverage class:
+
+| Regulation | Beverage type | Description |
+|------------|---------------|-------------|
+| 27 CFR 4.32(e) | Wine | Mandatory sulfite declaration when SO2 is 10 ppm or more |
+| 27 CFR 5.63(c)(7) | Distilled spirits | Mandatory sulfite declaration when SO2 is 10 ppm or more |
+| 27 CFR 7.63(b)(3) | Malt beverages | Mandatory sulfite declaration when SO2 is 10 ppm or more |
+
+This tool flags a missing **wine** statement as `needs_verification` because whether the declaration is required depends on production/lab SO2 data. The check message is beverage-neutral and does not embed a CFR cite. Beer and distilled spirits auto-pass the sulfite check. CSV Comments append the type-specific row above once when a sulfite finding is exported.
+
+---
+
 ## Country of Origin (Imported Products)
 
 | Regulation | Description |

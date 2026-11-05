@@ -15,6 +15,11 @@ This is a functional prototype operating in production. Both review modes (COLA 
 
 ## What Changed Recently
 
+- **Sulfite citation by beverage type (November 2026)**:
+  - Sulfite citation follows beverage type: wine `27 CFR 4.32(e)`, distilled spirits `27 CFR 5.63(c)(7)`, malt beverages `27 CFR 7.63(b)(3)`. Missing sulfite is still `needs_verification` for wine only; beer and spirits auto-pass. The backend message says "this product" and does not embed a CFR cite; CSV Comments append the type-specific Part once.
+  - Type-size still selects the most severe completed measurement (`fail` > `warning` > `needs_verification` > `pass`). `cannot_measure` is ranked below a completed result so an incomplete photo cannot hide a calibrated outcome.
+  - Fail-open demo access and `USE_FAST_EXTRACTION` remain unchanged (gate fail-open when unset; fast extraction off).
+
 - **Type-size NV + address phrase + CSV citations (November 2026)**:
   - Container-geometry type-size estimates below 27 CFR 16.22 are `needs_verification`, never a hard fail. A calibrated scale-marker measurement can still fail. An undersized warning with no scale marker goes to needs_verification.
   - Name-and-address matching allows a dropped or variant bottler phrase (27 CFR 4.35 / 5.66-5.68 / 7.66-7.68) when the remaining name and place match exactly. Classification uses the matched leading phrase only.

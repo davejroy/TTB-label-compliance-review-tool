@@ -270,8 +270,12 @@ def test_label_requirements_all_present_passes():
     assert all(r.status == "pass" for r in results if r.field not in _formula_fields | {"country_of_origin"})
     # country_of_origin and formula-dependent checks (allergen, age, commodity)
     # return "warning" - that keeps the overall status at "warning".
+    # Sulfite on spirits/beer auto-passes (wine-only requirement).
     coo = next(r for r in results if r.field == "country_of_origin")
     assert coo.status == "warning"
+    sulfite = next(r for r in results if r.field == "sulfite_declaration")
+    assert sulfite.status == "pass"
+    assert "only required for wine" in sulfite.message.lower()
     assert overall_status(results) == "warning"
 
 

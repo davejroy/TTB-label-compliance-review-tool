@@ -1444,11 +1444,13 @@ _TYPE_SIZE_SEVERITY = {
     "warning": 2,
     "needs_verification": 1,
     "pass": 0,
+    # Incomplete: never outranks a completed measurement (Bugbot cannot_measure).
+    "cannot_measure": -1,
 }
 
 
 def _prefer_type_size(results: list[TypeSizeMeasurement]) -> TypeSizeMeasurement:
-    """Return the most severe completed measurement (fail > warning > NV > pass)."""
+    """Return the most severe measurement (fail > warning > NV > pass > cannot_measure)."""
     return max(results, key=lambda item: _TYPE_SIZE_SEVERITY.get(item.state, -1))
 
 
@@ -1526,9 +1528,8 @@ async def _evaluate_type_size(
     ]
     if geometry:
         return _prefer_type_size(geometry)
-    for ts_res in results:
-        if type_size_details is None:
-            type_size_details = ts_res
+    if results:
+        return _prefer_type_size(results)
     return type_size_details
 
 

@@ -221,6 +221,38 @@ describe('reviewResultCsvRows', () => {
     });
 
     it.each([
+        ['wine', '27 CFR 4.32(e)'],
+        ['distilled_spirits', '27 CFR 5.63(c)(7)'],
+        ['malt beverage', '27 CFR 7.63(b)(3)'],
+    ] as const)('uses the COLA %s type for sulfite citations', (beverageType, citation) => {
+        const result = {
+            filenames: ['label.jpg'],
+            overall_status: 'needs_verification' as const,
+            processing_time_ms: 40,
+            fields: [
+                {
+                    field: 'sulfite_declaration',
+                    label_name: 'Sulfite Declaration',
+                    status: 'needs_verification' as const,
+                    application_value: null,
+                    label_value: null,
+                    message: 'No sulfite declaration found. If this product contains >=10 ppm sulfur dioxide, Contains Sulfites is required.',
+                },
+            ],
+            extracted: { government_warning_present: true, field_locations: [] },
+        };
+        const rows = reviewResultCsvRows(result, beverageType);
+        expect(rows[0][3]).toContain(citation);
+        expect(rows[0][3].split(citation)).toHaveLength(2);
+        expect(rows[0][3]).not.toMatch(/27 CFR 4\.32\(e\).*27 CFR 4\.32\(e\)/);
+        if (citation !== '27 CFR 4.32(e)') {
+            expect(rows[0][3]).not.toContain('27 CFR 4.32(e)');
+        }
+        expect(exportComment(result, beverageType)).toContain(citation);
+        expect(exportComment(result, beverageType).split(citation)).toHaveLength(2);
+    });
+
+    it.each([
         ['wine', '27 CFR 4.35'],
         ['distilled_spirits', '27 CFR 5.66-5.68'],
         ['malt beverage', '27 CFR 7.66-7.68'],
