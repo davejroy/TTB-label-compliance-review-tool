@@ -68,7 +68,7 @@ Products that contain 10 or more parts per million sulfur dioxide must bear "Con
 | 27 CFR 5.63(c)(7) | Distilled spirits | Mandatory sulfite declaration when SO2 is 10 ppm or more |
 | 27 CFR 7.63(b)(3) | Malt beverages | Mandatory sulfite declaration when SO2 is 10 ppm or more |
 
-This tool flags a missing statement as `needs_verification` because whether the declaration is required depends on production/lab SO2 data, not label text alone.
+This tool flags a missing **wine** statement as `needs_verification` because whether the declaration is required depends on production/lab SO2 data. Beer and distilled spirits auto-pass the sulfite check. CSV Comments still cite the type-specific row above when a sulfite finding is exported.
 
 ---
 

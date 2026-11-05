@@ -47,24 +47,26 @@ def test_sulfite_citation_follows_beverage_type(beverage_type, citation):
     assert _sulfite_citation(beverage_type) == citation
 
 
-@pytest.mark.parametrize(
-    "beverage_type,citation",
-    [
-        ("wine", "27 CFR 4.32(e)"),
-        ("distilled_spirits", "27 CFR 5.63(c)(7)"),
-        ("beer", "27 CFR 7.63(b)(3)"),
-    ],
-)
-def test_missing_sulfite_cites_type_specific_cfr(beverage_type, citation):
+def test_wine_missing_sulfite_is_needs_verification_with_4_32e():
+    result = _check_sulfite_declaration(
+        _extracted(sulfite_declaration=None, beverage_type_guess="wine"),
+        "wine",
+    )
+    assert result.status == "needs_verification"
+    assert "27 CFR 4.32(e)" in result.message
+    assert "27 CFR 5.63(c)(7)" not in result.message
+    assert "27 CFR 7.63(b)(3)" not in result.message
+
+
+@pytest.mark.parametrize("beverage_type", ["distilled_spirits", "beer", "malt beverage"])
+def test_beer_and_spirits_missing_sulfite_still_auto_pass(beverage_type):
     result = _check_sulfite_declaration(
         _extracted(sulfite_declaration=None, beverage_type_guess=beverage_type),
         beverage_type,
     )
-    assert result.status == "needs_verification"
-    assert citation in result.message
-    if citation != "27 CFR 4.32(e)":
-        assert "27 CFR 4.32(e)" not in result.message
-    assert "wine contains" not in result.message.lower()
+    assert result.status == "pass"
+    assert "only required for wine" in result.message.lower()
+    assert result.status != "needs_verification"
 
 
 @pytest.mark.parametrize("beverage_type", ["wine", "distilled_spirits", "beer"])
@@ -121,19 +123,25 @@ def test_cola_review_runs_sulfite_only_for_wine():
     assert "27 CFR 4.32(e)" in sulfite.message
 
 
+def test_label_only_wine_missing_sulfite_is_needs_verification():
+    results = check_label_requirements(
+        _extracted(sulfite_declaration=None, beverage_type_guess="wine"),
+        beverage_type="wine",
+    )
+    sulfite = next(item for item in results if item.field == "sulfite_declaration")
+    assert sulfite.status == "needs_verification"
+    assert "27 CFR 4.32(e)" in sulfite.message
+
+
 @pytest.mark.parametrize(
-    "beverage_type,citation",
-    [
-        ("wine", "27 CFR 4.32(e)"),
-        ("distilled_spirits", "27 CFR 5.63(c)(7)"),
-        ("beer", "27 CFR 7.63(b)(3)"),
-    ],
+    "beverage_type",
+    ["distilled_spirits", "beer"],
 )
-def test_label_only_missing_sulfite_uses_confirmed_type(beverage_type, citation):
+def test_label_only_beer_and_spirits_missing_sulfite_auto_pass(beverage_type):
     results = check_label_requirements(
         _extracted(sulfite_declaration=None, beverage_type_guess=beverage_type),
         beverage_type=beverage_type,
     )
     sulfite = next(item for item in results if item.field == "sulfite_declaration")
-    assert sulfite.status == "needs_verification"
-    assert citation in sulfite.message
+    assert sulfite.status == "pass"
+    assert "only required for wine" in sulfite.message.lower()

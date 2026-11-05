@@ -16,7 +16,7 @@ This is a functional prototype operating in production. Both review modes (COLA 
 ## What Changed Recently
 
 - **Sulfite citation by beverage type (November 2026)**:
-  - Sulfite citation follows beverage type: wine `27 CFR 4.32(e)`, distilled spirits `27 CFR 5.63(c)(7)`, malt beverages `27 CFR 7.63(b)(3)`. Label-only missing sulfite is `needs_verification` for all three classes. COLA application match still runs the sulfite check for wine. CSV Comments use the same type-specific cite.
+  - Sulfite citation follows beverage type: wine `27 CFR 4.32(e)`, distilled spirits `27 CFR 5.63(c)(7)`, malt beverages `27 CFR 7.63(b)(3)`. Missing sulfite is still `needs_verification` for wine only; beer and spirits auto-pass. CSV Comments use the same type-specific cite.
   - Type-size still selects the most severe completed measurement (`fail` > `warning` > `needs_verification` > `pass`). `cannot_measure` is ranked below a completed result so an incomplete photo cannot hide a calibrated outcome.
   - Fail-open demo access and `USE_FAST_EXTRACTION` remain unchanged (gate fail-open when unset; fast extraction off).
 
