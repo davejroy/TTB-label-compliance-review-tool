@@ -30,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
       security-events: write
     steps:
       - name: Checkout
@@ -73,6 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
       security-events: write
     container:
       image: semgrep/semgrep:1.135.0
@@ -88,8 +90,7 @@ jobs:
             --config auto \
             --severity ERROR \
             --error \
-            --sarif \
-            --output semgrep.sarif
+            --sarif-output semgrep.sarif
 
       - name: Upload Semgrep SARIF (when code scanning is available)
         if: always()

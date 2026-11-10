@@ -16,7 +16,7 @@ This is a functional prototype operating in production. Both review modes (COLA 
 ## What Changed Recently
 
 - **OSS scanners replace dead Snyk (November 2026)**:
-  - Added `.github/workflows/oss-security-scan.yml`: Trivy fs (vuln + secret + misconfig, CRITICAL/HIGH) and Semgrep CE (ERROR only) on pull requests, pushes to `main`, and weekly Mondays. Actions are SHA-pinned; workflow permissions default to `contents: read`; jobs add `security-events: write` only for SARIF upload.
+  - Added `.github/workflows/oss-security-scan.yml`: Trivy fs (vuln + secret + misconfig, CRITICAL/HIGH) and Semgrep CE (ERROR only) on pull requests, pushes to `main`, and weekly Mondays. Actions are SHA-pinned; workflow permissions default to `contents: read`; scan jobs add `actions: read` and `security-events: write` for SARIF upload.
   - Added `.github/dependabot.yml` (weekly) for pip, npm, Docker, Terraform, and GitHub Actions. No prior Dependabot config existed.
   - Snyk App / CLI is not configured here. GitHub Snyk App check statuses, if still visible, persist until the owner uninstalls the Snyk GitHub App. No scanner secrets were added.
   - Existing Test & Build CI and IaC validation jobs are unchanged. There were no gitleaks or SBOM CI jobs to keep.
