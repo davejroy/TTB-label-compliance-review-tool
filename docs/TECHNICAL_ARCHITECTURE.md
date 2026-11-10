@@ -136,6 +136,7 @@ Logs never contain raw image bytes, authorization tokens, or sensitive credentia
 - Input validation checks actual image signatures server-side; client-provided MIME types are not trusted.
 - Chunked or missing-Content-Length uploads are still counted against `MAX_REQUEST_BODY_BYTES`.
 - Vision `government_warning_header_appears_bold=False` is advisory only; statutory GW wording/casing remains a hard fail.
+- Supply-chain scanning in CI uses Trivy (filesystem vuln/secret/misconfig) and Semgrep Community Edition. Dependabot covers pip, npm, Docker, Terraform, and GitHub Actions. Snyk is not used.
 
 See [../SECURITY.md](../SECURITY.md) for the vulnerability reporting process.
 
@@ -196,6 +197,7 @@ A dedicated `docs/ADR/` directory can be added if formal decision records are de
 | 2026-11-04 | Pin `pillow-heif==1.8.1`; validate `VITE_API_HOST`; HTML-escape the Vite CSP meta attribute | Maintainer |
 | 2026-11-04 | Promote dest `59ebdd3`: first-class `needs_verification`; container-geometry type-size NV (scale-marker fail only); bottler-phrase match; printed Imported by; wine sulfite NV; CSV citation period strip | Maintainer |
 | 2026-11-05 | Promote dest `f9a52d5` + `a6ec863`: sulfite citation follows beverage type (4.32(e) / 5.63(c)(7) / 7.63(b)(3)); wine-only NV; beer/spirits auto-pass; backend message is beverage-neutral (no embedded CFR); type-size `cannot_measure` stays below completed measurements | Maintainer |
+| 2026-11-10 | Replace Snyk with Trivy + Semgrep CE in GitHub Actions; add weekly Dependabot for present ecosystems | Maintainer |
 
 ## Related Documentation
 

@@ -1,0 +1,30 @@
+# Weekly Dependabot version updates for ecosystems present in this repo.
+# No existing dependabot.yml was present. There are no gitleaks or SBOM
+# GitHub Actions jobs to preserve; Test & Build CI and IaC validation stay as-is.
+
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: terraform
+    directory: /infra/terraform
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

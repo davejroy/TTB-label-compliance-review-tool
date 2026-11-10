@@ -57,7 +57,10 @@ from `requirements.txt`; CI caches on it.
 
 **Recommendations:**
 - [MED] Pin dependencies to hashes (pip-compile / hashes) and enable
-  Dependabot + `pip-audit` in CI.
+  Dependabot + `pip-audit` in CI. **Partial (2026-11-10):** weekly Dependabot
+  is enabled for pip, npm, Docker, Terraform, and GitHub Actions. Trivy fs
+  (CRITICAL/HIGH) covers dependency vulns in CI; hash-pinning and `pip-audit`
+  are still open.
 - [LOW] Pin the Claude model version explicitly and record it in the SBOM so
   behavior changes are traceable.
 
@@ -147,6 +150,9 @@ endpoints, so a holder of the shared demo token could drive API spend.
 - [LOW] Enforce HTTPS-only and secure cookie/though token transport at the
   proxy.
 - [LOW] Add `pip-audit` and secret-scanning (gitleaks) as CI steps.
+  **Partial (2026-11-10):** Trivy fs in `.github/workflows/oss-security-scan.yml`
+  includes the secret scanner (CRITICAL/HIGH). Dedicated gitleaks and
+  `pip-audit` jobs are still not present.
 
 ## Update 2026-10-31 — vision error paths (LLM05 / info leak)
 
