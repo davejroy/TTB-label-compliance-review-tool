@@ -28,6 +28,9 @@ jobs:
   trivy:
     name: Trivy fs (vuln, secret, misconfig)
     runs-on: ubuntu-latest
+    env:
+      # Evaluate version floors such as pkg>=1.0. Default "precise" skips them.
+      TRIVY_DETECTION_PRIORITY: comprehensive
     permissions:
       contents: read
       actions: read
