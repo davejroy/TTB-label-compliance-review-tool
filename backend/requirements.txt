@@ -3,7 +3,7 @@ starlette==1.10.0
 uvicorn[standard]==0.34.0
 python-multipart==0.0.32
 anthropic==2.3.0
-pydantic==2.10.5
+pydantic==2.14.3
 python-dotenv==1.2.4
 Pillow==13.0.0
 pillow-heif==1.8.1
