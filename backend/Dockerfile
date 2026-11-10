@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.11.18-slim-bookworm AS base
+FROM python:3.15.0-slim-bookworm AS base
 
 # Prevent Python from writing .pyc files and enable unbuffered output
 ENV PYTHONDONTWRITEBYTECODE=1 \
