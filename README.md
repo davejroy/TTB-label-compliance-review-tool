@@ -67,6 +67,8 @@ worded correctly.
   backend and frontend dependencies.
 - [`docs/HANDOFF.md`](docs/HANDOFF.md) - Handoff summary of current project
   status, recent changes, and suggested next steps.
+- [`SECURITY.md`](SECURITY.md) - Vulnerability reporting and CI scanning
+  (Trivy + Semgrep CE; weekly Dependabot).
 
 ## Setup & running locally
 

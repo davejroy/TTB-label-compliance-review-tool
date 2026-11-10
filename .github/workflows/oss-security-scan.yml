@@ -1,0 +1,104 @@
+# OSS replacement for the dead Snyk GitHub App / weekly Snyk CLI.
+# Trivy fs: vuln + secret + misconfig (CRITICAL,HIGH).
+# Semgrep Community Edition: ERROR severity only.
+# No secrets. Do not add SNYK_TOKEN.
+#
+# SARIF upload is best-effort: it succeeds when GitHub code scanning is
+# enabled, and is ignored (continue-on-error) when it is not, so private
+# repos without GitHub Advanced Security still get table output and a
+# failing job on CRITICAL/HIGH or Semgrep ERROR findings.
+
+name: OSS security scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 10 * * 1" # weekly Monday 04:17 AM America/Chicago (10:17 UTC)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oss-security-scan-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trivy:
+    name: Trivy fs (vuln, secret, misconfig)
+    runs-on: ubuntu-latest
+    env:
+      # Evaluate version floors such as pkg>=1.0. Default "precise" skips them.
+      TRIVY_DETECTION_PRIORITY: comprehensive
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Trivy filesystem scan (table)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH
+          format: table
+          exit-code: "1"
+
+      - name: Trivy filesystem scan (SARIF)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-results.sarif
+          limit-severities-for-sarif: true
+          exit-code: "0"
+
+      - name: Upload Trivy SARIF (when code scanning is available)
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@9418214df1f2c4b8128c770156c409013b07d6b9 # v3.39.3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-fs
+
+  semgrep:
+    name: Semgrep CE (ERROR)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    container:
+      image: semgrep/semgrep:1.135.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Semgrep scan
+        run: |
+          semgrep scan \
+            --config auto \
+            --severity ERROR \
+            --error \
+            --sarif-output semgrep.sarif
+
+      - name: Upload Semgrep SARIF (when code scanning is available)
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@9418214df1f2c4b8128c770156c409013b07d6b9 # v3.39.3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep-ce

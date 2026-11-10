@@ -8,8 +8,8 @@ This document provides a comprehensive inventory of direct and resolved third-pa
 
 | Field | Value |
 |---|---|
-| Last Updated | 2026-11-04 |
-| Tool Used | pip-audit, npm audit, pip freeze, npm list |
+| Last Updated | 2026-11-10 |
+| Tool Used | pip-audit, npm audit, pip freeze, npm list, Trivy fs, Semgrep CE |
 | SBOM Format | Manual Markdown Catalog aligned with CycloneDX / SPDX structures |
 | Scope | Full Repository (Backend Python Web Service + Frontend React/TypeScript SPA) |
 | Generated Artifact | `backend/requirements.txt`, `frontend/package-lock.json` |
@@ -120,3 +120,4 @@ npm audit
 | 2026-10-31 | Promote dest `fdc9584` + `b6fa8a6`: vision typed HTTP errors, CSV Comments, type-size image_index, address parse. No dependency pin changes. | Maintainer |
 | 2026-11-03 | PR #28 security rescan of head after e7bbefe/e4eb087/d0e11bd. pip-audit / npm audit / bandit / gitleaks / trivy HIGH-CRIT: 0. No dependency pin changes. | Maintainer |
 | 2026-11-04 | Pin `pillow-heif==1.8.1` (keep `Pillow==13.0.0`). Frontend origin/CSP hardening only; no npm pin changes. | Maintainer |
+| 2026-11-10 | Replaced dead Snyk scanning with CI Trivy fs (vuln+secret+misconfig, CRITICAL/HIGH) and Semgrep CE (ERROR). Enabled weekly Dependabot for pip, npm, Docker, Terraform, and GitHub Actions. Local pre-scan of HEAD: 0 Trivy CRITICAL/HIGH, 0 Semgrep ERROR. No dependency pin changes. | Maintainer |

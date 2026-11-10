@@ -44,6 +44,18 @@ This tool processes uploaded beverage label images and calls the Anthropic Claud
 - Fail-open authentication design ensures public evaluators are never locked out: `DEMO_ACCESS_TOKEN` is unset by default and no mandatory `API_AUTH_TOKEN` is required.
 - CORS origins are configurable via the `CORS_ORIGINS` environment variable. When unset they fail-open to local Vite (`localhost`/`127.0.0.1:5173`) and the Render frontend from `render.yaml` (`https://ttb-label-frontend.onrender.com`), with methods limited to GET/POST/OPTIONS, headers limited to Authorization and Content-Type, and credentials disabled. Operators may set `CORS_ORIGINS=*` to restore a wildcard.
 
+## Dependency and CI scanning
+
+Snyk GitHub App / CLI scanning is no longer used (the Snyk account was removed). Replacement controls:
+
+- **Trivy** filesystem scan on pull requests, pushes to `main`, and a weekly schedule: vulnerabilities, secrets, and misconfigurations at CRITICAL/HIGH. See `.github/workflows/oss-security-scan.yml`.
+- **Semgrep Community Edition** on the same events, ERROR severity only.
+- **Dependabot** weekly version updates for pip (`backend/`), npm (`frontend/`), Docker (`backend/Dockerfile`), Terraform (`infra/terraform/`), and GitHub Actions.
+
+SARIF upload is best-effort when GitHub code scanning is enabled. No `SNYK_TOKEN` (or other scanner secrets) is required. Existing GitHub Snyk App check statuses, if any, remain until the repository owner uninstalls the Snyk GitHub App; this repository does not change GitHub settings or rulesets.
+
+There are no gitleaks or SBOM GitHub Actions jobs in this repository. Manual SBOM notes live in `docs/SBOM.md`.
+
 ## Disclosure Policy
 
 We follow **coordinated disclosure**: we will work with you to understand and remediate the issue before any public disclosure.
